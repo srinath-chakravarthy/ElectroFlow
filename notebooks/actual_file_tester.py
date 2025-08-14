@@ -3,19 +3,21 @@
 Quick 1-hour battery data analysis script.
 
 Usage:
-    python battery_script.py single_file.par
-    python battery_script.py file1.par file2.par file3.par
+    python battery_script.py file1.par [file2.par ...]
+    python battery_script.py --files file1.par file2.par --output results/
+    python battery_script.py file.par --no-plot --export-csv
 """
 
+import argparse
 import sys
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 # Import the fixed modules
-from src.core.data_models import DataFile, DataFileGroup, TechniqueType, SignalType
-from src.core.parsers import parse_par_file
+from data_models import DataFile, DataFileGroup, TechniqueType, SignalType
+from parsers import parse_par_file
 
 
 def parse_single_file(file_path: Path) -> DataFile:
@@ -64,15 +66,18 @@ def merge_files(file_paths: List[Path]) -> DataFileGroup:
     return group
 
 
-def plot_data(data, title: str, file_paths: List[Path]) -> None:
+def plot_data(data, title: str, file_paths: List[Path], output_dir: Optional[Path] = None,
+              show_plot: bool = True) -> None:
     """Create plots for the data."""
     # Get the dataframe
     if isinstance(data, DataFile):
         df = data.full_data.to_pandas()
         subtitle = f"File: {data.file_path.name}"
+        output_prefix = data.file_path.stem
     else:  # DataFileGroup
         df = data.get_combined_data().to_pandas()
         subtitle = f"Files: {', '.join([fp.name for fp in file_paths])}"
+        output_prefix = "merged_data"
 
     if df.empty:
         print("No data to plot")
@@ -140,7 +145,19 @@ def plot_data(data, title: str, file_paths: List[Path]) -> None:
             axes[1, 1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.show()
+
+    # Save plot if output directory specified
+    if output_dir:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        plot_path = output_dir / f"{output_prefix}_analysis.png"
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        print(f"✓ Plot saved to: {plot_path}")
+
+    # Show plot if requested
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
 
     # Print data summary
     print(f"\n=== DATA SUMMARY ===")
@@ -153,17 +170,112 @@ def plot_data(data, title: str, file_paths: List[Path]) -> None:
         print(f"Current range: {df['I(A)'].min():.6f} to {df['I(A)'].max():.6f} A")
 
 
+def export_data(data, output_dir: Path, export_format: str = 'parquet') -> None:
+    """Export data to file."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if isinstance(data, DataFile):
+        df = data.pruned_data  # Use pruned for storage
+        output_prefix = data.file_path.stem
+    else:  # DataFileGroup
+        df = data.get_combined_data()
+        # Prune empty columns for storage
+        from data_models import prune_empty_columns
+        df = prune_empty_columns(df)
+        output_prefix = "merged_data"
+
+    if export_format.lower() == 'csv':
+        output_path = output_dir / f"{output_prefix}.csv"
+        df.write_csv(output_path)
+    elif export_format.lower() == 'parquet':
+        output_path = output_dir / f"{output_prefix}.parquet"
+        df.write_parquet(output_path)
+    else:
+        raise ValueError(f"Unsupported export format: {export_format}")
+
+    print(f"✓ Data exported to: {output_path}")
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Create argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Parse and analyze VersaStudio .par files",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    # Single file analysis
+    python battery_script.py data.par
+
+    # Multiple file merge and analysis  
+    python battery_script.py file1.par file2.par file3.par
+
+    # Export data without plotting
+    python battery_script.py data.par --no-plot --export-csv --output results/
+
+    # Batch processing with custom output
+    python battery_script.py *.par --output analysis/ --export-parquet
+        """
+    )
+
+    # Positional arguments
+    parser.add_argument(
+        'files',
+        nargs='+',
+        type=Path,
+        help='One or more .par files to analyze'
+    )
+
+    # Output options
+    parser.add_argument(
+        '--output', '-o',
+        type=Path,
+        help='Output directory for plots and exported data'
+    )
+
+    # Plot options
+    parser.add_argument(
+        '--no-plot',
+        action='store_true',
+        help='Skip plotting (useful for batch processing)'
+    )
+
+    # Export options
+    parser.add_argument(
+        '--export-csv',
+        action='store_true',
+        help='Export data as CSV file'
+    )
+
+    parser.add_argument(
+        '--export-parquet',
+        action='store_true',
+        help='Export data as Parquet file (default if --export used)'
+    )
+
+    # Analysis options
+    parser.add_argument(
+        '--sample-size',
+        type=int,
+        default=50000,
+        help='Maximum number of points to plot (default: 50000)'
+    )
+
+    parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='Verbose output'
+    )
+
+    return parser
+
+
 def main():
     """Main script function."""
-    if len(sys.argv) < 2:
-        print("Usage: python battery_script.py file1.par [file2.par ...]")
-        sys.exit(1)
+    parser = create_parser()
+    args = parser.parse_args()
 
-    # Get file paths
-    file_paths = [Path(arg) for arg in sys.argv[1:]]
-
-    # Validate files exist
-    for file_path in file_paths:
+    # Validate files exist and are .par files
+    for file_path in args.files:
         if not file_path.exists():
             print(f"Error: File not found: {file_path}")
             sys.exit(1)
@@ -172,22 +284,61 @@ def main():
             sys.exit(1)
 
     try:
-        if len(file_paths) == 1:
-            # Single file
+        if len(args.files) == 1:
+            # Single file analysis
             print("=== SINGLE FILE ANALYSIS ===")
-            data_file = parse_single_file(file_paths[0])
-            plot_data(data_file, "Single File Analysis", file_paths)
+            data_file = parse_single_file(args.files[0])
+
+            # Plot if requested
+            if not args.no_plot:
+                plot_data(
+                    data_file,
+                    "Single File Analysis",
+                    args.files,
+                    output_dir=args.output,
+                    show_plot=not args.output  # Don't show if saving to file
+                )
+
+            # Export if requested
+            if args.export_csv or args.export_parquet or args.output:
+                if not args.output:
+                    args.output = Path('.')
+
+                if args.export_csv:
+                    export_data(data_file, args.output, 'csv')
+                else:
+                    export_data(data_file, args.output, 'parquet')
 
         else:
             # Multiple files - merge them
             print("=== MULTI-FILE ANALYSIS ===")
-            file_group = merge_files(file_paths)
-            plot_data(file_group, "Merged Files Analysis", file_paths)
+            file_group = merge_files(args.files)
+
+            # Plot if requested
+            if not args.no_plot:
+                plot_data(
+                    file_group,
+                    "Merged Files Analysis",
+                    args.files,
+                    output_dir=args.output,
+                    show_plot=not args.output
+                )
+
+            # Export if requested
+            if args.export_csv or args.export_parquet or args.output:
+                if not args.output:
+                    args.output = Path('.')
+
+                if args.export_csv:
+                    export_data(file_group, args.output, 'csv')
+                else:
+                    export_data(file_group, args.output, 'parquet')
 
     except Exception as e:
         print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
 
     print("\n=== ANALYSIS COMPLETE ===")
