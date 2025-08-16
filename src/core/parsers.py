@@ -390,39 +390,51 @@ class VersaStudioParser(BaseParser):
         # Combine all segment data (VersaStudio format)
         combined_data = self._combine_segments()
         
-        # Create ActionId -> Action name mapping for technique identification
-        action_id_mapping = {}
+        # PRIMARY MAPPING: Use hierarchy-based approach (Approach 2)
+        # Map data rows to actions using segment boundaries, not ActionId values
+        segment_to_action_mapping = {}
+        if not combined_data.is_empty() and 'Segment #' in combined_data.columns:
+            for segment_num in combined_data.get_column('Segment #').unique():
+                if segment_num is not None:
+                    # Direct mapping: segment number corresponds to action in hierarchy
+                    if segment_num in self.actions:
+                        segment_to_action_mapping[segment_num] = self.actions[segment_num].name
+                    else:
+                        segment_to_action_mapping[segment_num] = 'Unknown'
+        
+        # SECONDARY COLLECTION: ActionId database building (Approach 1)
+        # Collect ActionId -> Action name pairs for future database, but don't use for primary mapping
+        actionid_collection = {}
         if not combined_data.is_empty() and 'ActionId' in combined_data.columns:
-            # Map each unique ActionId to corresponding action name
             for action_id in combined_data.get_column('ActionId').unique():
                 if action_id is not None:
-                    # Find corresponding segment number
+                    # Try to find corresponding action name for database collection
                     segment_data = combined_data.filter(pl.col('ActionId') == action_id)
                     if not segment_data.is_empty():
                         segment_num = segment_data.get_column('Segment #')[0]
-                        # Map segment to action (0-based)
-                        if segment_num in self.actions:
-                            action_id_mapping[action_id] = self.actions[segment_num].name
+                        if segment_num in segment_to_action_mapping:
+                            actionid_collection[action_id] = segment_to_action_mapping[segment_num]
                         else:
-                            # Fallback: try to find action by ID
-                            for action in self.actions.values():
-                                if action.action_id == segment_num:
-                                    action_id_mapping[action_id] = action.name
-                                    break
-                            else:
-                                action_id_mapping[action_id] = 'Unknown'
+                            actionid_collection[action_id] = 'Unknown'
 
-        # Convert to universal schema
+        # Convert to universal schema using HIERARCHY-BASED mapping
         universal_data = create_universal_dataframe(
-            combined_data, action_id_mapping, timestamp
+            combined_data, segment_to_action_mapping, timestamp
         )
 
         # Extract enhanced metadata
         metadata = self._extract_metadata()
-        metadata['action_id_mapping'] = action_id_mapping
-        metadata['technique_mapping'] = {
+        # Primary mapping used for technique assignment
+        metadata['segment_to_action_mapping'] = segment_to_action_mapping
+        metadata['primary_technique_mapping'] = {
+            segment_num: map_technique_name(action_name) 
+            for segment_num, action_name in segment_to_action_mapping.items()
+        }
+        # Secondary collection for ActionId database building
+        metadata['actionid_collection'] = actionid_collection
+        metadata['actionid_technique_mapping'] = {
             action_id: map_technique_name(action_name) 
-            for action_id, action_name in action_id_mapping.items()
+            for action_id, action_name in actionid_collection.items()
         }
 
         return DataFile(

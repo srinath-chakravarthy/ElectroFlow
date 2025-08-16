@@ -118,11 +118,11 @@ TECHNIQUE_MAPPING = {
     ],
     'CC': [
         'Constant Current', 'CC', 'Voltametry ChronoPotentiometry', 
-        'ChronoPotentiometry'
+        'ChronoPotentiometry', 'Energy Constant Current', 'Corrosion Constant Current'
     ],
     'CV': [
         'Constant Voltage', 'CV', 'Voltametry ChronoAmperometry', 
-        'ChronoAmperometry'
+        'ChronoAmperometry', 'Energy Constant Voltage', 'Corrosion Constant Voltage'
     ],
     'GEIS': [
         'Galvanostatic EIS', 'GEIS'
@@ -491,14 +491,14 @@ def map_technique_name(action_name: str) -> str:
     return 'UNKNOWN'
 
 def create_universal_dataframe(versastudio_data: pl.DataFrame, 
-                             action_mapping: Dict[int, str],
+                             segment_mapping: Dict[int, str],
                              start_timestamp: datetime) -> pl.DataFrame:
     """
     Convert VersaStudio DataFrame to universal schema.
     
     Args:
         versastudio_data: Original VersaStudio DataFrame
-        action_mapping: ActionId -> technique name mapping
+        segment_mapping: Segment# -> technique name mapping (hierarchy-based)
         start_timestamp: Experiment start timestamp
         
     Returns:
@@ -545,14 +545,14 @@ def create_universal_dataframe(versastudio_data: pl.DataFrame,
          .otherwise(90.0 * pl.col('impedance_imag_ohm').sign())).alias('impedance_phase_deg')
     ])
     
-    # Add technique names based on ActionId mapping
-    if action_mapping:
+    # Add technique names based on SEGMENT mapping (hierarchy-based approach)
+    if segment_mapping:
         technique_names = []
         fundamental_techniques = []
         
-        for action_id in df.get_column('technique_id'):
-            if action_id is not None and action_id in action_mapping:
-                technique_name = action_mapping[action_id]
+        for segment_num in df.get_column('segment_number'):
+            if segment_num is not None and segment_num in segment_mapping:
+                technique_name = segment_mapping[segment_num]
                 fundamental_technique = map_technique_name(technique_name)
             else:
                 technique_name = 'Unknown'

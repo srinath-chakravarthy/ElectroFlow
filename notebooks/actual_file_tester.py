@@ -1,92 +1,118 @@
 #!/usr/bin/env python3
 """
-Quick 1-hour battery data analysis script.
+Universal Battery Data Analysis Script - API Testing Tool
+
+Tests the new universal battery data processing system with direct API calls.
+Perfect for debugging, validation, and development testing.
 
 Usage:
-    python battery_script.py file1.par [file2.par ...]
-    python battery_script.py --files file1.par file2.par --output results/
-    python battery_script.py file.par --no-plot --export-csv
+    python actual_file_tester.py file1.par [file2.par ...]
+    python actual_file_tester.py file.par --no-plot --export-csv
+    python actual_file_tester.py file.par --show-analytics
 """
 
 import argparse
 import sys
 from pathlib import Path
+import json
 
 # Add src to Python path
 script_dir = Path(__file__).parent.absolute()
-# If script is in notebooks/ folder, go up one level to project root
 project_root = script_dir.parent if script_dir.name == 'notebooks' else script_dir
 src_path = project_root / 'src'
 sys.path.insert(0, str(src_path))
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+import polars as pl
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
-# Import the fixed modules
-from src.core.data_models import DataFile, DataFileGroup, TechniqueType, SignalType
-from src.core.parsers import parse_par_file
+# Import the new universal system modules
+from core.data_models import DataFile, UNIVERSAL_COLUMNS, TECHNIQUE_MAPPING
+from core.parsers import VersaStudioParser
+from analysis.analytics import FundamentalAnalytics
 
 
 def parse_single_file(file_path: Path) -> DataFile:
-    """Parse a single .par file."""
+    """Parse a single .par file using the universal system."""
     print(f"Parsing {file_path.name}...")
-    data_file = parse_par_file(file_path)
+    
+    # Use VersaStudio parser directly
+    parser = VersaStudioParser()
+    
+    if not parser.validate_file(file_path):
+        raise ValueError(f"File validation failed: {file_path}")
+    
+    data_file = parser.parse(file_path)
 
     print(f"✓ Success! {data_file.point_count:,} points, {data_file.duration_seconds:.1f}s")
-    print(f"  Technique: {data_file.primary_technique.value}")
-    print(f"  Signal: {data_file.signal_type.value}")
+    print(f"  Timestamp: {data_file.timestamp}")
+    print(f"  Schema: {data_file.universal_data.shape[1]} columns (expected: {len(UNIVERSAL_COLUMNS)})")
+    
+    # Show techniques found
+    techniques = data_file.universal_data.get_column('fundamental_technique').unique().to_list()
+    print(f"  Techniques: {techniques}")
+    
+    # Show file hash for integrity
+    print(f"  File hash: {data_file.file_hash[:12]}...")
 
     return data_file
 
 
-def merge_files(file_paths: List[Path]) -> DataFileGroup:
-    """Parse and merge multiple .par files."""
-    print(f"Parsing and merging {len(file_paths)} files...")
+def process_multiple_files(file_paths: List[Path]) -> List[DataFile]:
+    """Parse multiple .par files individually (no merging in new system)."""
+    print(f"Processing {len(file_paths)} files individually...")
 
     # Parse all files
     data_files = []
+    total_points = 0
+    total_duration = 0.0
+    
     for file_path in file_paths:
         try:
             data_file = parse_single_file(file_path)
             data_files.append(data_file)
+            total_points += data_file.point_count
+            total_duration += data_file.duration_seconds
         except Exception as e:
             print(f"✗ Failed to parse {file_path.name}: {e}")
 
     if not data_files:
         raise ValueError("No files could be parsed")
 
-    # Create file group
-    group = DataFileGroup(
-        group_id="merged_experiment",
-        description=f"Merged data from {len(data_files)} files"
-    )
-
+    print(f"✓ Processing complete!")
+    print(f"  Total files: {len(data_files)}")
+    print(f"  Total points: {total_points:,}")
+    print(f"  Total duration: {total_duration:.1f}s")
+    
+    # Show technique summary across all files
+    all_techniques = set()
     for data_file in data_files:
-        group.add_data_file(data_file)
+        techniques = data_file.universal_data.get_column('fundamental_technique').unique().to_list()
+        all_techniques.update(techniques)
+    print(f"  All techniques: {sorted(all_techniques)}")
 
-    print(f"✓ Merged successfully!")
-    print(f"  Total files: {group.file_count}")
-    print(f"  Total points: {group.total_points:,}")
-    print(f"  Total duration: {group.total_duration:.1f}s")
-    print(f"  Primary technique: {group.primary_technique.value}")
-
-    return group
+    return data_files
 
 
 def plot_data(data, title: str, file_paths: List[Path], output_dir: Optional[Path] = None,
               show_plot: bool = True) -> None:
-    """Create plots for the data."""
+    """Create plots for the universal schema data."""
     # Get the dataframe
     if isinstance(data, DataFile):
-        df = data.full_data.to_pandas()
+        df = data.universal_data.to_pandas()
         subtitle = f"File: {data.file_path.name}"
         output_prefix = data.file_path.stem
-    else:  # DataFileGroup
-        df = data.get_combined_data().to_pandas()
+    elif isinstance(data, list):  # List of DataFiles
+        # Combine data from multiple files
+        dfs = [df.universal_data.to_pandas() for df in data]
+        df = pl.concat([pl.from_pandas(d) for d in dfs]).to_pandas()
         subtitle = f"Files: {', '.join([fp.name for fp in file_paths])}"
-        output_prefix = "merged_data"
+        output_prefix = "multiple_files"
+    else:
+        print("Unsupported data type for plotting")
+        return
 
     if df.empty:
         print("No data to plot")
@@ -94,7 +120,7 @@ def plot_data(data, title: str, file_paths: List[Path], output_dir: Optional[Pat
 
     # Sample data if too large
     if len(df) > 50000:
-        df = df.sample(n=50000).sort_values('Elapsed Time(s)')
+        df = df.sample(n=50000).sort_values('time_s')
         print(f"Plotting sample of 50,000 points (total: {len(df):,})")
 
     # Set up the plotting style
@@ -105,49 +131,49 @@ def plot_data(data, title: str, file_paths: List[Path], output_dir: Optional[Pat
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     fig.suptitle(f'{title}\n{subtitle}', fontsize=14)
 
-    # Voltage vs Time
-    if 'E(V)' in df.columns and 'Elapsed Time(s)' in df.columns:
-        axes[0, 0].plot(df['Elapsed Time(s)'], df['E(V)'], alpha=0.7, linewidth=0.5)
+    # Voltage vs Time (universal schema)
+    if 'potential_v' in df.columns and 'time_s' in df.columns:
+        axes[0, 0].plot(df['time_s'], df['potential_v'], alpha=0.7, linewidth=0.5)
         axes[0, 0].set_xlabel('Time (s)')
-        axes[0, 0].set_ylabel('Voltage (V)')
-        axes[0, 0].set_title('Voltage vs Time')
+        axes[0, 0].set_ylabel('Potential (V)')
+        axes[0, 0].set_title('Potential vs Time')
         axes[0, 0].grid(True, alpha=0.3)
 
-    # Current vs Time
-    if 'I(A)' in df.columns and 'Elapsed Time(s)' in df.columns:
-        axes[0, 1].plot(df['Elapsed Time(s)'], df['I(A)'], alpha=0.7, linewidth=0.5, color='orange')
+    # Current vs Time (universal schema)
+    if 'current_a' in df.columns and 'time_s' in df.columns:
+        axes[0, 1].plot(df['time_s'], df['current_a'], alpha=0.7, linewidth=0.5, color='orange')
         axes[0, 1].set_xlabel('Time (s)')
         axes[0, 1].set_ylabel('Current (A)')
         axes[0, 1].set_title('Current vs Time')
         axes[0, 1].grid(True, alpha=0.3)
 
-    # I-V Curve
-    if 'E(V)' in df.columns and 'I(A)' in df.columns:
-        axes[1, 0].scatter(df['E(V)'], df['I(A)'], alpha=0.5, s=0.5)
-        axes[1, 0].set_xlabel('Voltage (V)')
+    # I-V Curve (universal schema)
+    if 'potential_v' in df.columns and 'current_a' in df.columns:
+        axes[1, 0].scatter(df['potential_v'], df['current_a'], alpha=0.5, s=0.5)
+        axes[1, 0].set_xlabel('Potential (V)')
         axes[1, 0].set_ylabel('Current (A)')
-        axes[1, 0].set_title('Current vs Voltage')
+        axes[1, 0].set_title('Current vs Potential')
         axes[1, 0].grid(True, alpha=0.3)
 
-    # Frequency or Power plot
-    if 'Frequency(Hz)' in df.columns and df['Frequency(Hz)'].notna().any():
-        # EIS data - frequency plot
-        freq_data = df[df['Frequency(Hz)'] > 0]
-        if not freq_data.empty:
-            axes[1, 1].semilogx(freq_data['Frequency(Hz)'], freq_data['Z Real'],
-                                alpha=0.7, marker='o', markersize=1, linewidth=0.5)
-            axes[1, 1].set_xlabel('Frequency (Hz)')
-            axes[1, 1].set_ylabel('Z Real (Ω)')
-            axes[1, 1].set_title('Impedance vs Frequency')
+    # EIS or Power plot (universal schema)
+    if 'frequency_hz' in df.columns and df['frequency_hz'].notna().any():
+        # EIS data - Nyquist plot
+        eis_data = df[df['frequency_hz'] > 0]
+        if not eis_data.empty and 'impedance_real_ohm' in df.columns:
+            axes[1, 1].scatter(eis_data['impedance_real_ohm'], -eis_data['impedance_imag_ohm'],
+                             alpha=0.7, s=1)
+            axes[1, 1].set_xlabel('Z Real (Ω)')
+            axes[1, 1].set_ylabel('-Z Imag (Ω)')
+            axes[1, 1].set_title('Nyquist Plot (EIS)')
             axes[1, 1].grid(True, alpha=0.3)
+            axes[1, 1].axis('equal')
         else:
-            axes[1, 1].text(0.5, 0.5, 'No AC data found', ha='center', va='center')
-            axes[1, 1].set_title('Impedance vs Frequency')
+            axes[1, 1].text(0.5, 0.5, 'No EIS data found', ha='center', va='center')
+            axes[1, 1].set_title('Nyquist Plot (EIS)')
     else:
-        # Power calculation for DC data
-        if 'E(V)' in df.columns and 'I(A)' in df.columns:
-            power = df['E(V)'] * df['I(A)']
-            axes[1, 1].plot(df['Elapsed Time(s)'], power, alpha=0.7, linewidth=0.5, color='red')
+        # Power plot for DC data (universal schema)
+        if 'power_w' in df.columns and 'time_s' in df.columns:
+            axes[1, 1].plot(df['time_s'], df['power_w'], alpha=0.7, linewidth=0.5, color='red')
             axes[1, 1].set_xlabel('Time (s)')
             axes[1, 1].set_ylabel('Power (W)')
             axes[1, 1].set_title('Power vs Time')
@@ -168,30 +194,34 @@ def plot_data(data, title: str, file_paths: List[Path], output_dir: Optional[Pat
     else:
         plt.close()
 
-    # Print data summary
+    # Print data summary (universal schema)
     print(f"\n=== DATA SUMMARY ===")
     print(f"Data points: {len(df):,}")
-    if 'Elapsed Time(s)' in df.columns:
-        print(f"Duration: {df['Elapsed Time(s)'].max():.1f} seconds")
-    if 'E(V)' in df.columns:
-        print(f"Voltage range: {df['E(V)'].min():.3f} to {df['E(V)'].max():.3f} V")
-    if 'I(A)' in df.columns:
-        print(f"Current range: {df['I(A)'].min():.6f} to {df['I(A)'].max():.6f} A")
+    if 'time_s' in df.columns:
+        print(f"Duration: {df['time_s'].max():.1f} seconds")
+    if 'potential_v' in df.columns:
+        print(f"Potential range: {df['potential_v'].min():.3f} to {df['potential_v'].max():.3f} V")
+    if 'current_a' in df.columns:
+        print(f"Current range: {df['current_a'].min():.6f} to {df['current_a'].max():.6f} A")
+    if 'fundamental_technique' in df.columns:
+        techniques = df['fundamental_technique'].value_counts()
+        print(f"Techniques: {dict(techniques)}")
 
 
 def export_data(data, output_dir: Path, export_format: str = 'parquet') -> None:
-    """Export data to file."""
+    """Export universal schema data to file."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if isinstance(data, DataFile):
-        df = data.pruned_data  # Use pruned for storage
+        df = data.universal_data  # Export full universal schema
         output_prefix = data.file_path.stem
-    else:  # DataFileGroup
-        df = data.get_combined_data()
-        # Prune empty columns for storage
-        from src.core.data_models import prune_empty_columns
-        df = prune_empty_columns(df)
-        output_prefix = "merged_data"
+    elif isinstance(data, list):  # List of DataFiles
+        # Combine universal data from multiple files
+        dfs = [df.universal_data for df in data]
+        df = pl.concat(dfs, how="vertical_relaxed")
+        output_prefix = "multiple_files"
+    else:
+        raise ValueError("Unsupported data type for export")
 
     if export_format.lower() == 'csv':
         output_path = output_dir / f"{output_prefix}.csv"
@@ -203,26 +233,88 @@ def export_data(data, output_dir: Path, export_format: str = 'parquet') -> None:
         raise ValueError(f"Unsupported export format: {export_format}")
 
     print(f"✓ Data exported to: {output_path}")
+    print(f"  Format: {export_format.upper()}")
+    print(f"  Columns: {len(df.columns)} (universal schema)")
+    print(f"  Rows: {df.height:,}")
+
+
+def analyze_file_with_analytics(data_file: DataFile, show_details: bool = True) -> Dict[str, Any]:
+    """Run analytics on a parsed file and display results."""
+    print(f"\n=== ANALYTICS ANALYSIS ===")
+    
+    # Run analytics
+    analytics = FundamentalAnalytics()
+    results = analytics.analyze_datafile(data_file.universal_data)
+    
+    if not results:
+        print("No analytics results generated")
+        return {}
+    
+    print(f"Analyzed {len(results)} actions:")
+    
+    for action_id, analysis_result in results.items():
+        technique = analysis_result.technique
+        metrics = analysis_result.results
+        quality = analysis_result.quality_metrics
+        
+        print(f"\nAction {action_id} ({technique}):")
+        
+        # Display technique-specific results
+        if technique == 'CC':
+            print(f"  Capacity: {metrics.get('capacity_ah', 0):.6f} Ah")
+            print(f"  Energy: {metrics.get('energy_wh', 0):.6f} Wh")
+            print(f"  Avg Potential: {metrics.get('avg_voltage_v', 0):.3f} V")
+            print(f"  Current Stability: {quality.get('current_stability', 0):.3f}")
+        
+        elif technique == 'REST':
+            print(f"  Equilibrium Potential: {metrics.get('v_equilibrium_v', 0):.3f} V")
+            print(f"  Potential Drop: {metrics.get('v_drop_v', 0):.3f} V")
+            print(f"  Time Constant: {metrics.get('time_constant_s', 0):.1f} s")
+            print(f"  R²: {quality.get('r_squared', 0):.3f}")
+            print(f"  Fit Type: {metrics.get('fitting_type', 'unknown')}")
+        
+        elif technique == 'PULSE':
+            print(f"  Resistance: {metrics.get('resistance_ohm', 0):.6f} Ω")
+            print(f"  Potential Drop: {metrics.get('voltage_drop_v', 0):.3f} V")
+            print(f"  Duration: {metrics.get('pulse_duration_s', 0):.1f} s")
+            print(f"  Current Uniformity: {quality.get('current_uniformity', 0):.3f}")
+        
+        elif technique == 'EIS':
+            print(f"  Frequency Range: {metrics.get('frequency_min_hz', 0):.2e} - {metrics.get('frequency_max_hz', 0):.2e} Hz")
+            print(f"  Series Resistance: {metrics.get('series_resistance_ohm', 0):.6f} Ω")
+            print(f"  Charge Transfer R: {metrics.get('charge_transfer_resistance_ohm', 0):.6f} Ω")
+            print(f"  Frequency Coverage: {quality.get('frequency_coverage', 0):.1f} decades")
+        
+        elif technique == 'CV':
+            print(f"  Potential Range: {metrics.get('voltage_range_v', 0):.3f} V")
+            print(f"  Current Range: {metrics.get('current_range_a', 0):.6f} A")
+            print(f"  Scan Rate: {metrics.get('scan_rate_v_per_s', 0):.3f} V/s")
+            print(f"  Capacitance: {metrics.get('capacitance_f', 0):.6f} F")
+        
+        print(f"  Data Quality: {quality.get('data_completeness', 0):.3f}")
+        print(f"  Total Points: {metrics.get('total_points', 0)}")
+    
+    return results
 
 
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser."""
     parser = argparse.ArgumentParser(
-        description="Parse and analyze VersaStudio .par files",
+        description="Universal Battery Data Analysis - API Testing Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Single file analysis
-    python battery_script.py data.par
+    # Single file analysis with analytics
+    python actual_file_tester.py data.par --show-analytics
 
-    # Multiple file merge and analysis  
-    python battery_script.py file1.par file2.par file3.par
+    # Multiple file processing (individual, not merged)
+    python actual_file_tester.py file1.par file2.par file3.par
 
-    # Export data without plotting
-    python battery_script.py data.par --no-plot --export-csv --output results/
+    # Export universal schema without plotting
+    python actual_file_tester.py data.par --no-plot --export-csv --output results/
 
-    # Batch processing with custom output
-    python battery_script.py *.par --output analysis/ --export-parquet
+    # Full analysis with plots and analytics
+    python actual_file_tester.py data.par --show-analytics --output analysis/
         """
     )
 
@@ -248,17 +340,24 @@ Examples:
         help='Skip plotting (useful for batch processing)'
     )
 
+    # Analytics options
+    parser.add_argument(
+        '--show-analytics',
+        action='store_true',
+        help='Run and display fundamental analytics results'
+    )
+
     # Export options
     parser.add_argument(
         '--export-csv',
         action='store_true',
-        help='Export data as CSV file'
+        help='Export data as CSV file (universal schema)'
     )
 
     parser.add_argument(
         '--export-parquet',
         action='store_true',
-        help='Export data as Parquet file (default if --export used)'
+        help='Export data as Parquet file (universal schema)'
     )
 
     # Analysis options
@@ -272,7 +371,7 @@ Examples:
     parser.add_argument(
         '--verbose', '-v',
         action='store_true',
-        help='Verbose output'
+        help='Verbose output with debug information'
     )
 
     return parser
@@ -280,9 +379,6 @@ Examples:
 
 def main(args):
     """Main script function."""
-    # parser = create_parser()
-    # args = parser.parse_args()
-
     # Validate files exist and are .par files
     for file_path in args.files:
         if not file_path.exists():
@@ -298,11 +394,15 @@ def main(args):
             print("=== SINGLE FILE ANALYSIS ===")
             data_file = parse_single_file(args.files[0])
 
+            # Run analytics if requested
+            if args.show_analytics:
+                analytics_results = analyze_file_with_analytics(data_file)
+
             # Plot if requested
             if not args.no_plot:
                 plot_data(
                     data_file,
-                    "Single File Analysis",
+                    "Single File Analysis - Universal Schema",
                     args.files,
                     output_dir=args.output,
                     show_plot=not args.output  # Don't show if saving to file
@@ -319,15 +419,21 @@ def main(args):
                     export_data(data_file, args.output, 'parquet')
 
         else:
-            # Multiple files - merge them
+            # Multiple files - process individually (no merging)
             print("=== MULTI-FILE ANALYSIS ===")
-            file_group = merge_files(args.files)
+            data_files = process_multiple_files(args.files)
 
-            # Plot if requested
+            # Run analytics on all files if requested
+            if args.show_analytics:
+                for i, data_file in enumerate(data_files):
+                    print(f"\n--- File {i+1}: {data_file.file_path.name} ---")
+                    analytics_results = analyze_file_with_analytics(data_file)
+
+            # Plot if requested (combine for visualization)
             if not args.no_plot:
                 plot_data(
-                    file_group,
-                    "Merged Files Analysis",
+                    data_files,
+                    "Multi-File Analysis - Universal Schema",
                     args.files,
                     output_dir=args.output,
                     show_plot=not args.output
@@ -339,9 +445,9 @@ def main(args):
                     args.output = Path('.')
 
                 if args.export_csv:
-                    export_data(file_group, args.output, 'csv')
+                    export_data(data_files, args.output, 'csv')
                 else:
-                    export_data(file_group, args.output, 'parquet')
+                    export_data(data_files, args.output, 'parquet')
 
     except Exception as e:
         print(f"Error: {e}")
@@ -351,18 +457,27 @@ def main(args):
         sys.exit(1)
 
     print("\n=== ANALYSIS COMPLETE ===")
+    print(f"Universal Schema: {len(UNIVERSAL_COLUMNS)} columns")
+    print(f"Supported Techniques: {list(TECHNIQUE_MAPPING.keys())}")
+    print("Ready for production testing!")
 
 
 if __name__ == "__main__":
-    debug_mode = True  # Set to False for command line
+    debug_mode = True  # Set to False for command line, True for API testing
 
     if debug_mode:
         debug_args = [
             '../data/measurement_groups/GITT_EIS_Charge_cycle1_Channel 2.par',
+            '--show-analytics',
             '--output', '../data/measurement_groups/results',
             '--export-parquet',
             '--verbose'
         ]
+        print("=== DEBUG MODE - API TESTING ===")
+        print(f"Testing with: {debug_args[0]}")
+        print("Change debug_mode = False for command line usage")
+        print()
+        
         args = create_parser().parse_args(debug_args)
     else:
         args = create_parser().parse_args()

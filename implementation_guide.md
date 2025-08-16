@@ -113,11 +113,13 @@ class FundamentalAnalytics:
 ```python
 @dataclass
 class AnalysisResult:
-    technique: str                    # Technique name
-    action_id: int                   # ActionId from data
+    technique: str                    # Fundamental technique (CC, OCV, GEIS, etc.)
+    segment_id: int                  # Segment number (hierarchy-based)
     results: Dict[str, Any]          # Numerical results
     quality_metrics: Dict[str, float] # Quality indicators (R², completeness)
     fitted_data: Optional[Dict]       # Curve fitting data for plots
+    
+    # Note: ActionId values are collected separately in metadata for database building
 ```
 
 ## Storage System Customization
@@ -183,6 +185,38 @@ def test_large_file_performance():
 ```
 
 ## Common Development Tasks
+
+### VersaStudio Technique Mapping Strategy
+
+The system uses a **dual-approach** for technique identification:
+
+**Primary Mapping (Hierarchy-Based)**:
+- Maps data rows to Action0, Action1, Action2... using `Segment #` values
+- Uses action names from file headers: "Constant Current", "Galvanostatic EIS", etc.
+- Applies pattern matching via `TECHNIQUE_MAPPING` to get fundamental techniques
+- This is the **reliable method** used for technique assignment
+
+**Secondary Collection (ActionId Database)**:
+- Collects `ActionId` values from data for building VersaStudio technique database
+- Stored in metadata but **not used** for primary technique assignment
+- Enables future ActionId → technique mapping once database is complete
+
+```python
+# Primary: Segment-based mapping
+segment_to_action_mapping = {
+    0: "Common",                    # Action0
+    1: "Energy Open Circuit",       # Action1  
+    2: "Galvanostatic EIS",        # Action2
+    3: "Constant Current"          # Action3 (now correctly detected!)
+}
+
+# Secondary: ActionId collection for database building
+actionid_collection = {
+    1: "Constant Current",         # ActionId=1 maps to CC
+    5: "Energy Open Circuit",      # ActionId=5 maps to OCV
+    11: "Galvanostatic EIS"        # ActionId=11 maps to GEIS
+}
+```
 
 ### Adding New Technique Classification
 1. Update `TECHNIQUE_MAPPING` in `data_models.py`
