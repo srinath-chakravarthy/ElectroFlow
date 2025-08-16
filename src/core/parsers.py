@@ -12,7 +12,7 @@ from .data_models import (
     DataFile, ActionDefinition, SegmentData,
     create_universal_dataframe, UNIVERSAL_COLUMNS, UNIVERSAL_SCHEMA,
     VERSASTUDIO_COLUMNS, VERSASTUDIO_SCHEMA, TECHNIQUE_MAPPING,
-    map_technique_name, calculate_file_hash, prune_empty_columns
+    map_technique_name, is_structural_action, calculate_file_hash, prune_empty_columns
 )
 
 
@@ -395,9 +395,11 @@ class VersaStudioParser(BaseParser):
             }
             
             for segment_num, action in self.actions.items():
-                segment_mapping_data['segment_number'].append(segment_num)
-                segment_mapping_data['technique_name'].append(action.name)
-                segment_mapping_data['fundamental_technique'].append(map_technique_name(action.name))
+                # Skip structural actions (Common, Loop #1, etc.)
+                if not is_structural_action(action.name):
+                    segment_mapping_data['segment_number'].append(segment_num)
+                    segment_mapping_data['technique_name'].append(action.name)
+                    segment_mapping_data['fundamental_technique'].append(map_technique_name(action.name))
             
             # Create mapping DataFrame
             mapping_df = pl.DataFrame(segment_mapping_data)

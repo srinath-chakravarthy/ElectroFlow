@@ -468,6 +468,29 @@ def prune_empty_columns(df: pl.DataFrame) -> pl.DataFrame:
     return df.select(keep_columns)
 
 
+def is_structural_action(action_name: str) -> bool:
+    """
+    Check if action is a VersaStudio structural/organizational element (not actual experiment).
+    
+    Args:
+        action_name: Original action name from VersaStudio
+        
+    Returns:
+        True if action is structural (should be excluded from segment mapping)
+    """
+    if not action_name:
+        return True
+        
+    action_lower = action_name.lower()
+    
+    # Exclude VersaStudio structural elements
+    if action_name == 'Common':
+        return True
+    if 'loop' in action_lower:  # Loop #1, Loop #2, etc.
+        return True
+        
+    return False
+
 def map_technique_name(action_name: str) -> str:
     """
     Map VersaStudio action name to fundamental technique.
@@ -480,6 +503,10 @@ def map_technique_name(action_name: str) -> str:
     """
     if not action_name:
         return 'UNKNOWN'
+        
+    # Skip structural actions
+    if is_structural_action(action_name):
+        return 'STRUCTURAL'  # Special marker for excluded actions
         
     action_lower = action_name.lower()
     
