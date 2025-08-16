@@ -8,10 +8,131 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 from pathlib import Path
 import polars as pl
+import numpy as np
 from enum import Enum
+import hashlib
+import json
 
 
-# Standardized VersaStudio column schema with explicit types
+# Universal 31-column schema for all instruments
+UNIVERSAL_COLUMNS = [
+    # Core Time & Indexing (6 columns)
+    'time_s', 'timestamp', 'segment_number', 'point_number', 'loop_number', 'battery_cycle',
+    
+    # Electrochemical Core (6 columns)
+    'potential_v', 'current_a', 'potential_applied_v', 'current_applied_a',
+    'potential_avg_v', 'current_avg_a',
+    
+    # Battery Analytics (4 columns)
+    'charge_capacity_ah', 'energy_wh', 'power_w', 'temperature_c',
+    
+    # EIS (5 columns)
+    'frequency_hz', 'impedance_real_ohm', 'impedance_imag_ohm', 
+    'impedance_mag_ohm', 'impedance_phase_deg',
+    
+    # Status & Advanced (8 columns)
+    'current_range', 'potential_range', 'mode', 'technique_id', 'status_flags',
+    'ce_potential_v', 'cell_potential_v', 'ac_amplitude_v', 'aux_voltage_v',
+    
+    # Technique Tracking (2 columns)
+    'technique_name', 'fundamental_technique'
+]
+
+# Universal schema with explicit types
+UNIVERSAL_SCHEMA = {
+    # Core Time & Indexing
+    'time_s': pl.Float64,
+    'timestamp': pl.Datetime,
+    'segment_number': pl.Int64,
+    'point_number': pl.Int64,
+    'loop_number': pl.Int64,
+    'battery_cycle': pl.Int64,
+    
+    # Electrochemical Core
+    'potential_v': pl.Float64,
+    'current_a': pl.Float64,
+    'potential_applied_v': pl.Float64,
+    'current_applied_a': pl.Float64,
+    'potential_avg_v': pl.Float64,
+    'current_avg_a': pl.Float64,
+    
+    # Battery Analytics
+    'charge_capacity_ah': pl.Float64,
+    'energy_wh': pl.Float64,
+    'power_w': pl.Float64,
+    'temperature_c': pl.Float64,
+    
+    # EIS
+    'frequency_hz': pl.Float64,
+    'impedance_real_ohm': pl.Float64,
+    'impedance_imag_ohm': pl.Float64,
+    'impedance_mag_ohm': pl.Float64,
+    'impedance_phase_deg': pl.Float64,
+    
+    # Status & Advanced
+    'current_range': pl.Int64,
+    'potential_range': pl.Int64,
+    'mode': pl.Utf8,
+    'technique_id': pl.Int64,
+    'status_flags': pl.Int64,
+    'ce_potential_v': pl.Float64,
+    'cell_potential_v': pl.Float64,
+    'ac_amplitude_v': pl.Float64,
+    'aux_voltage_v': pl.Float64,
+    
+    # Technique Tracking
+    'technique_name': pl.Utf8,
+    'fundamental_technique': pl.Utf8
+}
+
+# VersaStudio → Universal column mapping
+VERSASTUDIO_MAPPING = {
+    # Time mappings
+    'Elapsed Time(s)': 'time_s',
+    'Segment #': 'segment_number',
+    'Point #': 'point_number',
+    
+    # Direct electrochemical mappings
+    'E(V)': 'potential_v',
+    'I(A)': 'current_a',
+    'E Applied(V)': 'potential_applied_v',
+    'Frequency(Hz)': 'frequency_hz',
+    'Z Real': 'impedance_real_ohm',
+    'Z Imag': 'impedance_imag_ohm',
+    
+    # Status and advanced
+    'Current Range': 'current_range',
+    'Status': 'status_flags',
+    'ActionId': 'technique_id',
+    'AC Amplitude': 'ac_amplitude_v',
+    'ADC Sync Input(V)': 'aux_voltage_v',
+    
+    # Computed columns will be added during processing
+}
+
+# Technique name mapping to fundamental techniques
+TECHNIQUE_MAPPING = {
+    'OCV': [
+        'Rest', 'Energy Open Circuit', 'Impedance Open Circuit', 'OCV', 
+        'Corrosion Open Circuit', 'Voltametry Open Circuit'
+    ],
+    'CC': [
+        'Constant Current', 'CC', 'Voltametry ChronoPotentiometry', 
+        'ChronoPotentiometry'
+    ],
+    'CV': [
+        'Constant Voltage', 'CV', 'Voltametry ChronoAmperometry', 
+        'ChronoAmperometry'
+    ],
+    'GEIS': [
+        'Galvanostatic EIS', 'GEIS'
+    ],
+    'PEIS': [
+        'Potentiostatic EIS', 'PEIS'
+    ]
+}
+
+# Legacy VersaStudio schema for backward compatibility
 VERSASTUDIO_COLUMNS = [
     'Segment #', 'Point #', 'E(V)', 'I(A)', 'Elapsed Time(s)',
     'ADC Sync Input(V)', 'Current Range', 'Status', 'E Applied(V)',
@@ -20,7 +141,6 @@ VERSASTUDIO_COLUMNS = [
     'Z2 Real', 'Z2 Imag', 'ActionId', 'AC Amplitude'
 ]
 
-# Explicit schema for Polars (fixes type inference issues)
 VERSASTUDIO_SCHEMA = {
     'Segment #': pl.Int64,
     'Point #': pl.Int64,
@@ -136,18 +256,24 @@ class SegmentData:
 @dataclass
 class DataFile:
     """
-    Single .par file with standardized data format.
+    Single .par file with universal schema data format.
 
     This class represents a complete measurement from one .par file,
-    including both metadata and standardized data.
+    including both metadata and universal schema data.
     """
     file_path: Path
     timestamp: datetime
-    full_data: pl.DataFrame  # Complete standardized schema
-    pruned_data: pl.DataFrame  # Storage-optimized (empty columns removed)
+    universal_data: pl.DataFrame  # Universal 31-column schema
     actions: Dict[int, ActionDefinition]
     segments: Dict[int, SegmentData]
     metadata: Dict[str, Any]
+    analysis_results: Dict[str, Any] = field(default_factory=dict)
+    file_hash: str = field(default="")
+    
+    def __post_init__(self):
+        """Calculate file hash if not provided."""
+        if not self.file_hash and self.file_path.exists():
+            self.file_hash = calculate_file_hash(self.file_path)
 
     @property
     def primary_technique(self) -> TechniqueType:
@@ -179,38 +305,64 @@ class DataFile:
     @property
     def duration_seconds(self) -> float:
         """Total measurement duration in seconds."""
-        if self.full_data.is_empty():
+        if self.universal_data.is_empty():
             return 0.0
-        return self.full_data.get_column('Elapsed Time(s)').max()
+        return self.universal_data.get_column('time_s').max()
 
     @property
     def point_count(self) -> int:
         """Total number of data points."""
-        return self.full_data.height
+        return self.universal_data.height
 
     def get_dc_data(self) -> pl.DataFrame:
         """Extract only DC measurements (Frequency = 0 or null)."""
-        if 'Frequency(Hz)' not in self.full_data.columns:
-            return self.full_data
-        return self.full_data.filter(
-            (pl.col('Frequency(Hz)').is_null()) |
-            (pl.col('Frequency(Hz)') == 0)
+        if 'frequency_hz' not in self.universal_data.columns:
+            return self.universal_data
+        return self.universal_data.filter(
+            (pl.col('frequency_hz').is_null()) |
+            (pl.col('frequency_hz') == 0)
         )
 
     def get_ac_data(self) -> pl.DataFrame:
         """Extract only AC measurements (Frequency > 0)."""
-        if 'Frequency(Hz)' not in self.full_data.columns:
+        if 'frequency_hz' not in self.universal_data.columns:
             return pl.DataFrame()
-        return self.full_data.filter(
-            pl.col('Frequency(Hz)').is_not_null() &
-            (pl.col('Frequency(Hz)') > 0)
+        return self.universal_data.filter(
+            pl.col('frequency_hz').is_not_null() &
+            (pl.col('frequency_hz') > 0)
         )
 
     def get_segment_data(self, segment_id: int) -> pl.DataFrame:
         """Get data for a specific segment."""
-        if 'Segment #' not in self.full_data.columns:
+        if 'segment_number' not in self.universal_data.columns:
             return pl.DataFrame()
-        return self.full_data.filter(pl.col('Segment #') == segment_id)
+        return self.universal_data.filter(pl.col('segment_number') == segment_id)
+    
+    def get_technique_data(self, fundamental_technique: str) -> pl.DataFrame:
+        """Get data for a specific fundamental technique."""
+        return self.universal_data.filter(
+            pl.col('fundamental_technique') == fundamental_technique
+        )
+    
+    def get_eis_segments(self) -> List[pl.DataFrame]:
+        """Get all EIS segments as separate DataFrames."""
+        eis_data = self.universal_data.filter(
+            (pl.col('fundamental_technique') == 'GEIS') |
+            (pl.col('fundamental_technique') == 'PEIS')
+        )
+        
+        if eis_data.is_empty():
+            return []
+        
+        # Group by ActionId (each represents one EIS measurement)
+        segments = []
+        for action_id in eis_data.get_column('technique_id').unique():
+            if action_id is not None:
+                segment = eis_data.filter(pl.col('technique_id') == action_id)
+                if not segment.is_empty():
+                    segments.append(segment)
+        
+        return segments
 
 
 @dataclass
@@ -240,35 +392,28 @@ class DataFileGroup:
         temporal continuity across fragmented files.
         """
         if not self.data_files:
-            return pl.DataFrame(schema=VERSASTUDIO_SCHEMA)
+            return pl.DataFrame(schema=UNIVERSAL_SCHEMA)
 
         dfs = []
         cumulative_time = 0.0
 
         for data_file in self.data_files:
-            df = data_file.full_data.clone()
+            df = data_file.universal_data.clone()
 
             # Adjust elapsed time for continuity
             if cumulative_time > 0:
                 df = df.with_columns([
-                    (pl.col('Elapsed Time(s)') + cumulative_time).alias('Elapsed Time(s)')
+                    (pl.col('time_s') + cumulative_time).alias('time_s')
                 ])
 
             # Update cumulative time for next file
             if not df.is_empty():
-                cumulative_time = df.get_column('Elapsed Time(s)').max()
+                cumulative_time = df.get_column('time_s').max()
 
             dfs.append(df)
 
         # Combine all dataframes
         combined = pl.concat(dfs, how="vertical_relaxed")
-
-        # Add absolute timestamps
-        start_time = min(df.timestamp for df in self.data_files)
-        combined = combined.with_columns([
-            (pl.lit(start_time) +
-             pl.duration(seconds=pl.col('Elapsed Time(s)'))).alias('absolute_timestamp')
-        ])
 
         return combined
 
@@ -278,7 +423,7 @@ class DataFileGroup:
         combined = self.get_combined_data()
         if combined.is_empty():
             return 0.0
-        return combined.get_column('Elapsed Time(s)').max()
+        return combined.get_column('time_s').max()
 
     @property
     def total_points(self) -> int:
@@ -323,16 +468,119 @@ def prune_empty_columns(df: pl.DataFrame) -> pl.DataFrame:
     return df.select(keep_columns)
 
 
+def map_technique_name(action_name: str) -> str:
+    """
+    Map VersaStudio action name to fundamental technique.
+    
+    Args:
+        action_name: Original action name from VersaStudio
+        
+    Returns:
+        Fundamental technique type (OCV, CC, CV, GEIS, PEIS, UNKNOWN)
+    """
+    if not action_name:
+        return 'UNKNOWN'
+        
+    action_lower = action_name.lower()
+    
+    for fundamental_technique, technique_variants in TECHNIQUE_MAPPING.items():
+        for variant in technique_variants:
+            if variant.lower() in action_lower:
+                return fundamental_technique
+                
+    return 'UNKNOWN'
+
+def create_universal_dataframe(versastudio_data: pl.DataFrame, 
+                             action_mapping: Dict[int, str],
+                             start_timestamp: datetime) -> pl.DataFrame:
+    """
+    Convert VersaStudio DataFrame to universal schema.
+    
+    Args:
+        versastudio_data: Original VersaStudio DataFrame
+        action_mapping: ActionId -> technique name mapping
+        start_timestamp: Experiment start timestamp
+        
+    Returns:
+        DataFrame with universal schema
+    """
+    # Start with empty universal dataframe
+    n_rows = versastudio_data.height
+    universal_data = {}
+    
+    # Initialize all columns with appropriate nulls
+    for col, dtype in UNIVERSAL_SCHEMA.items():
+        if dtype == pl.Float64:
+            universal_data[col] = [None] * n_rows
+        elif dtype == pl.Int64:
+            universal_data[col] = [None] * n_rows
+        elif dtype == pl.Utf8:
+            universal_data[col] = [None] * n_rows
+        elif dtype == pl.Datetime:
+            universal_data[col] = [None] * n_rows
+    
+    # Map VersaStudio columns to universal columns
+    for vs_col, universal_col in VERSASTUDIO_MAPPING.items():
+        if vs_col in versastudio_data.columns:
+            universal_data[universal_col] = versastudio_data.get_column(vs_col).to_list()
+    
+    # Create DataFrame with universal schema
+    df = pl.DataFrame(universal_data, schema=UNIVERSAL_SCHEMA)
+    
+    # Add computed columns
+    df = df.with_columns([
+        # Absolute timestamps
+        (pl.lit(start_timestamp) + 
+         pl.duration(seconds=pl.col('time_s'))).alias('timestamp'),
+        
+        # Power calculation
+        (pl.col('potential_v') * pl.col('current_a')).alias('power_w'),
+        
+        # Impedance magnitude and phase
+        ((pl.col('impedance_real_ohm')**2 + 
+          pl.col('impedance_imag_ohm')**2)**0.5).alias('impedance_mag_ohm'),
+        
+        (pl.when(pl.col('impedance_real_ohm') != 0)
+         .then((pl.col('impedance_imag_ohm') / pl.col('impedance_real_ohm')).arctan() * 180.0 / np.pi)
+         .otherwise(90.0 * pl.col('impedance_imag_ohm').sign())).alias('impedance_phase_deg')
+    ])
+    
+    # Add technique names based on ActionId mapping
+    if action_mapping:
+        technique_names = []
+        fundamental_techniques = []
+        
+        for action_id in df.get_column('technique_id'):
+            if action_id is not None and action_id in action_mapping:
+                technique_name = action_mapping[action_id]
+                fundamental_technique = map_technique_name(technique_name)
+            else:
+                technique_name = 'Unknown'
+                fundamental_technique = 'UNKNOWN'
+                
+            technique_names.append(technique_name)
+            fundamental_techniques.append(fundamental_technique)
+        
+        df = df.with_columns([
+            pl.Series('technique_name', technique_names),
+            pl.Series('fundamental_technique', fundamental_techniques)
+        ])
+    
+    return df
+
+def calculate_file_hash(file_path: Path) -> str:
+    """
+    Calculate SHA256 hash of file for integrity checking.
+    """
+    hash_sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_sha256.update(chunk)
+    return hash_sha256.hexdigest()
+
 def create_standardized_dataframe(data: Dict[str, List], available_columns: List[str]) -> pl.DataFrame:
     """
-    Create a DataFrame with standardized column schema.
-
-    Args:
-        data: Dictionary of column_name -> values
-        available_columns: List of columns present in the data
-
-    Returns:
-        DataFrame with full VERSASTUDIO_COLUMNS schema (NaN for missing columns)
+    Legacy function for backward compatibility.
     """
     # Start with available data
     df_data = {}

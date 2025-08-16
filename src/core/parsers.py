@@ -10,8 +10,9 @@ import polars as pl
 
 from .data_models import (
     DataFile, ActionDefinition, SegmentData,
-    create_standardized_dataframe, VERSASTUDIO_COLUMNS, VERSASTUDIO_SCHEMA,
-    prune_empty_columns
+    create_universal_dataframe, UNIVERSAL_COLUMNS, UNIVERSAL_SCHEMA,
+    VERSASTUDIO_COLUMNS, VERSASTUDIO_SCHEMA, TECHNIQUE_MAPPING,
+    map_technique_name, calculate_file_hash, prune_empty_columns
 )
 
 
@@ -246,7 +247,7 @@ class VersaStudioParser(BaseParser):
                 available_columns = self._parse_column_definition(definition)
 
                 # Calculate number of data rows
-                n_rows = data_end - data_start
+                n_rows = data_end - data_start -1
 
                 if n_rows <= 0:
                     # Empty segment
@@ -260,7 +261,7 @@ class VersaStudioParser(BaseParser):
                         has_header=False,
                         separator=',',
                         schema=self._create_segment_schema(available_columns),
-                        ignore_errors=False
+                        ignore_errors=True
                     )
 
                     # Standardize to full schema
@@ -378,40 +379,60 @@ class VersaStudioParser(BaseParser):
         return combined
 
     def _add_absolute_timestamps(self, df: pl.DataFrame, start_time: datetime) -> pl.DataFrame:
-        """Add absolute timestamp column based on elapsed time."""
-        if df.is_empty():
-            return df
-
-        return df.with_columns([
-            (pl.lit(start_time) +
-             pl.duration(seconds=pl.col('Elapsed Time(s)'))).alias('absolute_timestamp')
-        ])
+        """Legacy function - timestamps now handled in universal schema conversion."""
+        return df
 
     def _create_data_file(self, file_path: Path) -> DataFile:
         """Create DataFile object from parsed data."""
         # Extract timestamp
         timestamp = self._extract_timestamp()
 
-        # Combine all segment data
+        # Combine all segment data (VersaStudio format)
         combined_data = self._combine_segments()
+        
+        # Create ActionId -> Action name mapping for technique identification
+        action_id_mapping = {}
+        if not combined_data.is_empty() and 'ActionId' in combined_data.columns:
+            # Map each unique ActionId to corresponding action name
+            for action_id in combined_data.get_column('ActionId').unique():
+                if action_id is not None:
+                    # Find corresponding segment number
+                    segment_data = combined_data.filter(pl.col('ActionId') == action_id)
+                    if not segment_data.is_empty():
+                        segment_num = segment_data.get_column('Segment #')[0]
+                        # Map segment to action (0-based)
+                        if segment_num in self.actions:
+                            action_id_mapping[action_id] = self.actions[segment_num].name
+                        else:
+                            # Fallback: try to find action by ID
+                            for action in self.actions.values():
+                                if action.action_id == segment_num:
+                                    action_id_mapping[action_id] = action.name
+                                    break
+                            else:
+                                action_id_mapping[action_id] = 'Unknown'
 
-        # Add absolute timestamps
-        full_data = self._add_absolute_timestamps(combined_data, timestamp)
+        # Convert to universal schema
+        universal_data = create_universal_dataframe(
+            combined_data, action_id_mapping, timestamp
+        )
 
-        # Create pruned version for storage
-        pruned_data = prune_empty_columns(full_data)
-
-        # Extract metadata
+        # Extract enhanced metadata
         metadata = self._extract_metadata()
+        metadata['action_id_mapping'] = action_id_mapping
+        metadata['technique_mapping'] = {
+            action_id: map_technique_name(action_name) 
+            for action_id, action_name in action_id_mapping.items()
+        }
 
         return DataFile(
             file_path=file_path,
             timestamp=timestamp,
-            full_data=full_data,
-            pruned_data=pruned_data,
+            universal_data=universal_data,
             actions=self.actions,
             segments=self.segments,
-            metadata=metadata
+            metadata=metadata,
+            file_hash=calculate_file_hash(file_path)
         )
 
     def _extract_metadata(self) -> Dict[str, Any]:

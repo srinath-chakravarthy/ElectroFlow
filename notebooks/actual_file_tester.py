@@ -10,14 +10,23 @@ Usage:
 
 import argparse
 import sys
+from pathlib import Path
+
+# Add src to Python path
+script_dir = Path(__file__).parent.absolute()
+# If script is in notebooks/ folder, go up one level to project root
+project_root = script_dir.parent if script_dir.name == 'notebooks' else script_dir
+src_path = project_root / 'src'
+sys.path.insert(0, str(src_path))
+
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
+
 from typing import List, Optional
 
 # Import the fixed modules
-from data_models import DataFile, DataFileGroup, TechniqueType, SignalType
-from parsers import parse_par_file
+from src.core.data_models import DataFile, DataFileGroup, TechniqueType, SignalType
+from src.core.parsers import parse_par_file
 
 
 def parse_single_file(file_path: Path) -> DataFile:
@@ -180,7 +189,7 @@ def export_data(data, output_dir: Path, export_format: str = 'parquet') -> None:
     else:  # DataFileGroup
         df = data.get_combined_data()
         # Prune empty columns for storage
-        from data_models import prune_empty_columns
+        from src.core.data_models import prune_empty_columns
         df = prune_empty_columns(df)
         output_prefix = "merged_data"
 
@@ -269,10 +278,10 @@ Examples:
     return parser
 
 
-def main():
+def main(args):
     """Main script function."""
-    parser = create_parser()
-    args = parser.parse_args()
+    # parser = create_parser()
+    # args = parser.parse_args()
 
     # Validate files exist and are .par files
     for file_path in args.files:
@@ -345,4 +354,17 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    debug_mode = True  # Set to False for command line
+
+    if debug_mode:
+        debug_args = [
+            '../data/measurement_groups/GITT_EIS_Charge_cycle1_Channel 2.par',
+            '--output', '../data/measurement_groups/results',
+            '--export-parquet',
+            '--verbose'
+        ]
+        args = create_parser().parse_args(debug_args)
+    else:
+        args = create_parser().parse_args()
+
+    main(args)
