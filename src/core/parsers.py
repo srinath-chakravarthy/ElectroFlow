@@ -173,7 +173,7 @@ class VersaStudioParser(BaseParser):
             self.sections[section_name] = section_dict
 
     def _parse_action(self, section_name: str, content: List[Tuple[int, str]]) -> Optional[ActionDefinition]:
-        """Parse an action section."""
+        """Parse an action section, filtering out structural actions."""
         action_match = re.match(r'Action(\d+)', section_name)
         if not action_match:
             return None
@@ -189,6 +189,11 @@ class VersaStudioParser(BaseParser):
 
         # Extract action name
         name = parameters.get('Name', f'Action{action_id}')
+
+        # FILTER OUT STRUCTURAL ACTIONS AT PARSE TIME
+        if is_structural_action(name):
+            # Don't store structural actions - they won't be in self.actions
+            return None
 
         # Extract parent action if specified
         parent_id = None
@@ -395,11 +400,10 @@ class VersaStudioParser(BaseParser):
             }
             
             for segment_num, action in self.actions.items():
-                # Skip structural actions (Common, Loop #1, etc.)
-                if not is_structural_action(action.name):
-                    segment_mapping_data['segment_number'].append(segment_num)
-                    segment_mapping_data['technique_name'].append(action.name)
-                    segment_mapping_data['fundamental_technique'].append(map_technique_name(action.name))
+                # All actions in self.actions are already filtered (no structural actions)
+                segment_mapping_data['segment_number'].append(segment_num)
+                segment_mapping_data['technique_name'].append(action.name)
+                segment_mapping_data['fundamental_technique'].append(map_technique_name(action.name))
             
             # Create mapping DataFrame
             mapping_df = pl.DataFrame(segment_mapping_data)
