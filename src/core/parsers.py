@@ -48,8 +48,10 @@ class VersaStudioParser(BaseParser):
     def __init__(self):
         super().__init__()
         self.sections = {}
-        self.actions = {}
+        self.actions = {}  # Will store experimental actions with continuous indexing
         self.segments = {}
+        self.experimental_action_counter = 0  # Counter for continuous indexing
+        self.original_action_mapping = {}  # Track original ActionX -> continuous index
 
     def validate_file(self, file_path: Path) -> bool:
         """Validate that this is a VersaStudio .par file."""
@@ -157,8 +159,12 @@ class VersaStudioParser(BaseParser):
         """Process a parsed section."""
         if section_name.startswith('Action'):
             action = self._parse_action(section_name, content)
-            if action:
-                self.actions[action.action_id] = action
+            if action:  # Only experimental actions (structural ones filtered out)
+                # Store with continuous indexing instead of original action_id
+                self.actions[self.experimental_action_counter] = action
+                # Track mapping from original ActionX to continuous index
+                self.original_action_mapping[action.action_id] = self.experimental_action_counter
+                self.experimental_action_counter += 1
         elif section_name.startswith('Segment'):
             # Segment metadata will be handled separately
             segment_id = int(re.search(r'Segment(\d+)', section_name).group(1))
@@ -386,48 +392,113 @@ class VersaStudioParser(BaseParser):
 
         return combined
     
-    def _add_technique_mapping(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Add technique names using efficient Polars groupby operations."""
-        if df.is_empty():
-            return df
-            
-        # Create segment-to-action mapping DataFrame for efficient join
-        if self.actions:
-            segment_mapping_data = {
+    def _build_execution_sequence(self) -> List[Tuple[int, ActionDefinition, str]]:
+        """Build execution sequence from ParentNode relationships."""
+        if not self.actions:
+            return []
+        
+        # Group actions by parent_id
+        top_level_actions = []    # parent_id = None (Common) 
+        loop_groups = {}          # grouped by parent_id
+        
+        for continuous_index, action in self.actions.items():
+            if action.parent_action_id is None:
+                top_level_actions.append((continuous_index, action))
+            else:
+                parent_id = action.parent_action_id
+                if parent_id not in loop_groups:
+                    loop_groups[parent_id] = []
+                loop_groups[parent_id].append((continuous_index, action))
+        
+        # Sort within each group by original action_id to maintain VersaStudio order
+        top_level_actions.sort(key=lambda x: x[1].action_id)
+        for parent_id in loop_groups:
+            loop_groups[parent_id].sort(key=lambda x: x[1].action_id)
+        
+        # Build execution sequence: top-level first, then loops
+        execution_sequence = []
+        
+        # Add top-level actions (execute once)
+        for continuous_index, action in top_level_actions:
+            execution_sequence.append((continuous_index, action, 'top_level'))
+        
+        # Add loop actions (will repeat based on iterations)
+        for parent_id in sorted(loop_groups.keys()):
+            for continuous_index, action in loop_groups[parent_id]:
+                execution_sequence.append((continuous_index, action, f'loop_{parent_id}'))
+        
+        return execution_sequence
+    
+    def _build_segment_mapping(self) -> pl.DataFrame:
+        """Build segment-to-action mapping using execution sequence."""
+        execution_sequence = self._build_execution_sequence()
+        
+        if not execution_sequence:
+            return pl.DataFrame({
                 'segment_number': [],
                 'technique_name': [],
                 'fundamental_technique': []
-            }
-            
-            for segment_num, action in self.actions.items():
-                # All actions in self.actions are already filtered (no structural actions)
-                segment_mapping_data['segment_number'].append(segment_num)
-                segment_mapping_data['technique_name'].append(action.name)
-                segment_mapping_data['fundamental_technique'].append(map_technique_name(action.name))
-            
-            # Create mapping DataFrame
-            mapping_df = pl.DataFrame(segment_mapping_data)
-            
-            # Efficient join operation instead of Python loops
-            df = df.join(
-                mapping_df, 
-                left_on='Segment #', 
-                right_on='segment_number', 
-                how='left'
-            )
-            
-            # Fill missing values for unmapped segments
-            df = df.with_columns([
-                pl.col('technique_name').fill_null('Unknown'),
-                pl.col('fundamental_technique').fill_null('UNKNOWN')
-            ])
-        else:
+            })
+        
+        # Build mapping based on execution sequence
+        mapping_data = {
+            'segment_number': [],
+            'technique_name': [],
+            'fundamental_technique': []
+        }
+        
+        segment_counter = 0
+        
+        # Process execution sequence
+        for continuous_index, action, group_type in execution_sequence:
+            mapping_data['segment_number'].append(segment_counter)
+            mapping_data['technique_name'].append(action.name)
+            mapping_data['fundamental_technique'].append(map_technique_name(action.name))
+            segment_counter += 1
+        
+        # Create mapping DataFrame
+        mapping_df = pl.DataFrame(mapping_data)
+        
+        # Debug output (can be removed in production)
+        # print(f"Debug - Execution Sequence:")
+        # for continuous_index, action, group_type in execution_sequence:
+        #     print(f"  {group_type}: Action{action.action_id} ({action.name}) → continuous_index {continuous_index}")
+        # 
+        # print(f"Debug - Segment Mapping:")
+        # print(mapping_df)
+        
+        return mapping_df
+    
+    def _add_technique_mapping(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Add technique names using execution sequence mapping."""
+        if df.is_empty():
+            return df
+        
+        # Build segment mapping from execution sequence
+        mapping_df = self._build_segment_mapping()
+        
+        if mapping_df.is_empty():
             # No actions available - add default columns
             df = df.with_columns([
                 pl.lit('Unknown').alias('technique_name'),
                 pl.lit('UNKNOWN').alias('fundamental_technique')
             ])
-            
+            return df
+        
+        # Join data with mapping
+        df = df.join(
+            mapping_df,
+            left_on='Segment #',
+            right_on='segment_number',
+            how='left'
+        )
+        
+        # Fill missing values for unmapped segments
+        df = df.with_columns([
+            pl.col('technique_name').fill_null('Unknown'),
+            pl.col('fundamental_technique').fill_null('UNKNOWN')
+        ])
+        
         return df
     
     def _validate_technique_mapping(self, df: pl.DataFrame) -> Dict[str, Any]:
