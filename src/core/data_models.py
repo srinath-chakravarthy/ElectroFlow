@@ -490,22 +490,27 @@ def map_technique_name(action_name: str) -> str:
                 
     return 'UNKNOWN'
 
-def create_universal_dataframe(versastudio_data: pl.DataFrame, 
-                             segment_mapping: Dict[int, str],
+def create_universal_dataframe(instrument_data: pl.DataFrame, 
                              start_timestamp: datetime) -> pl.DataFrame:
     """
-    Convert VersaStudio DataFrame to universal schema.
+    Convert instrument DataFrame to universal schema (pure column translation).
+    
+    This function is now instrument-agnostic and only handles column mapping and 
+    computed fields. All instrument-specific logic (technique mapping, etc.) 
+    should be handled in the respective parser.
     
     Args:
-        versastudio_data: Original VersaStudio DataFrame
-        segment_mapping: Segment# -> technique name mapping (hierarchy-based)
+        instrument_data: Parsed instrument DataFrame (with technique columns already added)
         start_timestamp: Experiment start timestamp
         
     Returns:
         DataFrame with universal schema
     """
+    if instrument_data.is_empty():
+        return pl.DataFrame(schema=UNIVERSAL_SCHEMA)
+    
     # Start with empty universal dataframe
-    n_rows = versastudio_data.height
+    n_rows = instrument_data.height
     universal_data = {}
     
     # Initialize all columns with appropriate nulls
@@ -519,15 +524,22 @@ def create_universal_dataframe(versastudio_data: pl.DataFrame,
         elif dtype == pl.Datetime:
             universal_data[col] = [None] * n_rows
     
-    # Map VersaStudio columns to universal columns
+    # Map instrument columns to universal columns (VersaStudio mapping for now)
+    # TODO: This will become instrument-specific when we add multi-instrument support
     for vs_col, universal_col in VERSASTUDIO_MAPPING.items():
-        if vs_col in versastudio_data.columns:
-            universal_data[universal_col] = versastudio_data.get_column(vs_col).to_list()
+        if vs_col in instrument_data.columns:
+            universal_data[universal_col] = instrument_data.get_column(vs_col).to_list()
+    
+    # Copy technique columns if already present (added by parser)
+    if 'technique_name' in instrument_data.columns:
+        universal_data['technique_name'] = instrument_data.get_column('technique_name').to_list()
+    if 'fundamental_technique' in instrument_data.columns:
+        universal_data['fundamental_technique'] = instrument_data.get_column('fundamental_technique').to_list()
     
     # Create DataFrame with universal schema
     df = pl.DataFrame(universal_data, schema=UNIVERSAL_SCHEMA)
     
-    # Add computed columns
+    # Add computed columns (instrument-agnostic calculations)
     df = df.with_columns([
         # Absolute timestamps
         (pl.lit(start_timestamp) + 
@@ -544,27 +556,6 @@ def create_universal_dataframe(versastudio_data: pl.DataFrame,
          .then((pl.col('impedance_imag_ohm') / pl.col('impedance_real_ohm')).arctan() * 180.0 / np.pi)
          .otherwise(90.0 * pl.col('impedance_imag_ohm').sign())).alias('impedance_phase_deg')
     ])
-    
-    # Add technique names based on SEGMENT mapping (hierarchy-based approach)
-    if segment_mapping:
-        technique_names = []
-        fundamental_techniques = []
-        
-        for segment_num in df.get_column('segment_number'):
-            if segment_num is not None and segment_num in segment_mapping:
-                technique_name = segment_mapping[segment_num]
-                fundamental_technique = map_technique_name(technique_name)
-            else:
-                technique_name = 'Unknown'
-                fundamental_technique = 'UNKNOWN'
-                
-            technique_names.append(technique_name)
-            fundamental_techniques.append(fundamental_technique)
-        
-        df = df.with_columns([
-            pl.Series('technique_name', technique_names),
-            pl.Series('fundamental_technique', fundamental_techniques)
-        ])
     
     return df
 

@@ -360,7 +360,7 @@ class VersaStudioParser(BaseParser):
             raise VersaStudioParseError(f"Invalid timestamp format: {e}")
 
     def _combine_segments(self) -> pl.DataFrame:
-        """Combine all segments into single dataframe."""
+        """Combine all segments into single dataframe with technique mapping."""
         if not self.segments:
             return pl.DataFrame(schema=VERSASTUDIO_SCHEMA)
 
@@ -376,7 +376,86 @@ class VersaStudioParser(BaseParser):
         # Combine segments
         combined = pl.concat(segment_dfs, how="vertical_relaxed")
 
+        # Add technique mapping using efficient Polars operations
+        combined = self._add_technique_mapping(combined)
+
         return combined
+    
+    def _add_technique_mapping(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Add technique names using efficient Polars groupby operations."""
+        if df.is_empty():
+            return df
+            
+        # Create segment-to-action mapping DataFrame for efficient join
+        if self.actions:
+            segment_mapping_data = {
+                'segment_number': [],
+                'technique_name': [],
+                'fundamental_technique': []
+            }
+            
+            for segment_num, action in self.actions.items():
+                segment_mapping_data['segment_number'].append(segment_num)
+                segment_mapping_data['technique_name'].append(action.name)
+                segment_mapping_data['fundamental_technique'].append(map_technique_name(action.name))
+            
+            # Create mapping DataFrame
+            mapping_df = pl.DataFrame(segment_mapping_data)
+            
+            # Efficient join operation instead of Python loops
+            df = df.join(
+                mapping_df, 
+                left_on='Segment #', 
+                right_on='segment_number', 
+                how='left'
+            )
+            
+            # Fill missing values for unmapped segments
+            df = df.with_columns([
+                pl.col('technique_name').fill_null('Unknown'),
+                pl.col('fundamental_technique').fill_null('UNKNOWN')
+            ])
+        else:
+            # No actions available - add default columns
+            df = df.with_columns([
+                pl.lit('Unknown').alias('technique_name'),
+                pl.lit('UNKNOWN').alias('fundamental_technique')
+            ])
+            
+        return df
+    
+    def _validate_technique_mapping(self, df: pl.DataFrame) -> Dict[str, Any]:
+        """Validate that ActionId → Fundamental Technique mapping is consistent."""
+        if df.is_empty() or 'ActionId' not in df.columns:
+            return {'validation_passed': True, 'message': 'No ActionId data to validate'}
+            
+        # Group by ActionId and check consistency
+        validation_stats = df.group_by('ActionId').agg([
+            pl.col('fundamental_technique').n_unique().alias('unique_techniques'),
+            pl.col('fundamental_technique').first().alias('primary_technique'),
+            pl.col('Segment #').n_unique().alias('segments_spanned'),
+            pl.col('ActionId').count().alias('total_points')
+        ])
+        
+        # Find inconsistent mappings (ActionId maps to multiple techniques)
+        inconsistent = validation_stats.filter(pl.col('unique_techniques') > 1)
+        
+        # Find unknown mappings
+        unknown = validation_stats.filter(pl.col('primary_technique') == 'UNKNOWN')
+        
+        # Create ActionId → Technique mapping for database building
+        actionid_to_technique = validation_stats.select(['ActionId', 'primary_technique']).to_dicts()
+        
+        validation_passed = inconsistent.is_empty() and unknown.is_empty()
+        
+        return {
+            'validation_passed': validation_passed,
+            'inconsistent_actionids': inconsistent.to_dicts() if not inconsistent.is_empty() else [],
+            'unknown_actionids': unknown.to_dicts() if not unknown.is_empty() else [],
+            'actionid_to_technique_mapping': actionid_to_technique,
+            'total_actionids': validation_stats.height,
+            'validation_summary': validation_stats.to_dicts()
+        }
 
     def _add_absolute_timestamps(self, df: pl.DataFrame, start_time: datetime) -> pl.DataFrame:
         """Legacy function - timestamps now handled in universal schema conversion."""
@@ -387,55 +466,29 @@ class VersaStudioParser(BaseParser):
         # Extract timestamp
         timestamp = self._extract_timestamp()
 
-        # Combine all segment data (VersaStudio format)
+        # Combine all segment data with technique mapping (VersaStudio format)
+        # NOTE: Technique mapping now happens inside _combine_segments()
         combined_data = self._combine_segments()
         
-        # PRIMARY MAPPING: Use hierarchy-based approach (Approach 2)
-        # Map data rows to actions using segment boundaries, not ActionId values
-        segment_to_action_mapping = {}
-        if not combined_data.is_empty() and 'Segment #' in combined_data.columns:
-            for segment_num in combined_data.get_column('Segment #').unique():
-                if segment_num is not None:
-                    # Direct mapping: segment number corresponds to action in hierarchy
-                    if segment_num in self.actions:
-                        segment_to_action_mapping[segment_num] = self.actions[segment_num].name
-                    else:
-                        segment_to_action_mapping[segment_num] = 'Unknown'
+        # Validate ActionId consistency using internal validation
+        validation_results = self._validate_technique_mapping(combined_data)
         
-        # SECONDARY COLLECTION: ActionId database building (Approach 1)
-        # Collect ActionId -> Action name pairs for future database, but don't use for primary mapping
-        actionid_collection = {}
-        if not combined_data.is_empty() and 'ActionId' in combined_data.columns:
-            for action_id in combined_data.get_column('ActionId').unique():
-                if action_id is not None:
-                    # Try to find corresponding action name for database collection
-                    segment_data = combined_data.filter(pl.col('ActionId') == action_id)
-                    if not segment_data.is_empty():
-                        segment_num = segment_data.get_column('Segment #')[0]
-                        if segment_num in segment_to_action_mapping:
-                            actionid_collection[action_id] = segment_to_action_mapping[segment_num]
-                        else:
-                            actionid_collection[action_id] = 'Unknown'
+        # Log warnings for inconsistencies
+        if not validation_results['validation_passed']:
+            print(f"Warning: Technique mapping inconsistencies detected in {file_path.name}")
+            if validation_results['inconsistent_actionids']:
+                print(f"  Inconsistent ActionIds: {validation_results['inconsistent_actionids']}")
+            if validation_results['unknown_actionids']:
+                print(f"  Unknown ActionIds: {validation_results['unknown_actionids']}")
 
-        # Convert to universal schema using HIERARCHY-BASED mapping
-        universal_data = create_universal_dataframe(
-            combined_data, segment_to_action_mapping, timestamp
-        )
+        # Convert to universal schema (now much simpler - just column translation)
+        universal_data = create_universal_dataframe(combined_data, timestamp)
 
         # Extract enhanced metadata
         metadata = self._extract_metadata()
-        # Primary mapping used for technique assignment
-        metadata['segment_to_action_mapping'] = segment_to_action_mapping
-        metadata['primary_technique_mapping'] = {
-            segment_num: map_technique_name(action_name) 
-            for segment_num, action_name in segment_to_action_mapping.items()
-        }
-        # Secondary collection for ActionId database building
-        metadata['actionid_collection'] = actionid_collection
-        metadata['actionid_technique_mapping'] = {
-            action_id: map_technique_name(action_name) 
-            for action_id, action_name in actionid_collection.items()
-        }
+        # Add validation results and ActionId mapping for database building
+        metadata['mapping_validation'] = validation_results
+        metadata['actionid_to_technique_database'] = validation_results['actionid_to_technique_mapping']
 
         return DataFile(
             file_path=file_path,
