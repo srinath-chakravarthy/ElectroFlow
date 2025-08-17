@@ -23,7 +23,6 @@ if str(src_path) not in sys.path:
 
 from ui.backend_api import BackendAPI
 from ui.components.cell_manager import CellManagerTab
-from ui.components.file_association import FileAssociationTab
 from ui.components.data_processing import DataProcessingTab
 
 # Setup logging
@@ -36,15 +35,16 @@ class BatteryAnalyzerApp(param.Parameterized):
     Main Panel application for battery data preprocessing and analysis.
     
     Features:
-    - Cell management (create, view, organize)
-    - File association (upload .par and .par.csv files)
-    - Data processing (view data, analysis results, visualizations)
+    - Cell & File Management (create cells, upload files, manage active cell)
+    - Cell Data Processing (technique selection, group management, manual plotting)
     - SQLite database backend
-    - Plotly visualizations with resample support
+    - Active cell workflow across tabs
     """
     
     # Application state parameters
-    current_tab = param.String(default="Cell Management", doc="Current active tab")
+    current_tab = param.String(default="Cell & File Management", doc="Current active tab")
+    active_cell_id = param.Integer(default=None, allow_None=True, doc="Active cell ID across tabs")
+    active_cell_name = param.String(default="", doc="Active cell name across tabs")
     
     def __init__(self, data_dir: Path = None, db_path: Path = None, **params):
         super().__init__(**params)
@@ -73,19 +73,20 @@ class BatteryAnalyzerApp(param.Parameterized):
         
         # Create component tabs
         self.cell_manager = CellManagerTab(self.api)
-        self.file_association = FileAssociationTab(self.api)
         self.data_processing = DataProcessingTab(self.api)
+        
+        # Connect active cell sharing between tabs
+        self._setup_active_cell_sharing()
         
         # Create header
         header = self._create_header()
         
         # Create main tabbed interface
         self.tabs = pn.Tabs(
-            ("Cell Management", self.cell_manager.layout),
-            ("File Association", self.file_association.layout),
-            ("Data Processing", self.data_processing.layout),
+            ("Cell & File Management", self.cell_manager.layout),
+            ("Cell Data Processing", self.data_processing.layout),
             tabs_location='above',
-            width=1200
+            width=1400
         )
         
         # Create footer
@@ -96,8 +97,29 @@ class BatteryAnalyzerApp(param.Parameterized):
             header,
             self.tabs,
             footer,
-            width=1200
+            width=1400
         )
+    
+    def _setup_active_cell_sharing(self):
+        """Setup active cell sharing between tabs."""
+        
+        # Watch for changes in cell manager's active cell
+        def sync_active_cell_from_manager(event):
+            if hasattr(event, 'new') and event.new != self.active_cell_id:
+                self.active_cell_id = event.new
+                # Update data processing tab
+                if hasattr(self.data_processing, 'set_active_cell') and self.active_cell_id:
+                    cell_name = self.cell_manager.active_cell_name
+                    self.active_cell_name = cell_name
+                    self.data_processing.set_active_cell(self.active_cell_id, cell_name)
+        
+        def sync_active_cell_name_from_manager(event):
+            if hasattr(event, 'new') and event.new != self.active_cell_name:
+                self.active_cell_name = event.new
+        
+        # Connect cell manager to app state
+        self.cell_manager.param.watch(sync_active_cell_from_manager, 'active_cell_id')
+        self.cell_manager.param.watch(sync_active_cell_name_from_manager, 'active_cell_name')
     
     def _create_header(self):
         """Create application header."""
@@ -120,7 +142,7 @@ class BatteryAnalyzerApp(param.Parameterized):
         <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 10px;">
             <h1 style="margin: 0; color: #2c3e50;">🔋 Battery Data Analyzer</h1>
             <p style="margin: 5px 0; color: #7f8c8d;">
-                Universal electrochemical data processing with Panel UI and SQLite backend
+                Technique-centric battery data processing with active cell workflow
             </p>
             <p style="margin: 0; font-size: 12px; color: #95a5a6;">
                 Data Directory: {self.data_dir} | Database: {self.db_path.name} | {stats_text}
@@ -128,7 +150,7 @@ class BatteryAnalyzerApp(param.Parameterized):
         </div>
         """
         
-        return pn.pane.HTML(app_info, width=1200)
+        return pn.pane.HTML(app_info, width=1400)
     
     def _create_footer(self):
         """Create application footer."""
@@ -178,7 +200,7 @@ class BatteryAnalyzerApp(param.Parameterized):
                 status_pane,
                 sizing_mode='stretch_width'
             ),
-            pn.pane.HTML(footer_content, width=1200)
+            pn.pane.HTML(footer_content, width=1400)
         )
     
     def serve(self, port: int = 5007, show: bool = True, allow_websocket_origin: List[str] = None):
