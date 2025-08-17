@@ -17,7 +17,8 @@ class CellManagerTab(param.Parameterized):
     """
     
     # Parameters for reactive UI
-    selected_cell = param.String(default="", doc="Currently selected cell")
+    active_cell_id = param.Integer(default=None, allow_None=True, doc="Active cell ID")
+    active_cell_name = param.String(default="", doc="Active cell name") 
     refresh_trigger = param.Number(default=0, doc="Trigger for refreshing data")
     
     def __init__(self, backend_api, **params):
@@ -25,43 +26,79 @@ class CellManagerTab(param.Parameterized):
         self.api = backend_api
         self.layout = None
         self.cells_table = None
-        self.cell_details_pane = None
+        self.active_cell_files_table = None
         self.create_cell_form = None
+        self.active_cell_status = None
+        self._cells_df = None  # Store cells dataframe for selection handling
         self.setup_layout()
     
     def setup_layout(self):
-        """Setup the complete cell manager layout."""
+        """Setup the complete cell manager layout with active cell file management."""
+        
+        # Top section: Cell management
+        cell_management_section = self._create_cell_management_section()
+        
+        # Bottom section: Active cell file management
+        file_management_section = self._create_file_management_section()
+        
+        # Main layout
+        self.layout = pn.Column(
+            "## Cell & File Management",
+            cell_management_section,
+            "---",
+            file_management_section,
+            width=1200
+        )
+    
+    def _create_cell_management_section(self):
+        """Create the top section for cell management."""
         
         # Create cell form
         self.create_cell_form = self._create_cell_form()
         
-        # Cells table
-        self.cells_table = self._create_cells_table()
+        # Cells table with selection
+        cells_table = self._create_cells_table()
         
-        # Cell details pane
-        self.cell_details_pane = pn.pane.HTML(
-            "<p>Select a cell to view details</p>",
-            width=400, height=300
-        )
+        # Active cell controls
+        active_cell_controls = self._create_active_cell_controls()
         
-        # Main layout
-        self.layout = pn.Column(
-            "## Cell Management",
+        return pn.Column(
+            "### Cell Management",
             pn.Row(
                 pn.Column(
-                    "### Create New Cell",
+                    "#### Create New Cell",
                     self.create_cell_form,
-                    width=500
+                    width=400
                 ),
                 pn.Column(
-                    "### Cell Details",
-                    self.cell_details_pane,
-                    width=400
+                    "#### Select Active Cell",
+                    active_cell_controls,
+                    width=300
+                ),
+                pn.Column(
+                    "#### All Cells",
+                    cells_table,
+                    width=500
                 )
-            ),
-            "### Existing Cells",
-            self.cells_table,
-            width=1000
+            )
+        )
+    
+    def _create_file_management_section(self):
+        """Create the bottom section for active cell file management."""
+        
+        # Active cell status
+        self.active_cell_status = pn.pane.HTML(
+            "<p>No active cell selected</p>",
+            width=1200
+        )
+        
+        # Active cell files table
+        active_cell_files_table = self._create_active_cell_files_table()
+        
+        return pn.Column(
+            "### Active Cell File Management",
+            self.active_cell_status,
+            active_cell_files_table
         )
     
     def _create_cell_form(self):
@@ -151,22 +188,25 @@ class CellManagerTab(param.Parameterized):
         )
     
     def _create_cells_table(self):
-        """Create reactive cells table."""
+        """Create reactive cells table with active cell selection."""
         
         @pn.depends(self.param.refresh_trigger)
-        def get_cells_data():
-            """Get cells data from backend."""
+        def get_cells_table():
+            """Get cells table widget."""
             result = self.api.get_all_cells()
             if result['success']:
                 cells = result['cells']
                 if cells:
                     # Convert to DataFrame for table display
                     df = pd.DataFrame(cells)
+                    # Add database IDs for selection tracking
+                    self._cells_df = df.copy()  # Store for selection handling
+                    
                     # Format columns for display
                     display_columns = ['cell_name', 'description', 'chemistry', 'capacity_ah', 
                                      'file_count', 'processed_count', 'created_at']
                     available_columns = [col for col in display_columns if col in df.columns]
-                    df = df[available_columns]
+                    display_df = df[available_columns]
                     
                     # Rename columns for display
                     column_names = {
@@ -178,15 +218,15 @@ class CellManagerTab(param.Parameterized):
                         'processed_count': 'Processed',
                         'created_at': 'Created'
                     }
-                    df = df.rename(columns=column_names)
+                    display_df = display_df.rename(columns=column_names)
                     
                     # Create table with selection
                     table = pn.widgets.Tabulator(
-                        df,
+                        display_df,
                         pagination='remote',
                         page_size=10,
                         selectable='checkbox',
-                        width=950,
+                        width=450,
                         height=300
                     )
                     
@@ -194,9 +234,10 @@ class CellManagerTab(param.Parameterized):
                     def on_selection_change(event):
                         if event.new:
                             selected_index = event.new[0]
-                            selected_cell_name = df.iloc[selected_index]['Cell Name']
-                            self.selected_cell = selected_cell_name
-                            self._update_cell_details(selected_cell_name)
+                            selected_row = self._cells_df.iloc[selected_index]
+                            self.active_cell_id = selected_row['id']
+                            self.active_cell_name = selected_row['cell_name']
+                            self._update_active_cell_display()
                     
                     table.param.watch(on_selection_change, 'selection')
                     
@@ -206,96 +247,124 @@ class CellManagerTab(param.Parameterized):
             else:
                 return pn.pane.HTML(f'<p style="color: red;">Error loading cells: {result["error"]}</p>')
         
-        return pn.pane.HTML("Loading cells...", width=950)  # Placeholder, will be replaced
+        return get_cells_table
     
-    def _update_cell_details(self, cell_name: str):
-        """Update cell details pane."""
-        result = self.api.get_cell_details(cell_name)
+    def _create_active_cell_controls(self):
+        """Create active cell selection and status controls."""
         
-        if result['success']:
-            cell = result['cell']
-            summary = cell.get('summary', {})
+        # Active cell status display
+        @pn.depends(self.param.active_cell_name, self.param.active_cell_id)
+        def get_active_cell_status():
+            if self.active_cell_id:
+                return pn.pane.HTML(
+                    f"<p><strong>Active Cell:</strong> {self.active_cell_name} (ID: {self.active_cell_id})</p>",
+                    width=280
+                )
+            else:
+                return pn.pane.HTML(
+                    "<p style='color: #666;'>No active cell selected</p>",
+                    width=280
+                )
+        
+        # Clear selection button
+        clear_button = pn.widgets.Button(
+            name="Clear Selection",
+            button_type="light",
+            width=120
+        )
+        
+        def clear_selection(event):
+            self.active_cell_id = None
+            self.active_cell_name = ""
+            self._update_active_cell_display()
+        
+        clear_button.on_click(clear_selection)
+        
+        return pn.Column(
+            get_active_cell_status,
+            clear_button
+        )
+    
+    def _create_active_cell_files_table(self):
+        """Create reactive files table for the active cell."""
+        
+        @pn.depends(self.param.active_cell_id)
+        def get_active_cell_files():
+            if not self.active_cell_id:
+                return pn.pane.HTML(
+                    "<p style='color: #666;'>Select a cell to view its files</p>",
+                    width=1150
+                )
             
-            # Format cell details HTML
-            html = f"""
-            <div style="padding: 10px;">
-                <h3>{cell['cell_name']}</h3>
-                <p><strong>Description:</strong> {cell.get('description', 'N/A')}</p>
-                <p><strong>Chemistry:</strong> {cell.get('chemistry', 'N/A')}</p>
-                <p><strong>Capacity:</strong> {cell.get('capacity_ah', 'N/A')} Ah</p>
-                <p><strong>Notes:</strong> {cell.get('notes', 'N/A')}</p>
-                
-                <h4>File Summary</h4>
-                <p><strong>Total Files:</strong> {summary.get('total_files', 0)}</p>
-                <p><strong>Total Data Points:</strong> {summary.get('total_points', 0):,}</p>
-                <p><strong>Total Duration:</strong> {summary.get('total_duration_hours', 0):.2f} hours</p>
-                <p><strong>Techniques:</strong> {', '.join(summary.get('techniques_used', []))}</p>
-                
-                <h4>Timeline</h4>
-                <p><strong>Created:</strong> {cell.get('created_at', 'N/A')}</p>
-                <p><strong>Last Updated:</strong> {cell.get('updated_at', 'N/A')}</p>
+            # Get files for active cell
+            result = self.api.get_cell_files(self.active_cell_id)
+            if result['success']:
+                files = result['files']
+                if files:
+                    # Convert to DataFrame
+                    df = pd.DataFrame(files)
+                    
+                    # Format columns for display
+                    display_columns = ['original_filename', 'file_type', 'processing_status', 
+                                     'temperature_c', 'upload_timestamp']
+                    available_columns = [col for col in display_columns if col in df.columns]
+                    display_df = df[available_columns]
+                    
+                    # Rename columns
+                    column_names = {
+                        'original_filename': 'File Name',
+                        'file_type': 'Type',
+                        'processing_status': 'Status',
+                        'temperature_c': 'Temperature (°C)',
+                        'upload_timestamp': 'Uploaded'
+                    }
+                    display_df = display_df.rename(columns=column_names)
+                    
+                    # Create table
+                    table = pn.widgets.Tabulator(
+                        display_df,
+                        pagination='remote',
+                        page_size=10,
+                        selectable='checkbox',
+                        width=1150,
+                        height=250
+                    )
+                    
+                    return table
+                else:
+                    return pn.pane.HTML(
+                        f"<p>No files found for {self.active_cell_name}. Upload files using the File Association tab.</p>",
+                        width=1150
+                    )
+            else:
+                return pn.pane.HTML(
+                    f'<p style="color: red;">Error loading files: {result["error"]}</p>',
+                    width=1150
+                )
+        
+        return get_active_cell_files
+    
+    def _update_active_cell_display(self):
+        """Update the active cell status and files display."""
+        if self.active_cell_id:
+            # Update status display
+            status_html = f"""
+            <div style="padding: 10px; background-color: #f0f8ff; border-left: 4px solid #0066cc;">
+                <h4 style="margin: 0;">Active Cell: {self.active_cell_name}</h4>
+                <p style="margin: 5px 0;">ID: {self.active_cell_id} | Files will be displayed below</p>
             </div>
             """
-            
-            self.cell_details_pane.object = html
         else:
-            self.cell_details_pane.object = f'<p style="color: red;">Error: {result["error"]}</p>'
+            status_html = """
+            <div style="padding: 10px; background-color: #f5f5f5; border-left: 4px solid #999;">
+                <p style="margin: 0; color: #666;">No active cell selected. Choose a cell from the table above.</p>
+            </div>
+            """
+        
+        self.active_cell_status.object = status_html
     
     @pn.depends('refresh_trigger', watch=True)
     def refresh_cells_table(self):
         """Refresh the cells table when trigger changes."""
-        if self.layout and len(self.layout) > 2:
-            # Replace the table
-            self.layout[2] = self._create_cells_table_widget()
-    
-    def _create_cells_table_widget(self):
-        """Create the actual table widget."""
-        result = self.api.get_all_cells()
-        if result['success']:
-            cells = result['cells']
-            if cells:
-                # Convert to DataFrame for table display
-                df = pd.DataFrame(cells)
-                # Format columns for display
-                display_columns = ['cell_name', 'description', 'chemistry', 'capacity_ah', 
-                                 'file_count', 'processed_count', 'created_at']
-                available_columns = [col for col in display_columns if col in df.columns]
-                df = df[available_columns]
-                
-                # Rename columns for display
-                column_names = {
-                    'cell_name': 'Cell Name',
-                    'description': 'Description',
-                    'chemistry': 'Chemistry', 
-                    'capacity_ah': 'Capacity (Ah)',
-                    'file_count': 'Files',
-                    'processed_count': 'Processed',
-                    'created_at': 'Created'
-                }
-                df = df.rename(columns=column_names)
-                
-                # Create table with selection
-                table = pn.widgets.Tabulator(
-                    df,
-                    pagination='remote',
-                    page_size=10,
-                    selectable='checkbox',
-                    width=950,
-                    height=300
-                )
-                
-                # Handle selection
-                def on_selection_change(event):
-                    if event.new:
-                        selected_index = event.new[0]
-                        selected_cell_name = df.iloc[selected_index]['Cell Name']
-                        self.selected_cell = selected_cell_name
-                        self._update_cell_details(selected_cell_name)
-                
-                table.param.watch(on_selection_change, 'selection')
-                
-                return table
-            else:
-                return pn.pane.HTML("<p>No cells found. Create your first cell above.</p>")
-        else:
-            return pn.pane.HTML(f'<p style="color: red;">Error loading cells: {result["error"]}</p>')
+        # The table will refresh automatically due to the @pn.depends decorator
+        pass

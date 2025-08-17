@@ -650,6 +650,31 @@ class BackendAPI:
             }
 
     # Database operations
+    def get_cell_files(self, cell_id: int) -> Dict[str, Any]:
+        """
+        Get all files for a specific cell by cell_id.
+        
+        Args:
+            cell_id: Cell database ID
+            
+        Returns:
+            Dict with success status and files data
+        """
+        try:
+            files = self.db.get_cell_files(cell_id)
+            return {
+                'success': True,
+                'files': files,
+                'total_files': len(files)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get files for cell {cell_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'files': []
+            }
+
     def get_database_stats(self) -> Dict[str, Any]:
         """Get database statistics."""
         try:
