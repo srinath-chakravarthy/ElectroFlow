@@ -1,0 +1,1 @@
+# UI module for Panel-based battery data analyzer interface

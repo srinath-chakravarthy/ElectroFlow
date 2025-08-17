@@ -40,7 +40,7 @@ UNIVERSAL_COLUMNS = [
 
 # Universal schema with explicit types
 UNIVERSAL_SCHEMA = {
-    # Core Time & Indexing
+    # Core Time & Indexingok
     'time_s': pl.Float64,
     'timestamp': pl.Datetime,
     'segment_number': pl.Int64,

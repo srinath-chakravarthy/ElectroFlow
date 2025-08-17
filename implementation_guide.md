@@ -1,11 +1,11 @@
 # Implementation Guide - Battery Data Analyzer
 
 **Target Audience**: Developers working on the battery data analyzer system  
-**Last Updated**: August 16, 2025
+**Last Updated**: August 17, 2025
 
 ## System Overview
 
-The Battery Data Analyzer follows a modular architecture with clear separation between parsing, analytics, storage, and user interfaces. The system is designed for extensibility to support multiple instrument types while maintaining a universal data schema.
+The Battery Data Analyzer follows a modular architecture with clear separation between parsing, analytics, storage, and user interfaces. The system now uses SQLite database backend for metadata storage and Panel+Plotly UI for cell preprocessing and data management. Designed for extensibility to support multiple instrument types while maintaining a universal data schema.
 
 ## Code Organization
 
@@ -14,32 +14,275 @@ The Battery Data Analyzer follows a modular architecture with clear separation b
 src/
 ├── core/                   # Data models and parsing
 │   ├── data_models.py     # Universal schema, DataFile class
-│   ├── parsers.py         # VersaStudio parser implementation  
-│   └── parser_factory.py # Multi-instrument parser framework
+│   ├── parsers.py         # VersaStudio dual file parser (.par + .par.csv)
+│   ├── parser_factory.py # Multi-instrument parser framework
+│   └── database.py        # SQLite database schema and operations
 ├── analysis/              # Analytics engine
 │   └── analytics.py       # Fundamental analytics (CC, REST, EIS, etc.)
 ├── io_utils/              # Storage and file management
-│   └── storage.py         # Cell-based storage manager
+│   └── storage.py         # Database-backed storage manager
+├── ui/                    # Panel-based user interface
+│   ├── backend_api.py     # Clean UI/backend API separation
+│   ├── components/        # Panel UI components
+│   └── main_app.py        # Main Panel application
 ├── utils/                 # Shared utilities
 └── visualization/         # Plotting and visualization
 ```
 
 ### Key Design Patterns
 
-**1. Parser Strategy Pattern**
-- `BaseParser` abstract class defines common interface
-- Instrument-specific parsers (`VersaStudioParser`) implement `parse()` method
-- `ParserFactory` handles automatic parser selection
+**1. Dual File Processing Pattern**
+- VersaStudio parser handles both .par (technique sequence) and .par.csv (calibrated data)
+- .par files provide ActionId mapping and technique identification
+- .par.csv files provide calibrated EIS data and measurements
+- Combined processing ensures data quality and technique mapping
 
-**2. Universal Schema Conversion**
+**2. SQLite Database Backend**
+- Centralized metadata storage replacing JSON files
+- Referential integrity for file movement between cells
+- Schema migration support for future updates
+- Clean separation between raw data storage and metadata
+
+**3. Panel UI with Backend API**
+- Clean UI/backend separation via backend_api.py
+- Panel components for cell management and file association
+- Plotly integration for large dataset visualization
+- Default directory: /Users/srinathchakravarthy/
+
+**4. Universal Schema Conversion**
 - All parsers output to same 32-column universal schema
 - Instrument-specific mapping functions handle column translation
 - Missing columns filled with appropriate null values
 
-**3. Pipeline Architecture**
-- Clear separation: Parse → Analyze → Store
+**5. Pipeline Architecture**
+- Clear separation: Parse → Analyze → Store → UI
 - Each stage is independent and testable
 - Error handling at each stage with graceful degradation
+
+## SQLite Database Architecture
+
+### Database Schema
+```sql
+-- Cells table
+CREATE TABLE cells (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cell_name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    chemistry TEXT,
+    capacity_ah REAL,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Files table  
+CREATE TABLE files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cell_id INTEGER NOT NULL,
+    file_id TEXT UNIQUE NOT NULL,
+    original_filename TEXT NOT NULL,
+    file_type TEXT NOT NULL, -- 'par' or 'par_csv'
+    file_hash TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    processed_path TEXT,
+    analysis_path TEXT,
+    upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processing_status TEXT DEFAULT 'uploaded', -- 'uploaded', 'processing', 'completed', 'failed'
+    FOREIGN KEY (cell_id) REFERENCES cells (id) ON DELETE CASCADE
+);
+
+-- Technique segments table
+CREATE TABLE technique_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id TEXT NOT NULL,
+    segment_number INTEGER NOT NULL,
+    action_id INTEGER,
+    technique_name TEXT,
+    fundamental_technique TEXT,
+    start_time_s REAL,
+    end_time_s REAL,
+    point_count INTEGER,
+    FOREIGN KEY (file_id) REFERENCES files (file_id) ON DELETE CASCADE
+);
+
+-- User groups table
+CREATE TABLE user_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cell_id INTEGER NOT NULL,
+    group_name TEXT NOT NULL,
+    description TEXT,
+    file_ids TEXT, -- JSON array of file_ids
+    segments TEXT, -- JSON array of segment specifications
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (cell_id) REFERENCES cells (id) ON DELETE CASCADE,
+    UNIQUE(cell_id, group_name)
+);
+```
+
+### Database Operations
+```python
+# src/core/database.py
+class DatabaseManager:
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self.init_database()
+    
+    def create_cell(self, cell_name: str, **metadata) -> int:
+        """Create new cell and return cell_id"""
+        
+    def add_file_to_cell(self, cell_id: int, file_info: dict) -> str:
+        """Add file to cell and return file_id"""
+        
+    def move_file_to_cell(self, file_id: str, new_cell_id: int) -> bool:
+        """Move file between cells atomically"""
+        
+    def get_cell_files(self, cell_id: int) -> List[dict]:
+        """Get all files for a cell"""
+        
+    def update_processing_status(self, file_id: str, status: str):
+        """Update file processing status"""
+```
+
+## Panel UI Implementation
+
+### Backend API Layer
+```python
+# src/ui/backend_api.py
+class BackendAPI:
+    """Clean interface between Panel UI and backend systems"""
+    
+    def __init__(self, db_manager: DatabaseManager, storage_manager: StorageManager):
+        self.db = db_manager
+        self.storage = storage_manager
+    
+    def get_all_cells(self) -> List[dict]:
+        """Get all cells with file counts"""
+        
+    def create_cell(self, cell_name: str, **metadata) -> dict:
+        """Create new cell, return success/error status"""
+        
+    def add_files_to_cell(self, cell_id: int, file_paths: List[Path]) -> dict:
+        """Add multiple files to cell, return processing results"""
+        
+    def get_file_data_preview(self, file_id: str, n_rows: int = 1000) -> pl.DataFrame:
+        """Get data preview for UI display"""
+```
+
+### Panel UI Components
+```python
+# src/ui/components/cell_manager.py
+class CellManagerTab:
+    """Cell creation and management interface"""
+    
+    def __init__(self, backend_api: BackendAPI):
+        self.api = backend_api
+        self.setup_layout()
+    
+    def setup_layout(self):
+        # Cell list table
+        # Create cell form
+        # Cell metadata editor
+
+# src/ui/components/file_association.py  
+class FileAssociationTab:
+    """File upload and cell association interface"""
+    
+    def __init__(self, backend_api: BackendAPI):
+        self.api = backend_api
+        self.default_directory = Path("/Users/srinathchakravarthy/")
+        self.setup_layout()
+    
+    def setup_layout(self):
+        # File browser (default: /Users/srinathchakravarthy/)
+        # Cell selection dropdown
+        # Dual file processing (.par + .par.csv)
+        # Upload progress indicators
+
+# src/ui/components/data_processing.py
+class DataProcessingTab:
+    """Data preview and processing interface"""
+    
+    def __init__(self, backend_api: BackendAPI):
+        self.api = backend_api
+        self.setup_layout()
+    
+    def setup_layout(self):
+        # File data preview (plotly-resample for large datasets)
+        # Processing status monitoring
+        # Analysis results display
+```
+
+### Main Application
+```python
+# src/ui/main_app.py
+import panel as pn
+import plotly.graph_objects as go
+from plotly_resampler import FigureResampler
+
+class BatteryAnalyzerApp:
+    """Main Panel application for battery data preprocessing"""
+    
+    def __init__(self):
+        pn.extension('plotly')
+        self.setup_backend()
+        self.setup_ui()
+    
+    def setup_backend(self):
+        db_path = Path("data/battery_analyzer.db")
+        self.db_manager = DatabaseManager(db_path)
+        self.storage_manager = StorageManager(self.db_manager)
+        self.api = BackendAPI(self.db_manager, self.storage_manager)
+    
+    def setup_ui(self):
+        self.cell_manager = CellManagerTab(self.api)
+        self.file_association = FileAssociationTab(self.api)
+        self.data_processing = DataProcessingTab(self.api)
+        
+        # Create tabbed interface
+        self.tabs = pn.Tabs(
+            ("Cell Management", self.cell_manager.layout),
+            ("File Association", self.file_association.layout),
+            ("Data Processing", self.data_processing.layout)
+        )
+    
+    def serve(self, port: int = 5007):
+        return self.tabs.servable()
+
+if __name__ == "__main__":
+    app = BatteryAnalyzerApp()
+    pn.serve(app.serve(), port=5007, show=True)
+```
+
+## Dual File Processing Implementation
+
+### VersaStudio Parser Updates
+```python
+# src/core/parsers.py - Enhanced for dual file processing
+class VersaStudioParser(BaseParser):
+    def parse_dual_files(self, par_path: Path, csv_path: Path) -> DataFile:
+        """Parse both .par and .par.csv files for complete data"""
+        
+        # Parse .par for technique sequence and ActionId mapping
+        par_data = self.parse_structure_only(par_path)
+        
+        # Parse .par.csv for calibrated measurement data
+        csv_data = self.parse_calibrated_csv(csv_path)
+        
+        # Combine: technique mapping from .par + calibrated data from .csv
+        return self.merge_dual_file_data(par_data, csv_data)
+    
+    def parse_calibrated_csv(self, csv_path: Path) -> pl.DataFrame:
+        """Parse VersaStudio exported .par.csv file (calibrated data)"""
+        # Read CSV with proper column detection
+        # Apply VersaStudio CSV → Universal schema mapping
+        # Validate data quality and calibration markers
+        
+    def validate_dual_files(self, par_path: Path, csv_path: Path) -> bool:
+        """Validate that .par and .par.csv files are compatible"""
+        # Check timestamps match
+        # Verify segment counts align
+        # Validate measurement compatibility
+```
 
 ## Adding New Instrument Parsers
 

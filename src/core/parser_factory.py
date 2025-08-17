@@ -27,6 +27,8 @@ class ParserRegistry:
         self.register_parser(VersaStudioParser)
         # Future parsers will be added here:
         # self.register_parser(BiologicParser)
+
+
         # self.register_parser(GamryParser)
 
     def register_parser(self, parser_class: Type[BaseParser]):

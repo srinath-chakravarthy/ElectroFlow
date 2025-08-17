@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**✅ COMPLETED**: Universal data processing system with VersaStudio support, fundamental analytics, cell-based storage, and CLI interface. See `project_status.md` for full implementation details.
+**✅ COMPLETED**: Dual-mapping technique identification system with loop-aware structural parsing, ActionId database, and comprehensive CLI interface.
 
-**🎯 CURRENT FOCUS**: System refinement, BioLogic parser, and user grouping system.
+**🎯 CURRENT FOCUS**: Panel UI for cell preprocessing with SQLite database backend and calibrated CSV integration.
 
 ## Active Work Instructions
 
@@ -54,7 +54,36 @@ TECHNIQUE_MAPPING = {
 
 ## Immediate Development Priorities
 
-### 1. Diagnostic and Validation Tools
+### 1. DataFile Abstraction for Multi-Instrument Support
+**Status**: Ready to Start (After Testing/Debugging)  
+**Priority**: High (Before BioLogic Implementation)
+
+**Current Issue**: DataFile class contains VersaStudio-specific elements that limit extensibility:
+- ActionDefinition and SegmentData are VersaStudio concepts
+- Comments reference ".par file" specifically  
+- Structure assumes VersaStudio parsing workflow
+
+**Refactoring Plan**:
+```python
+@dataclass  
+class DataFile:
+    """Universal data file for any electrochemical instrument."""
+    file_path: Path
+    timestamp: datetime
+    universal_data: pl.DataFrame      # Always 32-column universal schema
+    metadata: Dict[str, Any]          # Instrument-specific metadata
+    analysis_results: Dict[str, Any]
+    file_hash: str
+    
+    # REMOVE instrument-specific fields:
+    # actions: Dict[int, ActionDefinition]     # Move to metadata["versastudio_specific"]
+    # segments: Dict[int, SegmentData]         # Move to metadata["versastudio_specific"]
+```
+
+**Benefits**: True universality, clean parser separation, future-proof design  
+**Timing**: After current system testing reveals real-world usage patterns
+
+### 2. Diagnostic and Validation Tools
 **Status**: In Progress  
 **Priority**: High
 

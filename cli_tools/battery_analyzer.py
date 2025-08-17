@@ -8,6 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 from typing import List, Optional
+import polars as pl
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -296,7 +297,7 @@ def main():
     export_parser.add_argument(
         '--format',
         choices=['csv', 'parquet', 'eis_csv'],
-        default='csv',
+        default='parquet',
         help='Export format (default: csv)'
     )
     

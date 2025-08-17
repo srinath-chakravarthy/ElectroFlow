@@ -689,6 +689,325 @@ class VersaStudioParser(BaseParser):
 
         return metadata
 
+    # Dual file processing methods for Panel UI integration
+    def parse_dual_files(self, par_path: Path, csv_path: Path) -> DataFile:
+        """
+        Parse both .par and .par.csv files for complete data processing.
+        
+        This method combines technique sequence mapping from .par files with
+        calibrated measurement data from .par.csv files exported by VersaStudio.
+        
+        Args:
+            par_path: Path to .par file (technique sequence and ActionId mapping)
+            csv_path: Path to .par.csv file (calibrated measurement data)
+            
+        Returns:
+            DataFile with combined technique mapping and calibrated data
+            
+        Raises:
+            VersaStudioParseError: If files are incompatible or parsing fails
+        """
+        if not self.validate_dual_files(par_path, csv_path):
+            raise VersaStudioParseError(f"Incompatible file pair: {par_path.name} and {csv_path.name}")
+        
+        try:
+            # Parse .par file for technique sequence only (no data segments)
+            structure_data = self.parse_structure_only(par_path)
+            
+            # Parse .par.csv file for calibrated measurement data
+            calibrated_data = self.parse_calibrated_csv(csv_path)
+            
+            # Merge technique mapping with calibrated data
+            merged_data = self.merge_dual_file_data(structure_data, calibrated_data, par_path)
+            
+            return merged_data
+            
+        except Exception as e:
+            raise VersaStudioParseError(f"Dual file parsing failed: {str(e)}") from e
+    
+    def parse_structure_only(self, par_path: Path) -> Dict[str, Any]:
+        """
+        Parse .par file for technique sequence and ActionId mapping only.
+        
+        Extracts action hierarchy, technique names, and ActionId mapping
+        without processing large data segments.
+        
+        Args:
+            par_path: Path to .par file
+            
+        Returns:
+            Dictionary with technique mapping and metadata
+        """
+        # Parse file structure (actions and metadata only)
+        self._parse_file_structure(par_path)
+        
+        # Build execution sequence for technique mapping
+        execution_sequence = self._build_execution_sequence()
+        segment_mapping = self._build_segment_mapping(execution_sequence)
+        
+        # Create technique mapping table
+        technique_mapping = []
+        for segment_id, action_data in segment_mapping.items():
+            action_id = action_data.get('action_id')
+            action = self.actions.get(action_id) if action_id is not None else None
+            
+            mapping_entry = {
+                'segment_number': segment_id,
+                'action_id': action_id,
+                'technique_name': action.name if action else None,
+                'fundamental_technique': self._map_action_to_fundamental_technique(action_id, action.name if action else None)
+            }
+            technique_mapping.append(mapping_entry)
+        
+        return {
+            'technique_mapping': technique_mapping,
+            'actions': {k: {'name': v.name, 'technique': v.technique.value} for k, v in self.actions.items()},
+            'metadata': self._extract_metadata(),
+            'timestamp': self._extract_timestamp()
+        }
+    
+    def parse_calibrated_csv(self, csv_path: Path) -> pl.DataFrame:
+        """
+        Parse VersaStudio exported .par.csv file for calibrated measurement data.
+        
+        VersaStudio CSV exports contain calibrated data that should be used
+        for EIS measurements and other calibrated analyses.
+        
+        Args:
+            csv_path: Path to .par.csv file
+            
+        Returns:
+            Polars DataFrame with calibrated measurement data
+            
+        Raises:
+            VersaStudioParseError: If CSV parsing fails
+        """
+        try:
+            # Read CSV file with VersaStudio format detection
+            df = pl.read_csv(
+                csv_path,
+                has_header=True,
+                try_parse_dates=True,
+                ignore_errors=False
+            )
+            
+            # Validate that this is a VersaStudio CSV export
+            if not self._validate_versastudio_csv(df):
+                raise VersaStudioParseError(f"Not a valid VersaStudio CSV export: {csv_path.name}")
+            
+            # Apply VersaStudio CSV column mapping
+            df = self._map_csv_columns_to_universal(df)
+            
+            # Add computed columns for universal schema compatibility
+            df = self._add_csv_computed_columns(df)
+            
+            return df
+            
+        except Exception as e:
+            raise VersaStudioParseError(f"Failed to parse CSV file {csv_path.name}: {str(e)}") from e
+    
+    def _validate_versastudio_csv(self, df: pl.DataFrame) -> bool:
+        """
+        Validate that DataFrame is a VersaStudio CSV export.
+        
+        Args:
+            df: Polars DataFrame from CSV
+            
+        Returns:
+            True if valid VersaStudio CSV format
+        """
+        required_columns = ['Segment #', 'Point #', 'E(V)', 'I(A)', 'Elapsed Time(s)']
+        return all(col in df.columns for col in required_columns)
+    
+    def _map_csv_columns_to_universal(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Map VersaStudio CSV columns to universal schema.
+        
+        Args:
+            df: Raw CSV DataFrame
+            
+        Returns:
+            DataFrame with universal schema columns
+        """
+        # Use existing VersaStudio mapping
+        from .data_models import VERSASTUDIO_MAPPING
+        
+        # Create mapping for available columns
+        column_mapping = {}
+        for vs_col, universal_col in VERSASTUDIO_MAPPING.items():
+            if vs_col in df.columns:
+                column_mapping[vs_col] = universal_col
+        
+        # Rename columns
+        df = df.rename(column_mapping)
+        
+        # Add missing universal schema columns with null values
+        for col in UNIVERSAL_COLUMNS:
+            if col not in df.columns:
+                df = df.with_columns(pl.lit(None).alias(col))
+        
+        return df.select(UNIVERSAL_COLUMNS)
+    
+    def _add_csv_computed_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Add computed columns to CSV data for universal schema compatibility.
+        
+        Args:
+            df: DataFrame with mapped columns
+            
+        Returns:
+            DataFrame with computed columns added
+        """
+        df = df.with_columns([
+            # Power calculation
+            (pl.col('potential_v') * pl.col('current_a')).alias('power_w'),
+            
+            # Impedance magnitude and phase (if impedance columns exist)
+            pl.when(pl.col('impedance_real_ohm').is_not_null() & pl.col('impedance_imag_ohm').is_not_null())
+            .then(((pl.col('impedance_real_ohm')**2 + pl.col('impedance_imag_ohm')**2)**0.5))
+            .otherwise(None)
+            .alias('impedance_mag_ohm'),
+            
+            pl.when(pl.col('impedance_real_ohm').is_not_null() & pl.col('impedance_imag_ohm').is_not_null())
+            .then((pl.col('impedance_imag_ohm') / pl.col('impedance_real_ohm')).arctan() * 180.0 / 3.14159)
+            .otherwise(None)
+            .alias('impedance_phase_deg')
+        ])
+        
+        return df
+    
+    def merge_dual_file_data(self, structure_data: Dict[str, Any], 
+                           calibrated_data: pl.DataFrame, par_path: Path) -> DataFile:
+        """
+        Merge technique mapping from .par with calibrated data from .par.csv.
+        
+        Args:
+            structure_data: Technique mapping and metadata from .par file
+            calibrated_data: Calibrated measurement data from .par.csv file
+            par_path: Original .par file path for DataFile creation
+            
+        Returns:
+            DataFile with combined data
+        """
+        # Create technique mapping lookup
+        technique_lookup = {}
+        for mapping in structure_data['technique_mapping']:
+            segment_num = mapping['segment_number']
+            technique_lookup[segment_num] = {
+                'action_id': mapping['action_id'],
+                'technique_name': mapping['technique_name'],
+                'fundamental_technique': mapping['fundamental_technique']
+            }
+        
+        # Add technique columns to calibrated data
+        calibrated_data = calibrated_data.with_columns([
+            # Map segment numbers to techniques
+            pl.col('segment_number').map_elements(
+                lambda seg: technique_lookup.get(seg, {}).get('action_id'),
+                return_dtype=pl.Int64
+            ).alias('technique_id'),
+            
+            pl.col('segment_number').map_elements(
+                lambda seg: technique_lookup.get(seg, {}).get('technique_name'),
+                return_dtype=pl.Utf8
+            ).alias('technique_name'),
+            
+            pl.col('segment_number').map_elements(
+                lambda seg: technique_lookup.get(seg, {}).get('fundamental_technique'),
+                return_dtype=pl.Utf8
+            ).alias('fundamental_technique')
+        ])
+        
+        # Add absolute timestamps
+        start_timestamp = structure_data['timestamp']
+        calibrated_data = calibrated_data.with_columns([
+            (pl.lit(start_timestamp) + 
+             pl.duration(seconds=pl.col('time_s'))).alias('timestamp')
+        ])
+        
+        # Create DataFile object
+        return DataFile(
+            file_path=par_path,
+            timestamp=start_timestamp,
+            universal_data=calibrated_data,
+            actions=structure_data['actions'],
+            segments={},  # Segments not needed for dual file processing
+            metadata={
+                **structure_data['metadata'],
+                'processing_type': 'dual_file',
+                'calibrated_data_source': 'par_csv_export',
+                'data_quality': 'calibrated'
+            },
+            file_hash=calculate_file_hash(par_path)
+        )
+    
+    def validate_dual_files(self, par_path: Path, csv_path: Path) -> bool:
+        """
+        Validate that .par and .par.csv files are compatible for dual processing.
+        
+        Args:
+            par_path: Path to .par file
+            csv_path: Path to .par.csv file
+            
+        Returns:
+            True if files are compatible for dual processing
+        """
+        try:
+            # Basic file existence and extension checks
+            if not (par_path.exists() and csv_path.exists()):
+                return False
+            
+            if par_path.suffix.lower() != '.par':
+                return False
+                
+            if not csv_path.name.lower().endswith('.par.csv'):
+                return False
+            
+            # Check if CSV file is readable
+            try:
+                test_df = pl.read_csv(csv_path, has_header=True, n_rows=5)
+                if not self._validate_versastudio_csv(test_df):
+                    return False
+            except:
+                return False
+            
+            # Check file timestamps (CSV should be newer or same time as PAR)
+            par_time = par_path.stat().st_mtime
+            csv_time = csv_path.stat().st_mtime
+            
+            # Allow CSV to be up to 1 hour older (manual export timing)
+            time_diff = par_time - csv_time
+            if time_diff > 3600:  # 1 hour in seconds
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    def _map_action_to_fundamental_technique(self, action_id: Optional[int], action_name: Optional[str]) -> str:
+        """
+        Map action to fundamental technique using dual approach.
+        
+        Args:
+            action_id: VersaStudio ActionId
+            action_name: Action name from hierarchy
+            
+        Returns:
+            Fundamental technique name
+        """
+        # Priority 1: ActionId-based mapping
+        if action_id is not None:
+            technique = map_actionid_to_technique(action_id)
+            if technique != 'UNKNOWN':
+                return technique
+        
+        # Priority 2: Hierarchy-based mapping
+        if action_name:
+            return map_technique_name(action_name)
+        
+        return 'UNKNOWN'
+
 
 # Convenience function
 def parse_par_file(file_path: Path) -> DataFile:
