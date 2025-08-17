@@ -107,9 +107,9 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cell_id INTEGER NOT NULL,
                     group_name TEXT NOT NULL,
+                    group_type TEXT NOT NULL DEFAULT 'Custom',
                     description TEXT,
-                    file_ids TEXT, -- JSON array of file_ids
-                    segments TEXT, -- JSON array of segment specifications
+                    techniques TEXT, -- JSON array of technique references: [{"file_id": "...", "segment_number": 1}]
                     group_metadata_json TEXT, -- Group-specific metadata
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -148,6 +148,29 @@ class DatabaseManager:
                 logger.info("Added temperature_c column to technique_segments table")
             except sqlite3.OperationalError:
                 # Column already exists
+                pass
+                
+            # Add group_type column to user_groups table if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE user_groups ADD COLUMN group_type TEXT DEFAULT 'Custom'")
+                logger.info("Added group_type column to user_groups table")
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+                
+            # Rename file_ids/segments columns to techniques if needed
+            try:
+                # Check if old columns exist
+                cursor = conn.execute("PRAGMA table_info(user_groups)")
+                columns = [row[1] for row in cursor.fetchall()]
+                
+                if 'file_ids' in columns and 'techniques' not in columns:
+                    conn.execute("ALTER TABLE user_groups ADD COLUMN techniques TEXT")
+                    conn.execute("UPDATE user_groups SET techniques = '[]' WHERE techniques IS NULL")
+                    logger.info("Added techniques column to user_groups table")
+                    
+            except sqlite3.OperationalError:
+                # Migration not needed
                 pass
             
             conn.commit()
@@ -493,37 +516,36 @@ class DatabaseManager:
             return segments
     
     # User groups operations  
-    def create_user_group(self, cell_id: int, group_name: str, description: str = "",
-                         file_ids: List[str] = None, segments: List[Dict] = None,
+    def create_user_group(self, cell_id: int, group_name: str, group_type: str = "Custom",
+                         description: str = "", techniques: List[Dict] = None,
                          metadata: Dict[str, Any] = None) -> int:
         """Create user group for a cell.
         
         Args:
             cell_id: Cell primary key
             group_name: Group name (unique within cell)
+            group_type: Group type (OCV, Rate, EIS, etc.)
             description: Group description
-            file_ids: List of file_ids in group
-            segments: List of segment specifications
+            techniques: List of technique references: [{"file_id": "...", "segment_number": 1}]
             metadata: Additional group metadata
             
         Returns:
             group_id: Primary key of created group
         """
-        file_ids_json = json.dumps(file_ids or [])
-        segments_json = json.dumps(segments or [])
+        techniques_json = json.dumps(techniques or [])
         metadata_json = json.dumps(metadata or {})
         
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 INSERT INTO user_groups (
-                    cell_id, group_name, description, file_ids,
-                    segments, group_metadata_json
+                    cell_id, group_name, group_type, description, techniques,
+                    group_metadata_json
                 ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (cell_id, group_name, description, file_ids_json,
-                  segments_json, metadata_json))
+            """, (cell_id, group_name, group_type, description, techniques_json,
+                  metadata_json))
             conn.commit()
             group_id = cursor.lastrowid
-            logger.info(f"Created user group: {group_name} (cell_id={cell_id})")
+            logger.info(f"Created user group: {group_name} (type={group_type}, cell_id={cell_id})")
             return group_id
     
     def get_cell_groups(self, cell_id: int) -> List[Dict[str, Any]]:
@@ -545,8 +567,17 @@ class DatabaseManager:
             for row in cursor.fetchall():
                 group_dict = dict(row)
                 # Parse JSON fields
-                group_dict['file_ids'] = json.loads(group_dict['file_ids'])
-                group_dict['segments'] = json.loads(group_dict['segments'])
+                if 'techniques' in group_dict and group_dict['techniques']:
+                    group_dict['techniques'] = json.loads(group_dict['techniques'])
+                else:
+                    group_dict['techniques'] = []
+                    
+                # Handle legacy fields for backward compatibility
+                if 'file_ids' in group_dict and group_dict['file_ids']:
+                    group_dict['file_ids'] = json.loads(group_dict['file_ids'])
+                if 'segments' in group_dict and group_dict['segments']:
+                    group_dict['segments'] = json.loads(group_dict['segments'])
+                    
                 if group_dict['group_metadata_json']:
                     group_dict['metadata'] = json.loads(group_dict['group_metadata_json'])
                 else:
@@ -554,6 +585,121 @@ class DatabaseManager:
                 del group_dict['group_metadata_json']
                 groups.append(group_dict)
             return groups
+    
+    def update_user_group(self, group_id: int, **updates) -> bool:
+        """Update user group.
+        
+        Args:
+            group_id: Group primary key
+            **updates: Fields to update (techniques, group_type, description, etc.)
+            
+        Returns:
+            True if group was updated, False if not found
+        """
+        if not updates:
+            return False
+            
+        # Handle JSON serialization for techniques
+        if 'techniques' in updates:
+            updates['techniques'] = json.dumps(updates['techniques'])
+        if 'metadata' in updates:
+            updates['group_metadata_json'] = json.dumps(updates['metadata'])
+            del updates['metadata']
+            
+        # Add updated_at timestamp
+        updates['updated_at'] = datetime.now().isoformat()
+        
+        set_clause = ", ".join(f"{key} = ?" for key in updates.keys())
+        values = list(updates.values()) + [group_id]
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute(f"""
+                UPDATE user_groups SET {set_clause} WHERE id = ?
+            """, values)
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def delete_user_group(self, group_id: int) -> bool:
+        """Delete user group.
+        
+        Args:
+            group_id: Group primary key
+            
+        Returns:
+            True if group was deleted, False if not found
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM user_groups WHERE id = ?", (group_id,))
+            conn.commit()
+            deleted = cursor.rowcount > 0
+            if deleted:
+                logger.info(f"Deleted user group: id={group_id}")
+            return deleted
+    
+    def get_user_group_by_id(self, group_id: int) -> Optional[Dict[str, Any]]:
+        """Get user group by ID.
+        
+        Args:
+            group_id: Group primary key
+            
+        Returns:
+            Group dictionary or None if not found
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM user_groups WHERE id = ?", (group_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+                
+            group_dict = dict(row)
+            # Parse JSON fields
+            if group_dict['techniques']:
+                group_dict['techniques'] = json.loads(group_dict['techniques'])
+            else:
+                group_dict['techniques'] = []
+                
+            if group_dict['group_metadata_json']:
+                group_dict['metadata'] = json.loads(group_dict['group_metadata_json'])
+            else:
+                group_dict['metadata'] = {}
+            del group_dict['group_metadata_json']
+            
+            return group_dict
+    
+    def get_cell_techniques_with_files(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get all techniques for a cell with file information.
+        
+        Args:
+            cell_id: Cell primary key
+            
+        Returns:
+            List of technique dictionaries with file information
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    ts.*,
+                    f.original_filename,
+                    f.file_type,
+                    f.temperature_c,
+                    f.processing_status
+                FROM technique_segments ts
+                JOIN files f ON ts.file_id = f.file_id
+                WHERE f.cell_id = ?
+                ORDER BY f.upload_timestamp ASC, ts.segment_number ASC
+            """, (cell_id,))
+            
+            techniques = []
+            for row in cursor.fetchall():
+                technique_dict = dict(row)
+                # Parse JSON analysis results
+                if technique_dict['analysis_results_json']:
+                    technique_dict['analysis_results'] = json.loads(technique_dict['analysis_results_json'])
+                else:
+                    technique_dict['analysis_results'] = {}
+                del technique_dict['analysis_results_json']
+                techniques.append(technique_dict)
+            return techniques
     
     # Database utilities
     def get_database_stats(self) -> Dict[str, Any]:
