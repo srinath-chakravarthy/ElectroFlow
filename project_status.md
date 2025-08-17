@@ -1,19 +1,20 @@
 # Battery Data Analyzer - Project Status Report
 
-**Generated**: August 16, 2025  
-**Implementation Phase**: Universal System Complete  
-**Git Commit**: 80938a0 - Universal battery data processing system
+**Generated**: August 17, 2025  
+**Implementation Phase**: Dual Mapping System Complete  
+**Git Commit**: d3dd0e9 - Loop-aware segment mapping and dual ActionId/hierarchy technique mapping
 
 ## Executive Summary
 
-Successfully implemented a complete universal battery data processing system capable of parsing VersaStudio .par files, performing automated fundamental analytics, and storing data in a cell-centric architecture. The system processes 949k+ data points with excellent curve fitting accuracy (R² > 0.9) and provides immediate technique analysis upon file upload.
+Successfully implemented a dual-mapping technique identification system that combines ActionId-based direct lookup with hierarchical structural parsing. The system now correctly maps complex loop structures (123 total segments vs previous 10) and provides both immediate ActionId recognition and complete fallback coverage. Validated with real data files containing 949k+ data points.
 
 ## Implementation Status Overview
 
 ### ✅ Phase 1: Universal Schema & Parsing (COMPLETED)
 - **Universal 32-column schema** implemented with VersaStudio compatibility
-- **Action hierarchy parsing** with 0-based indexing and ParentNode support  
-- **Technique mapping system** (OCV, CC, CV, GEIS, PEIS, UNKNOWN)
+- **Structural parsing system** with loop expansion and continuous 0-based indexing
+- **Dual technique mapping**: ActionId-based (primary) + hierarchy-based (fallback)
+- **Loop-aware segment mapping**: 123 total segments vs previous 10 unique actions
 - **Absolute timestamp calculation** from file metadata
 - **Computed columns**: power, impedance magnitude/phase, timestamps
 
@@ -85,12 +86,14 @@ data/cells/CELL_ID/
 
 ## Validation Results
 
-### Real Data Test: GITT/EIS Experiment
+### Real Data Test: GITT/EIS Experiment  
 - **File**: `GITT_EIS_Charge_cycle1_Channel 2.par`
 - **Data Points**: 948,974 
 - **Duration**: 328,048 seconds (91.1 hours)
-- **Techniques Detected**: OCV, GEIS, UNKNOWN
-- **Timestamp Range**: 2025-04-07 12:41:57 to next day
+- **Total Segments**: 123 (0-122) with complete loop expansion
+- **Loop Structure**: Loop#1 (10×4=40 segments) + Loop#2 (20×4=80 segments)
+- **ActionIds Found**: 8 (CC), 20 (GEIS), 23 (OCV) - all mapped successfully
+- **Mapping Coverage**: 100% via dual system (ActionId + hierarchy fallback)
 - **Processing Time**: < 10 seconds
 
 ### Analytics Accuracy
@@ -266,12 +269,32 @@ $ python cli_tools/battery_analyzer.py export CELL_ID FILE_ID eis.csv --format e
 ## Git History Summary
 
 **Major Commits**:
+- `d3dd0e9`: Loop-aware segment mapping and dual ActionId/hierarchy technique mapping
 - `80938a0`: Universal battery data processing system (ALL PHASES)
 - Previous commits: Foundation work and parser development
 
-**Files Added**: 21 files, 2,283 insertions
-**Key Modules**: Universal schema, analytics engine, storage system, CLI
+**Latest Changes**: 3 files modified, 228 insertions, 46 deletions
+**Key Features**: ActionId database, loop expansion, dual mapping system, debug tools
 
 ---
 
-*This document represents the complete current state of the Battery Data Analyzer project as of August 16, 2025. For ongoing work instructions, see CLAUDE.md.*
+*This document represents the complete current state of the Battery Data Analyzer project as of August 17, 2025. For ongoing work instructions, see CLAUDE.md.*
+
+## Recent Major Enhancement: Dual Mapping System
+
+### Key Achievement: Complete Loop Expansion
+- **Problem Solved**: Previous mapping only covered 10 unique actions, missing loop iterations
+- **Solution Implemented**: Loop-aware expansion from action hierarchy with `Number of Iterations`
+- **Result**: Perfect 123-segment mapping matching actual data structure
+
+### ActionId Database Strategy
+- **Data-Driven Approach**: Only verified ActionIds from real files (8, 20, 23)
+- **Organic Growth**: Database expands as more files are processed and validated
+- **Immediate Benefits**: Simple, fast, accurate mapping for known ActionIds
+- **Future-Ready**: Framework for pure ActionId mode when database is complete
+
+### Technical Implementation Notes
+- **Dual Priority**: ActionId preferred, hierarchy fallback ensures complete coverage
+- **Debug Tools**: 7 enumerated test scenarios for development and validation
+- **Real Data Validation**: Tested on 2 files with 100% success rate
+- **Performance**: Maintains speed while adding robustness and accuracy

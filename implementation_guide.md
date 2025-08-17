@@ -188,35 +188,69 @@ def test_large_file_performance():
 
 ### VersaStudio Technique Mapping Strategy
 
-The system uses a **dual-approach** for technique identification:
+The system uses a **dual-approach** for technique identification with ActionId priority:
 
-**Primary Mapping (Hierarchy-Based)**:
-- Maps data rows to Action0, Action1, Action2... using `Segment #` values
-- Uses action names from file headers: "Constant Current", "Galvanostatic EIS", etc.
-- Applies pattern matching via `TECHNIQUE_MAPPING` to get fundamental techniques
-- This is the **reliable method** used for technique assignment
-
-**Secondary Collection (ActionId Database)**:
-- Collects `ActionId` values from data for building VersaStudio technique database
-- Stored in metadata but **not used** for primary technique assignment
-- Enables future ActionId → technique mapping once database is complete
+#### **Method 1: ActionId-Based Mapping (Primary)**
+Direct lookup for verified ActionIds with immediate technique assignment:
 
 ```python
-# Primary: Segment-based mapping
-segment_to_action_mapping = {
-    0: "Common",                    # Action0
-    1: "Energy Open Circuit",       # Action1  
-    2: "Galvanostatic EIS",        # Action2
-    3: "Constant Current"          # Action3 (now correctly detected!)
-}
-
-# Secondary: ActionId collection for database building
-actionid_collection = {
-    1: "Constant Current",         # ActionId=1 maps to CC
-    5: "Energy Open Circuit",      # ActionId=5 maps to OCV
-    11: "Galvanostatic EIS"        # ActionId=11 maps to GEIS
+# Verified ActionId database (data-driven expansion)
+VERSASTUDIO_ACTIONID_MAPPING = {
+    8: 'CC',     # Constant Current (verified from GITT data)
+    20: 'GEIS',  # Galvanostatic EIS (verified from GITT data)
+    23: 'OCV',   # Energy Open Circuit (verified from GITT data)
+    # Add more as real data files are processed
 }
 ```
+
+**Benefits**: Simple, fast, accurate for known ActionIds
+**Limitations**: Partial coverage, requires database expansion
+
+#### **Method 2: Structural Parsing + Loop-Aware Mapping (Fallback)**
+Complex hierarchical analysis with complete loop expansion:
+
+```python
+# Execution sequence building with loop iterations
+def _build_execution_sequence():
+    # 1. Filter structural actions (Common, Loop #X)
+    # 2. Group experimental actions by ParentNode
+    # 3. Expand loops based on "Number of Iterations"
+    # 4. Create complete segment mapping (0-based continuous)
+    
+    # Example result:
+    # 3 top-level + Loop#1(10×4) + Loop#2(20×4) = 123 total segments
+```
+
+**Benefits**: Complete coverage, handles complex hierarchies
+**Limitations**: Complex logic, requires structural parsing
+
+#### **Hybrid Implementation**
+```python
+# Final technique assignment priority:
+fundamental_technique_final = (
+    ActionId_mapping if ActionId in database
+    else hierarchy_mapping
+)
+```
+
+#### **Loop Expansion Example**
+Real data file analysis showing complete segment mapping:
+```
+GITT_EIS_Charge_cycle1_Channel 2.par:
+├── Top-level: Action1, Action2, Action13 → segments 0, 1, 122
+├── Loop #1 (10 iterations): Action4-7 → segments 2-41 (40 total)
+└── Loop #2 (20 iterations): Action9-12 → segments 42-121 (80 total)
+Total: 123 segments (perfect 0-based continuous mapping)
+```
+
+#### **Database Expansion Process**
+1. **Parse new .par files** with structural parser
+2. **Check validation warnings** for inconsistent ActionIds  
+3. **Manually verify techniques** from action names
+4. **Add verified mappings** to VERSASTUDIO_ACTIONID_MAPPING
+5. **Test with multiple files** to ensure consistency
+
+**Current ActionId Coverage**: 3 verified (8, 20, 23) - grows organically with usage
 
 ### Adding New Technique Classification
 1. Update `TECHNIQUE_MAPPING` in `data_models.py`
