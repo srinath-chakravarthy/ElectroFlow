@@ -132,6 +132,19 @@ TECHNIQUE_MAPPING = {
     ]
 }
 
+# VersaStudio ActionId → Fundamental Technique mapping
+# This is a simpler, direct mapping that bypasses complex hierarchy parsing
+# ONLY CONTAINS VERIFIED ActionIds from real data files
+VERSASTUDIO_ACTIONID_MAPPING = {
+    # Verified from GITT_EIS_Charge_cycle1_Channel 2.par
+    8: 'CC',     # Constant Current (confirmed from real data)
+    20: 'GEIS',  # Galvanostatic EIS (confirmed from real data)
+    23: 'OCV',   # Energy Open Circuit (confirmed from real data)
+    
+    # TODO: Add more ActionIds as we encounter them in additional real data files
+    # Only add ActionIds that are actually observed in parsed files
+}
+
 # Legacy VersaStudio schema for backward compatibility
 VERSASTUDIO_COLUMNS = [
     'Segment #', 'Point #', 'E(V)', 'I(A)', 'Elapsed Time(s)',
@@ -490,6 +503,21 @@ def is_structural_action(action_name: str) -> bool:
         return True
         
     return False
+
+def map_actionid_to_technique(action_id: int) -> str:
+    """
+    Map VersaStudio ActionId directly to fundamental technique.
+    
+    This is a simpler alternative to hierarchy-based mapping.
+    Returns 'UNKNOWN' for unmapped ActionIds.
+    
+    Args:
+        action_id: VersaStudio ActionId number
+        
+    Returns:
+        Fundamental technique type (OCV, CC, CV, GEIS, PEIS, UNKNOWN)
+    """
+    return VERSASTUDIO_ACTIONID_MAPPING.get(action_id, 'UNKNOWN')
 
 def map_technique_name(action_name: str) -> str:
     """

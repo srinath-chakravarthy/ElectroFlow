@@ -12,7 +12,8 @@ from .data_models import (
     DataFile, ActionDefinition, SegmentData,
     create_universal_dataframe, UNIVERSAL_COLUMNS, UNIVERSAL_SCHEMA,
     VERSASTUDIO_COLUMNS, VERSASTUDIO_SCHEMA, TECHNIQUE_MAPPING,
-    map_technique_name, is_structural_action, calculate_file_hash, prune_empty_columns
+    map_technique_name, map_actionid_to_technique, is_structural_action, 
+    calculate_file_hash, prune_empty_columns
 )
 
 
@@ -45,13 +46,15 @@ class VersaStudioParser(BaseParser):
     Uses line-by-line parsing for metadata and Polars for data sections.
     """
 
-    def __init__(self):
+    def __init__(self, debug_structural_parsing=False):
         super().__init__()
+        self.debug_structural_parsing = debug_structural_parsing
         self.sections = {}
         self.actions = {}  # Will store experimental actions with continuous indexing
         self.segments = {}
         self.experimental_action_counter = 0  # Counter for continuous indexing
         self.original_action_mapping = {}  # Track original ActionX -> continuous index
+        self.loop_iterations = {}  # Store loop iteration counts: {loop_name: iterations}
 
     def validate_file(self, file_path: Path) -> bool:
         """Validate that this is a VersaStudio .par file."""
@@ -199,14 +202,43 @@ class VersaStudioParser(BaseParser):
         # FILTER OUT STRUCTURAL ACTIONS AT PARSE TIME
         if is_structural_action(name):
             # Don't store structural actions - they won't be in self.actions
+            # But capture loop iteration info before filtering
+            if 'Loop #' in name and 'Number of Iterations' in parameters:
+                try:
+                    iterations = int(parameters['Number of Iterations'])
+                    self.loop_iterations[name] = iterations
+                    if self.debug_structural_parsing:
+                        print(f"🔄 Captured loop: {name} → {iterations} iterations")
+                except ValueError:
+                    pass
+                    
+            if self.debug_structural_parsing:
+                print(f"🚫 Filtered structural: Action{action_id} ({name})")
             return None
 
         # Extract parent action if specified
         parent_id = None
+        parent_loop_name = None
         if 'ParentNode' in parameters:
-            parent_match = re.search(r'Action(\d+)', parameters['ParentNode'])
+            parent_node = parameters['ParentNode']
+            parent_match = re.search(r'Action(\d+)', parent_node)
             if parent_match:
                 parent_id = int(parent_match.group(1))
+            # Handle string parent nodes like "Common", "Loop #2"
+            elif parent_node == 'Common':
+                parent_id = None  # Top-level action
+            elif 'Loop #' in parent_node:
+                # Store loop name for later resolution
+                parent_loop_name = parent_node
+                parent_id = None  # Will be resolved in execution sequence building
+
+
+        # Store parent loop name in parameters for execution sequence building
+        if parent_loop_name:
+            parameters['_parent_loop'] = parent_loop_name
+
+        if self.debug_structural_parsing:
+            print(f"✅ Stored experimental: Action{action_id} ({name}) → continuous_index {self.experimental_action_counter}, parent_loop={parent_loop_name}")
 
         return ActionDefinition(
             action_id=action_id,
@@ -392,40 +424,57 @@ class VersaStudioParser(BaseParser):
 
         return combined
     
-    def _build_execution_sequence(self) -> List[Tuple[int, ActionDefinition, str]]:
+    def _build_execution_sequence(self) -> List[Tuple[int, ActionDefinition, str, int]]:
         """Build execution sequence from ParentNode relationships."""
         if not self.actions:
             return []
         
-        # Group actions by parent_id
+        # Group actions by parent type
         top_level_actions = []    # parent_id = None (Common) 
-        loop_groups = {}          # grouped by parent_id
+        loop_groups = {}          # grouped by loop name
         
         for continuous_index, action in self.actions.items():
-            if action.parent_action_id is None:
-                top_level_actions.append((continuous_index, action))
+            parent_loop = action.parameters.get('_parent_loop')
+            
+            if parent_loop:
+                # Action belongs to a loop
+                if parent_loop not in loop_groups:
+                    loop_groups[parent_loop] = []
+                loop_groups[parent_loop].append((continuous_index, action))
             else:
-                parent_id = action.parent_action_id
-                if parent_id not in loop_groups:
-                    loop_groups[parent_id] = []
-                loop_groups[parent_id].append((continuous_index, action))
+                # Top-level action (Common parent or no parent)
+                top_level_actions.append((continuous_index, action))
         
         # Sort within each group by original action_id to maintain VersaStudio order
         top_level_actions.sort(key=lambda x: x[1].action_id)
-        for parent_id in loop_groups:
-            loop_groups[parent_id].sort(key=lambda x: x[1].action_id)
+        for loop_name in loop_groups:
+            loop_groups[loop_name].sort(key=lambda x: x[1].action_id)
         
-        # Build execution sequence: top-level first, then loops
+        # Build execution sequence: top-level first, then expanded loops
         execution_sequence = []
         
         # Add top-level actions (execute once)
         for continuous_index, action in top_level_actions:
-            execution_sequence.append((continuous_index, action, 'top_level'))
+            execution_sequence.append((continuous_index, action, 'top_level', 1))
         
-        # Add loop actions (will repeat based on iterations)
-        for parent_id in sorted(loop_groups.keys()):
-            for continuous_index, action in loop_groups[parent_id]:
-                execution_sequence.append((continuous_index, action, f'loop_{parent_id}'))
+        # Add loop actions (expand based on iterations)
+        for loop_name in sorted(loop_groups.keys()):
+            loop_iterations = self.loop_iterations.get(loop_name, 1)  # Default to 1 if not found
+            loop_actions = loop_groups[loop_name]
+            
+            # Repeat the loop actions for each iteration
+            for iteration in range(loop_iterations):
+                for continuous_index, action in loop_actions:
+                    execution_sequence.append((continuous_index, action, f'loop_{loop_name}', iteration + 1))
+        
+        if self.debug_structural_parsing:
+            print(f"\n🔄 Execution Sequence Built:")
+            print(f"   Top-level actions: {len(top_level_actions)}")
+            print(f"   Loop groups: {list(loop_groups.keys())}")
+            print(f"   Loop iterations: {self.loop_iterations}")
+            print(f"   Total expanded segments: {len(execution_sequence)}")
+            for continuous_index, action, group_type, iteration in execution_sequence:
+                print(f"   {group_type}: Action{action.action_id} ({action.name}) → iteration {iteration}")
         
         return execution_sequence
     
@@ -449,8 +498,8 @@ class VersaStudioParser(BaseParser):
         
         segment_counter = 0
         
-        # Process execution sequence
-        for continuous_index, action, group_type in execution_sequence:
+        # Process expanded execution sequence
+        for continuous_index, action, group_type, iteration in execution_sequence:
             mapping_data['segment_number'].append(segment_counter)
             mapping_data['technique_name'].append(action.name)
             mapping_data['fundamental_technique'].append(map_technique_name(action.name))
@@ -459,21 +508,48 @@ class VersaStudioParser(BaseParser):
         # Create mapping DataFrame
         mapping_df = pl.DataFrame(mapping_data)
         
-        # Debug output (can be removed in production)
-        # print(f"Debug - Execution Sequence:")
-        # for continuous_index, action, group_type in execution_sequence:
-        #     print(f"  {group_type}: Action{action.action_id} ({action.name}) → continuous_index {continuous_index}")
-        # 
-        # print(f"Debug - Segment Mapping:")
-        # print(mapping_df)
         
         return mapping_df
     
     def _add_technique_mapping(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Add technique names using execution sequence mapping."""
+        """Add technique names using both ActionId and execution sequence mapping."""
         if df.is_empty():
             return df
         
+        # Method 1: ActionId-based mapping (simple, direct, partial coverage)
+        df_with_actionid = self._add_actionid_technique_mapping(df)
+        
+        # Method 2: Execution sequence mapping (complete, complex)
+        df_with_hierarchy = self._add_hierarchy_technique_mapping(df_with_actionid)
+        
+        return df_with_hierarchy
+    
+    def _add_actionid_technique_mapping(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Add ActionId-based technique mapping (simple, direct method)."""
+        if 'ActionId' not in df.columns:
+            # Add default columns if ActionId not available
+            df = df.with_columns([
+                pl.lit('Unknown').alias('technique_name_actionid'),
+                pl.lit('UNKNOWN').alias('fundamental_technique_actionid')
+            ])
+            return df
+        
+        # Create ActionId → technique mapping using Polars
+        df = df.with_columns([
+            # Direct ActionId mapping
+            pl.col('ActionId').map_elements(
+                lambda x: map_actionid_to_technique(x) if x is not None else 'UNKNOWN',
+                return_dtype=pl.Utf8
+            ).alias('fundamental_technique_actionid'),
+            
+            # Keep ActionId as technique name for now (can be enhanced later)
+            pl.format('ActionId_{}', pl.col('ActionId')).alias('technique_name_actionid')
+        ])
+        
+        return df
+    
+    def _add_hierarchy_technique_mapping(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Add hierarchy-based technique mapping (complex, complete method)."""
         # Build segment mapping from execution sequence
         mapping_df = self._build_segment_mapping()
         
@@ -498,6 +574,15 @@ class VersaStudioParser(BaseParser):
             pl.col('technique_name').fill_null('Unknown'),
             pl.col('fundamental_technique').fill_null('UNKNOWN')
         ])
+        
+        # Prefer ActionId mapping when available, fall back to hierarchy mapping
+        if 'fundamental_technique_actionid' in df.columns:
+            df = df.with_columns([
+                pl.when(pl.col('fundamental_technique_actionid') != 'UNKNOWN')
+                .then(pl.col('fundamental_technique_actionid'))
+                .otherwise(pl.col('fundamental_technique'))
+                .alias('fundamental_technique_final')
+            ])
         
         return df
     
@@ -543,6 +628,10 @@ class VersaStudioParser(BaseParser):
         # Extract timestamp
         timestamp = self._extract_timestamp()
 
+        # Debug: Show execution sequence if debug mode enabled
+        if self.debug_structural_parsing:
+            self._build_execution_sequence()  # This will print debug output
+
         # Combine all segment data with technique mapping (VersaStudio format)
         # NOTE: Technique mapping now happens inside _combine_segments()
         combined_data = self._combine_segments()
@@ -565,7 +654,7 @@ class VersaStudioParser(BaseParser):
         metadata = self._extract_metadata()
         # Add validation results and ActionId mapping for database building
         metadata['mapping_validation'] = validation_results
-        metadata['actionid_to_technique_database'] = validation_results['actionid_to_technique_mapping']
+        metadata['actionid_to_technique_database'] = validation_results.get('actionid_to_technique_mapping', [])
 
         return DataFile(
             file_path=file_path,

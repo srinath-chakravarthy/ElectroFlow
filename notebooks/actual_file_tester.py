@@ -34,12 +34,12 @@ from core.parsers import VersaStudioParser
 from analysis.analytics import FundamentalAnalytics
 
 
-def parse_single_file(file_path: Path) -> DataFile:
+def parse_single_file(file_path: Path, enable_debug_output: bool = False) -> DataFile:
     """Parse a single .par file using the universal system."""
     print(f"Parsing {file_path.name}...")
     
-    # Use VersaStudio parser directly
-    parser = VersaStudioParser()
+    # Use VersaStudio parser directly (with optional debug output)
+    parser = VersaStudioParser(debug_structural_parsing=enable_debug_output)
     
     if not parser.validate_file(file_path):
         raise ValueError(f"File validation failed: {file_path}")
@@ -392,7 +392,9 @@ def main(args):
         if len(args.files) == 1:
             # Single file analysis
             print("=== SINGLE FILE ANALYSIS ===")
-            data_file = parse_single_file(args.files[0])
+            # Enable debug output for scenarios 6 and 7
+            enable_debug = hasattr(args, '_debug_scenario') and getattr(args, '_debug_scenario', 0) in [6, 7]
+            data_file = parse_single_file(args.files[0], enable_debug_output=enable_debug)
 
             # Run analytics if requested
             if args.show_analytics:
@@ -466,19 +468,82 @@ if __name__ == "__main__":
     debug_mode = True  # Set to False for command line, True for API testing
 
     if debug_mode:
-        debug_args = [
-            '../data/measurement_groups/GITT_EIS_Charge_cycle1_Channel 2.par',
-            '--show-analytics',
-            '--output', '../data/measurement_groups/results',
-            '--export-parquet',
-            '--verbose'
-        ]
-        print("=== DEBUG MODE - API TESTING ===")
-        print(f"Testing with: {debug_args[0]}")
-        print("Change debug_mode = False for command line usage")
+        # ============= DEBUG TEST SCENARIOS =============
+        # Choose a test scenario by setting debug_scenario number
+        debug_scenario = 7  # Change this number to test different scenarios
+        
+        debug_scenarios = {
+            1: {
+                'name': 'Nested Structure Parsing - Complex Hierarchy',
+                'args': ['../test_nested_structure.par', '--no-plot', '--verbose'],
+                'description': 'Test complex nested loops (Loop #3 inside Loop #2), structural filtering'
+            },
+            2: {
+                'name': 'Real Data - GITT EIS Charge',
+                'args': ['../data/measurement_groups/GITT_EIS_Charge_cycle1_Channel 2.par', '--no-plot'],
+                'description': 'Test real data file with 948k points, segment mapping validation'
+            },
+            3: {
+                'name': 'Real Data with Analytics',
+                'args': ['../data/measurement_groups/GITT_EIS_Charge_cycle1_Channel 2.par', '--show-analytics', '--no-plot'],
+                'description': 'Test real data with fundamental analytics engine'
+            },
+            4: {
+                'name': 'Nested Structure with Plotting',
+                'args': ['../test_nested_structure.par', '--verbose'],
+                'description': 'Test nested structure with visualization (no data segments expected)'
+            },
+            5: {
+                'name': 'Real Data with Export',
+                'args': ['../data/measurement_groups/GITT_EIS_Charge_cycle1_Channel 2.par', '--export-parquet', '--no-plot', '--output', './debug_output'],
+                'description': 'Test real data with parquet export to debug_output folder'
+            },
+            6: {
+                'name': 'Nested Structure with Debug Output',
+                'args': ['../test_nested_structure.par', '--no-plot', '--verbose'],
+                'description': 'Test nested structure with detailed structural parsing debug output'
+            },
+            7: {
+                'name': 'Real Data with Debug Output',
+                'args': ['../data/measurement_groups/GITT_EIS_Charge_cycle1_Channel 2.par', '--no-plot', '--verbose'],
+                'description': 'Test real data with structural parsing debug output (first 10 actions only)'
+            }
+        }
+        
+        # Display available scenarios
+        print("=== DEBUG MODE - STRUCTURAL PARSING TESTING ===")
+        print("Available test scenarios:")
+        for num, scenario in debug_scenarios.items():
+            marker = ">>> " if num == debug_scenario else "    "
+            print(f"{marker}{num}. {scenario['name']}")
+            print(f"       {scenario['description']}")
+            print(f"       Args: {' '.join(scenario['args'])}")
+            print()
+        
+        # Execute selected scenario
+        if debug_scenario in debug_scenarios:
+            selected = debug_scenarios[debug_scenario]
+            print(f"=== EXECUTING SCENARIO {debug_scenario}: {selected['name']} ===")
+            print(f"Description: {selected['description']}")
+            print(f"Args: {' '.join(selected['args'])}")
+            print()
+            args = create_parser().parse_args(selected['args'])
+            # Store debug scenario number for reference
+            args._debug_scenario = debug_scenario
+        else:
+            print(f"❌ Invalid debug_scenario: {debug_scenario}")
+            print(f"Available scenarios: {list(debug_scenarios.keys())}")
+            exit(1)
+            
+        print("💡 PyCharm Debug Tips:")
+        print("   - Set breakpoints in src/core/parsers.py:")
+        print("     * _parse_action() (~line 181) - action filtering")
+        print("     * _build_execution_sequence() (~line 414) - loop grouping") 
+        print("     * _build_segment_mapping() (~line 450) - segment mapping")
+        print("   - Watch variables: self.actions, self.experimental_action_counter")
+        print("   - Check execution_sequence for proper loop hierarchy")
         print()
         
-        args = create_parser().parse_args(debug_args)
     else:
         args = create_parser().parse_args()
 
