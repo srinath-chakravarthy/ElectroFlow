@@ -21,6 +21,7 @@ if str(src_path) not in sys.path:
 from core.database import DatabaseManager
 from io_utils.storage_v2 import DatabaseStorageManager
 from core.parsers import VersaStudioParser
+from analysis.group_analytics import GroupAnalytics
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class BackendAPI:
         self.db = DatabaseManager(self.db_path)
         self.storage = DatabaseStorageManager(self.data_dir, self.db_path)
         self.parser = VersaStudioParser()
+        self.group_analytics = GroupAnalytics(self.storage)
         
         logger.info(f"BackendAPI initialized with data_dir: {self.data_dir}")
 
@@ -701,6 +703,150 @@ class BackendAPI:
             }
         except Exception as e:
             logger.error(f"Failed to backup database: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    # Group analytics operations
+    def analyze_group(self, group_id: int) -> Dict[str, Any]:
+        """
+        Analyze a technique group and return comprehensive results.
+        
+        Args:
+            group_id: Database ID of the group to analyze
+            
+        Returns:
+            Dict with success status and analysis results
+        """
+        try:
+            result = self.group_analytics.analyze_group(group_id)
+            if result:
+                return {
+                    'success': True,
+                    'analysis_result': {
+                        'group_id': result.group_id,
+                        'group_name': result.group_name,
+                        'group_type': result.group_type,
+                        'technique_count': result.technique_count,
+                        'total_points': result.total_points,
+                        'time_span_hours': result.time_span_hours,
+                        'analysis_results': result.analysis_results,
+                        'quality_metrics': result.quality_metrics,
+                        'computed_at': result.computed_at
+                    }
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f"Group {group_id} not found or analysis failed"
+                }
+        except Exception as e:
+            logger.error(f"Failed to analyze group {group_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def compare_groups(self, group_ids: List[int]) -> Dict[str, Any]:
+        """
+        Compare multiple groups of the same type.
+        
+        Args:
+            group_ids: List of group IDs to compare
+            
+        Returns:
+            Dict with success status and comparison results
+        """
+        try:
+            if len(group_ids) < 2:
+                return {
+                    'success': False,
+                    'error': "At least 2 groups required for comparison"
+                }
+            
+            comparison_result = self.group_analytics.get_group_comparison(group_ids)
+            return {
+                'success': True,
+                'comparison_result': comparison_result
+            }
+        except Exception as e:
+            logger.error(f"Failed to compare groups {group_ids}: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def get_group_analytics_summary(self, cell_id: int) -> Dict[str, Any]:
+        """
+        Get analytics summary for all groups in a cell.
+        
+        Args:
+            cell_id: Cell database ID
+            
+        Returns:
+            Dict with success status and groups analytics summary
+        """
+        try:
+            groups = self.db.get_cell_groups(cell_id)
+            if not groups:
+                return {
+                    'success': True,
+                    'groups_summary': [],
+                    'message': "No groups found for this cell"
+                }
+            
+            groups_summary = []
+            for group in groups:
+                try:
+                    # Quick analysis for summary
+                    analysis_result = self.group_analytics.analyze_group(group['id'])
+                    if analysis_result:
+                        summary_item = {
+                            'group_id': group['id'],
+                            'group_name': group['group_name'],
+                            'group_type': group['group_type'],
+                            'technique_count': analysis_result.technique_count,
+                            'total_points': analysis_result.total_points,
+                            'time_span_hours': round(analysis_result.time_span_hours, 2),
+                            'overall_quality': round(analysis_result.quality_metrics.get('overall_quality', 0.0), 3),
+                            'has_analysis': True
+                        }
+                    else:
+                        # Fallback for groups that can't be analyzed
+                        summary_item = {
+                            'group_id': group['id'],
+                            'group_name': group['group_name'],
+                            'group_type': group['group_type'],
+                            'technique_count': len(group.get('techniques', [])),
+                            'total_points': 0,
+                            'time_span_hours': 0,
+                            'overall_quality': 0.0,
+                            'has_analysis': False
+                        }
+                    
+                    groups_summary.append(summary_item)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to analyze group {group['id']}: {e}")
+                    # Add group with minimal info
+                    groups_summary.append({
+                        'group_id': group['id'],
+                        'group_name': group['group_name'],
+                        'group_type': group['group_type'],
+                        'technique_count': len(group.get('techniques', [])),
+                        'error': str(e),
+                        'has_analysis': False
+                    })
+            
+            return {
+                'success': True,
+                'groups_summary': groups_summary,
+                'total_groups': len(groups_summary)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get group analytics summary for cell {cell_id}: {e}")
             return {
                 'success': False,
                 'error': str(e)
