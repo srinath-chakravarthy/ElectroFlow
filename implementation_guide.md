@@ -1,11 +1,11 @@
-dont # Implementation Guide - Battery Data Analyzer
+# Implementation Guide - Battery Data Analyzer
 
 **Target Audience**: Developers working on the battery data analyzer system  
-**Last Updated**: August 17, 2025
+**Last Updated**: August 17, 2025 (Schema Update)
 
 ## System Overview
 
-The Battery Data Analyzer follows a modular architecture with clear separation between parsing, analytics, storage, and user interfaces. The system now uses SQLite database backend for metadata storage and Panel+Plotly UI for cell preprocessing and data management. Designed for extensibility to support multiple instrument types while maintaining a universal data schema.
+The Battery Data Analyzer follows a modular architecture with refined 21-column universal schema focused on management and analytics. Uses SQLite database backend with temperature metadata support and Panel+Plotly UI for cell preprocessing. Supports VersaStudio .par.csv calibrated data processing with applied potential configuration.
 
 ## Code Organization
 
@@ -49,10 +49,11 @@ src/
 - Plotly integration for large dataset visualization
 - Default directory: /Users/srinathchakravarthy/
 
-**4. Universal Schema Conversion**
-- All parsers output to same 32-column universal schema
-- Instrument-specific mapping functions handle column translation
-- Missing columns filled with appropriate null values
+**4. Refined Universal Schema (21 Columns)**
+- Focused on essential measurements and analytics (not instrumentation debugging)
+- VersaStudio .par.csv calibrated data mapping
+- BioLogic compatibility with avg columns
+- Temperature as file-level metadata with database storage
 
 **5. Pipeline Architecture**
 - Clear separation: Parse → Analyze → Store → UI
@@ -75,7 +76,7 @@ CREATE TABLE cells (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Files table  
+-- Files table (UPDATED with temperature support)
 CREATE TABLE files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cell_id INTEGER NOT NULL,
@@ -86,12 +87,14 @@ CREATE TABLE files (
     file_path TEXT NOT NULL,
     processed_path TEXT,
     analysis_path TEXT,
+    temperature_c REAL, -- File-level temperature metadata
     upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     processing_status TEXT DEFAULT 'uploaded', -- 'uploaded', 'processing', 'completed', 'failed'
+    metadata_json TEXT, -- Additional file metadata (applied_potential_interpretation, etc.)
     FOREIGN KEY (cell_id) REFERENCES cells (id) ON DELETE CASCADE
 );
 
--- Technique segments table
+-- Technique segments table (UPDATED with temperature inheritance)
 CREATE TABLE technique_segments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_id TEXT NOT NULL,
@@ -102,6 +105,8 @@ CREATE TABLE technique_segments (
     start_time_s REAL,
     end_time_s REAL,
     point_count INTEGER,
+    temperature_c REAL, -- Segment-level temperature (inherits from file-level)
+    analysis_results_json TEXT, -- Segment-specific analysis results
     FOREIGN KEY (file_id) REFERENCES files (file_id) ON DELETE CASCADE
 );
 
@@ -253,35 +258,49 @@ if __name__ == "__main__":
     pn.serve(app.serve(), port=5007, show=True)
 ```
 
-## Dual File Processing Implementation
+## VersaStudio .par.csv Processing (UPDATED)
 
-### VersaStudio Parser Updates
+### Calibrated Data Processing
 ```python
-# src/core/parsers.py - Enhanced for dual file processing
-class VersaStudioParser(BaseParser):
-    def parse_dual_files(self, par_path: Path, csv_path: Path) -> DataFile:
-        """Parse both .par and .par.csv files for complete data"""
-        
-        # Parse .par for technique sequence and ActionId mapping
-        par_data = self.parse_structure_only(par_path)
-        
-        # Parse .par.csv for calibrated measurement data
-        csv_data = self.parse_calibrated_csv(csv_path)
-        
-        # Combine: technique mapping from .par + calibrated data from .csv
-        return self.merge_dual_file_data(par_data, csv_data)
+# VersaStudio .par.csv → Universal column mapping (calibrated export data)
+VERSASTUDIO_CSV_MAPPING = {
+    # Core measurements from .par.csv export
+    'Potential (V)': 'potential_v',
+    'Current (A)': 'current_a', 
+    'Applied Potential (V)': 'potential_applied_v',
+    'Elapsed Time (s)': 'time_s',
     
-    def parse_calibrated_csv(self, csv_path: Path) -> pl.DataFrame:
-        """Parse VersaStudio exported .par.csv file (calibrated data)"""
-        # Read CSV with proper column detection
-        # Apply VersaStudio CSV → Universal schema mapping
-        # Validate data quality and calibration markers
-        
-    def validate_dual_files(self, par_path: Path, csv_path: Path) -> bool:
-        """Validate that .par and .par.csv files are compatible"""
-        # Check timestamps match
-        # Verify segment counts align
-        # Validate measurement compatibility
+    # EIS measurements from .par.csv export (CALIBRATED)
+    'Frequency (Hz)': 'frequency_hz',
+    'Zre (ohms)': 'impedance_real_ohm',
+    'Zim (ohms)': 'impedance_imag_ohm',
+    'Phase of Z (deg)': 'impedance_phase_deg',
+    
+    # Multi-electrode measurements
+    'CE-RE Potential (V)': 'ce_re_potential_v',
+    
+    # Experimental context
+    'ActionID': 'technique_id',
+    'Segment': 'segment_number',
+    'Point': 'point_number',
+}
+```
+
+### Temperature and Configuration Support
+```python
+# File upload with metadata
+file_metadata = {
+    'temperature_c': 25.5,  # Optional temperature input
+    'applied_potential_interpretation': '2-electrode WE-CE voltage'  # Default
+}
+
+# Upload options in UI
+applied_potential_options = [
+    "2-electrode WE-CE voltage",     # Default for battery measurements
+    "3-electrode WE-RE voltage",     # Working vs reference
+    "3-electrode CE-RE voltage",     # Counter vs reference
+    "Custom configuration"
+]
 ```
 
 ## Adding New Instrument Parsers

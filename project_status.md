@@ -1,22 +1,22 @@
 # Battery Data Analyzer - Project Status Report
 
 **Generated**: August 17, 2025  
-**Implementation Phase**: Dual Mapping System Complete  
-**Git Commit**: d3dd0e9 - Loop-aware segment mapping and dual ActionId/hierarchy technique mapping
+**Implementation Phase**: Panel UI with Refined Schema Complete  
+**Git Commit**: [Current] - Schema refinement, temperature metadata, and Panel UI enhancements
 
 ## Executive Summary
 
-Successfully implemented a dual-mapping technique identification system that combines ActionId-based direct lookup with hierarchical structural parsing. The system now correctly maps complex loop structures (123 total segments vs previous 10) and provides both immediate ActionId recognition and complete fallback coverage. Validated with real data files containing 949k+ data points.
+Successfully refined the universal schema from 32 to 21 focused columns for management/analytics (not instrumentation debugging). Implemented temperature as file-level metadata with database storage, applied potential configuration UI with 2-electrode default, and VersaStudio .par.csv calibrated data support. Panel UI fully functional with SQLite backend and comprehensive file upload workflows.
 
 ## Implementation Status Overview
 
-### ✅ Phase 1: Universal Schema & Parsing (COMPLETED)
-- **Universal 32-column schema** implemented with VersaStudio compatibility
-- **Structural parsing system** with loop expansion and continuous 0-based indexing
-- **Dual technique mapping**: ActionId-based (primary) + hierarchy-based (fallback)
-- **Loop-aware segment mapping**: 123 total segments vs previous 10 unique actions
-- **Absolute timestamp calculation** from file metadata
-- **Computed columns**: power, impedance magnitude/phase, timestamps
+### ✅ Phase 1: Refined Universal Schema (UPDATED - COMPLETED)
+- **Universal 21-column schema** focused on management/analytics (not debugging)
+- **VersaStudio .par.csv calibrated data mapping** with exact column names
+- **BioLogic compatibility** with `potential_avg_v` and `current_avg_a` columns
+- **Temperature as file-level metadata** with database storage and inheritance
+- **Applied potential configuration** with 2-electrode WE-CE default
+- **Structural parsing system** with loop expansion and technique mapping maintained
 
 ### ✅ Phase 2: Fundamental Analytics Engine (COMPLETED)
 - **CC Analysis**: Capacity (Ah), energy (Wh), efficiency calculations
@@ -26,55 +26,96 @@ Successfully implemented a dual-mapping technique identification system that com
 - **EIS Analysis**: Basic impedance characteristics, resistance estimates
 - **Quality Metrics**: R², RMSE, data completeness, fit success indicators
 
-### ✅ Phase 3: Cell-Based Storage System (COMPLETED)
-- **Individual file processing**: Parse → Analyze → Store pipeline
-- **Cell-centric organization**: Independent cell directories
-- **Duplicate handling**: User choice (replace/keep_both/skip)
-- **Multi-format storage**: Parquet + JSON + CSV exports
-- **Automatic EIS exports**: Relaxis-compatible CSV format
+### ✅ Phase 3: SQLite Database Backend (UPDATED - COMPLETED)
+- **Database schema** with temperature support and metadata storage
+- **File tracking**: Processing status, error handling, and referential integrity
+- **Database migration**: Automatic schema updates for existing installations
+- **Cell organization**: Atomic file movement between cells
+- **Metadata storage**: Applied potential configuration and temperature
 
-### ✅ Phase 4: CLI Interface & Validation (COMPLETED)
-- **Complete CLI**: Upload, analyze, list, info, export commands
-- **Real data validation**: 948,974 data points successfully processed
-- **Working technique detection**: ActionId → technique mapping verified
-- **Export functionality**: CSV, parquet, EIS-specific formats
-- **Performance validation**: Large file handling confirmed
+### ✅ Phase 4: Panel UI Implementation (NEW - COMPLETED)
+- **Panel + Plotly UI**: Tabbed interface with file browser and visualization
+- **Cell Management Tab**: Create/manage battery cells with metadata
+- **File Association Tab**: Upload files with temperature and configuration options
+- **Data Processing Tab**: View processed data and analysis results
+- **Dual file support**: .par (technique mapping) + .par.csv (calibrated data)
+- **Real-time processing**: Status monitoring and error reporting
 
 ## System Architecture (As-Built)
 
-### Universal Schema (32 Columns)
+### Refined Universal Schema (21 Columns - UPDATED)
 ```python
-# Core Time & Indexing (6 columns)
-'time_s', 'timestamp', 'segment_number', 'point_number', 'loop_number', 'battery_cycle'
+# Core Time & Indexing (4 columns)
+'time_s', 'timestamp', 'segment_number', 'point_number'
 
 # Electrochemical Core (6 columns)  
-'potential_v', 'current_a', 'potential_applied_v', 'current_applied_a',
-'potential_avg_v', 'current_avg_a'
+'potential_v', 'current_a', 'potential_applied_v', 'potential_avg_v', 'current_avg_a',
+'ce_re_potential_v'
 
-# Battery Analytics (4 columns)
-'charge_capacity_ah', 'energy_wh', 'power_w', 'temperature_c'
+# EIS Measurements (4 columns)
+'frequency_hz', 'impedance_real_ohm', 'impedance_imag_ohm', 'impedance_phase_deg'
 
-# EIS (5 columns)
-'frequency_hz', 'impedance_real_ohm', 'impedance_imag_ohm', 
-'impedance_mag_ohm', 'impedance_phase_deg'
+# Calculated Analytics (3 columns)
+'power_w', 'charge_capacity_ah', 'energy_wh'
 
-# Status & Advanced (8 columns)
-'current_range', 'potential_range', 'mode', 'technique_id', 'status_flags',
-'ce_potential_v', 'cell_potential_v', 'ac_amplitude_v', 'aux_voltage_v'
+# Environmental (1 column)
+'temperature_c'
 
-# Technique Tracking (2 columns)
-'technique_name', 'fundamental_technique'
+# Experimental Context (3 columns)
+'technique_id', 'technique_name', 'fundamental_technique'
 ```
 
-### Cell-Based Storage Structure
+### VersaStudio .par.csv Mapping (NEW)
+```python
+VERSASTUDIO_CSV_MAPPING = {
+    'Potential (V)': 'potential_v',
+    'Current (A)': 'current_a', 
+    'Applied Potential (V)': 'potential_applied_v',
+    'Elapsed Time (s)': 'time_s',
+    'Frequency (Hz)': 'frequency_hz',
+    'Zre (ohms)': 'impedance_real_ohm',
+    'Zim (ohms)': 'impedance_imag_ohm',
+    'Phase of Z (deg)': 'impedance_phase_deg',
+    'CE-RE Potential (V)': 'ce_re_potential_v',
+    'ActionID': 'technique_id',
+    'Segment': 'segment_number',
+    'Point': 'point_number'
+}
 ```
-data/cells/CELL_ID/
-├── raw/                    # Original uploaded files (.par)
-├── processed/              # Universal schema parquet files
-├── analysis_results/       # Analysis JSON with metrics
-├── exports/relaxis/        # EIS CSV exports for Relaxis
-├── user_groups/           # Future: User-defined groupings
-└── metadata.json          # Cell-level metadata
+
+### Storage Structure (UPDATED with Database)
+```
+data/
+├── battery_analyzer.db     # SQLite database (NEW)
+└── cells/CELL_ID/
+    ├── raw/                # Original files (.par, .par.csv)
+    ├── processed/          # Universal schema parquet files
+    ├── analysis_results/   # Analysis JSON with metrics
+    ├── exports/relaxis/    # EIS CSV exports for Relaxis
+    └── user_groups/        # Future: User-defined groupings
+```
+
+### Database Schema (NEW)
+```sql
+-- Files table with temperature support
+CREATE TABLE files (
+    id INTEGER PRIMARY KEY,
+    cell_id INTEGER NOT NULL,
+    file_id TEXT UNIQUE NOT NULL,
+    temperature_c REAL,           -- File-level temperature
+    metadata_json TEXT,           -- Applied potential config, etc.
+    processing_status TEXT,
+    FOREIGN KEY (cell_id) REFERENCES cells (id)
+);
+
+-- Technique segments with temperature inheritance
+CREATE TABLE technique_segments (
+    id INTEGER PRIMARY KEY,
+    file_id TEXT NOT NULL,
+    temperature_c REAL,           -- Inherits from file level
+    analysis_results_json TEXT,
+    FOREIGN KEY (file_id) REFERENCES files (file_id)
+);
 ```
 
 ### Processing Pipeline
