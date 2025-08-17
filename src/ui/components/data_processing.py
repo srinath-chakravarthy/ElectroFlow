@@ -73,7 +73,7 @@ class DataProcessingTab(param.Parameterized):
         """Create active cell status display."""
         
         @pn.depends(self.param.active_cell_name, self.param.active_cell_id)
-        def get_status_display():
+        def get_status_display(*args):
             if self.active_cell_id:
                 return pn.pane.HTML(
                     f"""
@@ -117,7 +117,7 @@ class DataProcessingTab(param.Parameterized):
         """Create files selection section."""
         
         @pn.depends(self.param.active_cell_id, self.param.refresh_trigger)
-        def get_files_table():
+        def get_files_table(*args):
             if not self.active_cell_id:
                 return pn.pane.HTML(
                     "<p style='color: #666;'>No active cell selected</p>",
@@ -368,7 +368,7 @@ class DataProcessingTab(param.Parameterized):
         """Create existing groups section."""
         
         @pn.depends(self.param.active_cell_id, self.param.refresh_trigger)
-        def get_groups_table():
+        def get_groups_table(*args):
             if not self.active_cell_id:
                 return pn.pane.HTML(
                     "<p style='color: #666;'>No active cell selected</p>",

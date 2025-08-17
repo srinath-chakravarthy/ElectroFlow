@@ -191,7 +191,7 @@ class CellManagerTab(param.Parameterized):
         """Create reactive cells table with active cell selection."""
         
         @pn.depends(self.param.refresh_trigger)
-        def get_cells_table():
+        def get_cells_table(*args):
             """Get cells table widget."""
             result = self.api.get_all_cells()
             if result['success']:
@@ -254,7 +254,7 @@ class CellManagerTab(param.Parameterized):
         
         # Active cell status display
         @pn.depends(self.param.active_cell_name, self.param.active_cell_id)
-        def get_active_cell_status():
+        def get_active_cell_status(*args):
             if self.active_cell_id:
                 return pn.pane.HTML(
                     f"<p><strong>Active Cell:</strong> {self.active_cell_name} (ID: {self.active_cell_id})</p>",
@@ -289,7 +289,7 @@ class CellManagerTab(param.Parameterized):
         """Create reactive files table for the active cell."""
         
         @pn.depends(self.param.active_cell_id)
-        def get_active_cell_files():
+        def get_active_cell_files(*args):
             if not self.active_cell_id:
                 return pn.pane.HTML(
                     "<p style='color: #666;'>Select a cell to view its files</p>",
@@ -364,7 +364,7 @@ class CellManagerTab(param.Parameterized):
         self.active_cell_status.object = status_html
     
     @pn.depends('refresh_trigger', watch=True)
-    def refresh_cells_table(self):
+    def refresh_cells_table(self, *args):
         """Refresh the cells table when trigger changes."""
         # The table will refresh automatically due to the @pn.depends decorator
         pass
