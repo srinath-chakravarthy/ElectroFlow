@@ -282,6 +282,39 @@ class FileAssociationTab(param.Parameterized):
             width=200
         )
         
+        # Temperature input (file-level metadata)
+        temperature_input = pn.widgets.FloatInput(
+            name="Temperature (°C)",
+            value=None,
+            placeholder="Optional temperature",
+            width=200
+        )
+        
+        # Applied potential interpretation configuration
+        applied_potential_config = pn.widgets.Select(
+            name="Applied Potential Interpretation",
+            value="2-electrode WE-CE voltage",
+            options=[
+                "2-electrode WE-CE voltage", 
+                "3-electrode WE-RE voltage",
+                "3-electrode CE-RE voltage",
+                "Custom configuration"
+            ],
+            width=300
+        )
+        
+        # Configuration description
+        config_description = pn.pane.HTML(
+            """
+            <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                <strong>Default:</strong> 2-electrode (WE-CE) - Standard battery measurement<br>
+                <strong>3-electrode (WE-RE):</strong> Working electrode vs reference<br>
+                <strong>3-electrode (CE-RE):</strong> Counter electrode vs reference
+            </div>
+            """,
+            width=300
+        )
+        
         # Upload buttons
         upload_single_btn = pn.widgets.Button(
             name="Upload Single Files",
@@ -314,10 +347,18 @@ class FileAssociationTab(param.Parameterized):
             
             try:
                 file_paths = [Path(f) for f in self.selected_files]
+                
+                # Prepare upload options with temperature and applied potential config
+                upload_options = {
+                    'duplicate_handling': duplicate_handling.value,
+                    'temperature_c': temperature_input.value,
+                    'applied_potential_interpretation': applied_potential_config.value
+                }
+                
                 result = self.api.add_files_to_cell(
                     self.selected_cell, 
                     file_paths, 
-                    duplicate_handling.value
+                    upload_options
                 )
                 
                 if result['success']:
@@ -386,13 +427,20 @@ class FileAssociationTab(param.Parameterized):
             upload_dual_btn.disabled = True
             
             try:
+                # Prepare upload options with temperature and applied potential config
+                upload_options = {
+                    'duplicate_handling': duplicate_handling.value,
+                    'temperature_c': temperature_input.value,
+                    'applied_potential_interpretation': applied_potential_config.value
+                }
+                
                 results = []
                 for par_path, csv_path in dual_pairs:
                     result = self.api.add_dual_files_to_cell(
                         self.selected_cell,
                         par_path,
                         csv_path,
-                        duplicate_handling.value
+                        upload_options
                     )
                     results.append({
                         'par_file': par_path.name,
@@ -434,6 +482,9 @@ class FileAssociationTab(param.Parameterized):
             "### Upload to Cell",
             self.cell_selector,
             duplicate_handling,
+            temperature_input,
+            applied_potential_config,
+            config_description,
             pn.Row(upload_single_btn, upload_dual_btn),
             "### Upload Status",
             self.upload_status

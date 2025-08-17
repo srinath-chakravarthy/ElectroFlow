@@ -108,8 +108,11 @@ class DataProcessingTab(param.Parameterized):
             if self.selected_file:
                 self._update_data_displays(self.selected_file)
         
-        cell_selector.param.watch(on_cell_change, 'value')
-        file_selector.param.watch(on_file_change, 'value')
+        # Only set up watchers if we have actual widgets (not HTML error messages)
+        if hasattr(cell_selector, 'value'):
+            cell_selector.param.watch(on_cell_change, 'value')
+        if hasattr(file_selector, 'value'):
+            file_selector.param.watch(on_file_change, 'value')
         refresh_btn.on_click(refresh_data)
         
         return pn.Row(

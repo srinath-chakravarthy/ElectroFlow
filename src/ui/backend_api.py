@@ -198,18 +198,26 @@ class BackendAPI:
 
     # File management operations
     def add_files_to_cell(self, cell_name: str, file_paths: List[Path],
-                         user_choice: str = "ask") -> Dict[str, Any]:
+                         upload_options: Union[str, Dict[str, Any]] = "ask") -> Dict[str, Any]:
         """
         Add multiple files to cell with processing.
         
         Args:
             cell_name: Target cell name
             file_paths: List of file paths to upload
-            user_choice: Duplicate handling strategy
+            upload_options: Duplicate handling strategy (str) or full options dict
+                           with keys: duplicate_handling, temperature_c, applied_potential_interpretation
             
         Returns:
             Dict with success status and processing results
         """
+        # Handle backward compatibility - if string passed, convert to dict
+        if isinstance(upload_options, str):
+            upload_options = {'duplicate_handling': upload_options}
+        
+        user_choice = upload_options.get('duplicate_handling', 'ask')
+        temperature_c = upload_options.get('temperature_c')
+        applied_potential_config = upload_options.get('applied_potential_interpretation', '2-electrode WE-CE voltage')
         try:
             results = []
             successful_uploads = 0
@@ -240,9 +248,15 @@ class BackendAPI:
                         failed_uploads += 1
                         continue
                     
-                    # Upload file
+                    # Prepare file metadata
+                    file_metadata = {
+                        'temperature_c': temperature_c,
+                        'applied_potential_interpretation': applied_potential_config
+                    }
+                    
+                    # Upload file with metadata
                     file_id, status = self.storage.upload_file(
-                        file_path, cell_name, file_type, user_choice
+                        file_path, cell_name, file_type, user_choice, file_metadata
                     )
                     
                     if status != "skipped":
@@ -286,7 +300,7 @@ class BackendAPI:
             }
 
     def add_dual_files_to_cell(self, cell_name: str, par_path: Path, csv_path: Path,
-                              user_choice: str = "ask") -> Dict[str, Any]:
+                              upload_options: Union[str, Dict[str, Any]] = "ask") -> Dict[str, Any]:
         """
         Add dual .par and .par.csv files for calibrated processing.
         
@@ -294,11 +308,20 @@ class BackendAPI:
             cell_name: Target cell name
             par_path: Path to .par file
             csv_path: Path to .par.csv file
-            user_choice: Duplicate handling strategy
+            upload_options: Duplicate handling strategy (str) or full options dict
+                           with keys: duplicate_handling, temperature_c, applied_potential_interpretation
             
         Returns:
             Dict with success status and processing results
         """
+        # Handle backward compatibility - if string passed, convert to dict
+        if isinstance(upload_options, str):
+            upload_options = {'duplicate_handling': upload_options}
+        
+        user_choice = upload_options.get('duplicate_handling', 'ask')
+        temperature_c = upload_options.get('temperature_c')
+        applied_potential_config = upload_options.get('applied_potential_interpretation', '2-electrode WE-CE voltage')
+        
         try:
             # Validate dual files
             if not self.parser.validate_dual_files(par_path, csv_path):
@@ -307,9 +330,15 @@ class BackendAPI:
                     'error': f"Invalid dual file pair: {par_path.name} and {csv_path.name}"
                 }
             
-            # Upload dual files
+            # Prepare file metadata
+            file_metadata = {
+                'temperature_c': temperature_c,
+                'applied_potential_interpretation': applied_potential_config
+            }
+            
+            # Upload dual files with metadata
             file_ids, status = self.storage.upload_dual_files(
-                par_path, csv_path, cell_name, user_choice
+                par_path, csv_path, cell_name, user_choice, file_metadata
             )
             
             if status == "skipped":

@@ -103,7 +103,8 @@ class DatabaseStorageManager:
         return cell_id
 
     def upload_file(self, source_file_path: Path, cell_name: str, 
-                   file_type: str = "par", user_choice: str = "ask") -> Tuple[str, str]:
+                   file_type: str = "par", user_choice: str = "ask", 
+                   file_metadata: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
         """
         Upload a file to cell's raw directory with database tracking.
         
@@ -112,6 +113,7 @@ class DatabaseStorageManager:
             cell_name: Target cell name
             file_type: File type ('par' or 'par_csv')
             user_choice: Duplicate handling ("replace", "keep_both", "skip", "ask")
+            file_metadata: Optional metadata (temperature_c, applied_potential_interpretation, etc.)
             
         Returns:
             Tuple of (file_id, status) where status is "uploaded", "replaced", "skipped"
@@ -164,6 +166,16 @@ class DatabaseStorageManager:
         file_hash = calculate_file_hash(target_path)
         file_id = f"{cell_name}_{target_path.stem}"
         
+        # Prepare metadata with user-provided values
+        metadata = {
+            'upload_source': str(source_file_path),
+            'upload_timestamp': datetime.now().isoformat()
+        }
+        
+        # Add user-provided metadata if available
+        if file_metadata:
+            metadata.update(file_metadata)
+        
         # Add file to database
         file_info = {
             'file_id': file_id,
@@ -171,10 +183,8 @@ class DatabaseStorageManager:
             'file_type': file_type,
             'file_hash': file_hash,
             'file_path': str(target_path),
-            'metadata': {
-                'upload_source': str(source_file_path),
-                'upload_timestamp': datetime.now().isoformat()
-            }
+            'temperature_c': file_metadata.get('temperature_c') if file_metadata else None,
+            'metadata': metadata
         }
         
         self.db.add_file_to_cell(cell_id, file_info)
@@ -190,7 +200,7 @@ class DatabaseStorageManager:
         return file_id, status
 
     def upload_dual_files(self, par_path: Path, csv_path: Path, cell_name: str,
-                          user_choice: str = "ask") -> Tuple[List[str], str]:
+                          user_choice: str = "ask", file_metadata: Optional[Dict[str, Any]] = None) -> Tuple[List[str], str]:
         """
         Upload both .par and .par.csv files for dual processing.
         
@@ -199,6 +209,7 @@ class DatabaseStorageManager:
             csv_path: Path to .par.csv file  
             cell_name: Target cell name
             user_choice: Duplicate handling
+            file_metadata: Optional metadata (temperature_c, applied_potential_interpretation, etc.)
             
         Returns:
             Tuple of (file_ids, status)
@@ -207,9 +218,9 @@ class DatabaseStorageManager:
         if not self.versastudio_parser.validate_dual_files(par_path, csv_path):
             raise ValueError(f"Invalid dual file pair: {par_path.name} and {csv_path.name}")
         
-        # Upload both files
-        par_file_id, par_status = self.upload_file(par_path, cell_name, "par", user_choice)
-        csv_file_id, csv_status = self.upload_file(csv_path, cell_name, "par_csv", user_choice)
+        # Upload both files with shared metadata
+        par_file_id, par_status = self.upload_file(par_path, cell_name, "par", user_choice, file_metadata)
+        csv_file_id, csv_status = self.upload_file(csv_path, cell_name, "par_csv", user_choice, file_metadata)
         
         if par_status == "skipped" or csv_status == "skipped":
             return [], "skipped"

@@ -35,6 +35,7 @@ class DatabaseManager:
         """Context manager for database connections."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable dict-like access
+        conn.execute("PRAGMA foreign_keys = ON")  # Enable foreign key constraints
         try:
             yield conn
         finally:
@@ -72,6 +73,7 @@ class DatabaseManager:
                     file_path TEXT NOT NULL,
                     processed_path TEXT,
                     analysis_path TEXT,
+                    temperature_c REAL, -- File-level temperature metadata
                     upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     processing_status TEXT DEFAULT 'uploaded' 
                         CHECK (processing_status IN ('uploaded', 'processing', 'completed', 'failed')),
@@ -93,6 +95,7 @@ class DatabaseManager:
                     start_time_s REAL,
                     end_time_s REAL,
                     point_count INTEGER,
+                    temperature_c REAL, -- Segment-level temperature (inherits from file-level)
                     analysis_results_json TEXT, -- Segment-specific analysis results
                     FOREIGN KEY (file_id) REFERENCES files (file_id) ON DELETE CASCADE
                 )
@@ -130,9 +133,24 @@ class DatabaseManager:
         Args:
             target_version: Target schema version
         """
-        # Future implementation for schema migrations
-        # This allows adding new columns or tables without breaking existing data
-        pass
+        with self.get_connection() as conn:
+            # Add temperature_c column to files table if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE files ADD COLUMN temperature_c REAL")
+                logger.info("Added temperature_c column to files table")
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+                
+            # Add temperature_c column to technique_segments table if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE technique_segments ADD COLUMN temperature_c REAL")
+                logger.info("Added temperature_c column to technique_segments table")
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+            
+            conn.commit()
     
     # Cell operations
     def create_cell(self, cell_name: str, description: str = "", chemistry: str = "", 
@@ -259,7 +277,7 @@ class DatabaseManager:
             cell_id: Cell primary key
             file_info: Dictionary with file metadata
                 Required: file_id, original_filename, file_type, file_hash, file_path
-                Optional: processed_path, analysis_path, metadata
+                Optional: processed_path, analysis_path, temperature_c, metadata
                 
         Returns:
             file_id: Unique file identifier
@@ -278,13 +296,13 @@ class DatabaseManager:
             conn.execute("""
                 INSERT INTO files (
                     cell_id, file_id, original_filename, file_type, file_hash, file_path,
-                    processed_path, analysis_path, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    processed_path, analysis_path, temperature_c, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 cell_id, file_info['file_id'], file_info['original_filename'],
                 file_info['file_type'], file_info['file_hash'], file_info['file_path'],
                 file_info.get('processed_path'), file_info.get('analysis_path'),
-                metadata_json
+                file_info.get('temperature_c'), metadata_json
             ))
             conn.commit()
             logger.info(f"Added file to cell: {file_info['file_id']} → cell_id={cell_id}")

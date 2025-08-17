@@ -743,21 +743,30 @@ class VersaStudioParser(BaseParser):
         
         # Build execution sequence for technique mapping
         execution_sequence = self._build_execution_sequence()
-        segment_mapping = self._build_segment_mapping(execution_sequence)
+        segment_mapping = self._build_segment_mapping()
         
-        # Create technique mapping table
+        # Create technique mapping table from DataFrame
         technique_mapping = []
-        for segment_id, action_data in segment_mapping.items():
-            action_id = action_data.get('action_id')
-            action = self.actions.get(action_id) if action_id is not None else None
-            
-            mapping_entry = {
-                'segment_number': segment_id,
-                'action_id': action_id,
-                'technique_name': action.name if action else None,
-                'fundamental_technique': self._map_action_to_fundamental_technique(action_id, action.name if action else None)
-            }
-            technique_mapping.append(mapping_entry)
+        if not segment_mapping.is_empty():
+            for row in segment_mapping.iter_rows(named=True):
+                segment_number = row['segment_number']
+                technique_name = row['technique_name']
+                fundamental_technique = row['fundamental_technique']
+                
+                # Find corresponding action_id (simplified for now)
+                action_id = None
+                for action in self.actions.values():
+                    if action.name == technique_name:
+                        action_id = action.action_id
+                        break
+                
+                mapping_entry = {
+                    'segment_number': segment_number,
+                    'action_id': action_id,
+                    'technique_name': technique_name,
+                    'fundamental_technique': fundamental_technique
+                }
+                technique_mapping.append(mapping_entry)
         
         return {
             'technique_mapping': technique_mapping,
@@ -816,7 +825,8 @@ class VersaStudioParser(BaseParser):
         Returns:
             True if valid VersaStudio CSV format
         """
-        required_columns = ['Segment #', 'Point #', 'E(V)', 'I(A)', 'Elapsed Time(s)']
+        # Check for new .par.csv export column names
+        required_columns = ['Segment', 'Point', 'Potential (V)', 'Current (A)', 'Elapsed Time (s)']
         return all(col in df.columns for col in required_columns)
     
     def _map_csv_columns_to_universal(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -824,17 +834,17 @@ class VersaStudioParser(BaseParser):
         Map VersaStudio CSV columns to universal schema.
         
         Args:
-            df: Raw CSV DataFrame
+            df: Raw CSV DataFrame from .par.csv export
             
         Returns:
             DataFrame with universal schema columns
         """
-        # Use existing VersaStudio mapping
-        from .data_models import VERSASTUDIO_MAPPING
+        # Use VersaStudio CSV mapping for calibrated data
+        from .data_models import VERSASTUDIO_CSV_MAPPING
         
         # Create mapping for available columns
         column_mapping = {}
-        for vs_col, universal_col in VERSASTUDIO_MAPPING.items():
+        for vs_col, universal_col in VERSASTUDIO_CSV_MAPPING.items():
             if vs_col in df.columns:
                 column_mapping[vs_col] = universal_col
         
@@ -862,16 +872,8 @@ class VersaStudioParser(BaseParser):
             # Power calculation
             (pl.col('potential_v') * pl.col('current_a')).alias('power_w'),
             
-            # Impedance magnitude and phase (if impedance columns exist)
-            pl.when(pl.col('impedance_real_ohm').is_not_null() & pl.col('impedance_imag_ohm').is_not_null())
-            .then(((pl.col('impedance_real_ohm')**2 + pl.col('impedance_imag_ohm')**2)**0.5))
-            .otherwise(None)
-            .alias('impedance_mag_ohm'),
-            
-            pl.when(pl.col('impedance_real_ohm').is_not_null() & pl.col('impedance_imag_ohm').is_not_null())
-            .then((pl.col('impedance_imag_ohm') / pl.col('impedance_real_ohm')).arctan() * 180.0 / 3.14159)
-            .otherwise(None)
-            .alias('impedance_phase_deg')
+            # Note: charge_capacity_ah and energy_wh are calculated during analytics
+            # based on integration over technique segments, not raw data points
         ])
         
         return df

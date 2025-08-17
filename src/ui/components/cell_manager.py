@@ -153,7 +153,7 @@ class CellManagerTab(param.Parameterized):
     def _create_cells_table(self):
         """Create reactive cells table."""
         
-        @pn.depends(self.refresh_trigger)
+        @pn.depends(self.param.refresh_trigger)
         def get_cells_data():
             """Get cells data from backend."""
             result = self.api.get_all_cells()

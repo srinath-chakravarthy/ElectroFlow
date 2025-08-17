@@ -14,78 +14,65 @@ import hashlib
 import json
 
 
-# Universal 31-column schema for all instruments
+# Universal schema - focused on essential measurements and analytics
 UNIVERSAL_COLUMNS = [
-    # Core Time & Indexing (6 columns)
-    'time_s', 'timestamp', 'segment_number', 'point_number', 'loop_number', 'battery_cycle',
+    # Core Time & Indexing (4 columns)
+    'time_s', 'timestamp', 'segment_number', 'point_number',
     
-    # Electrochemical Core (6 columns)
-    'potential_v', 'current_a', 'potential_applied_v', 'current_applied_a',
-    'potential_avg_v', 'current_avg_a',
+    # Electrochemical Core (6 columns)  
+    'potential_v', 'current_a', 'potential_applied_v', 'potential_avg_v', 'current_avg_a',
+    'ce_re_potential_v',
     
-    # Battery Analytics (4 columns)
-    'charge_capacity_ah', 'energy_wh', 'power_w', 'temperature_c',
+    # EIS Measurements (4 columns)
+    'frequency_hz', 'impedance_real_ohm', 'impedance_imag_ohm', 'impedance_phase_deg',
     
-    # EIS (5 columns)
-    'frequency_hz', 'impedance_real_ohm', 'impedance_imag_ohm', 
-    'impedance_mag_ohm', 'impedance_phase_deg',
+    # Calculated Analytics (3 columns)
+    'power_w', 'charge_capacity_ah', 'energy_wh',
     
-    # Status & Advanced (8 columns)
-    'current_range', 'potential_range', 'mode', 'technique_id', 'status_flags',
-    'ce_potential_v', 'cell_potential_v', 'ac_amplitude_v', 'aux_voltage_v',
+    # Environmental (1 column)
+    'temperature_c',
     
-    # Technique Tracking (2 columns)
-    'technique_name', 'fundamental_technique'
+    # Experimental Context (3 columns)
+    'technique_id', 'technique_name', 'fundamental_technique'
 ]
 
 # Universal schema with explicit types
 UNIVERSAL_SCHEMA = {
-    # Core Time & Indexingok
+    # Core Time & Indexing
     'time_s': pl.Float64,
     'timestamp': pl.Datetime,
     'segment_number': pl.Int64,
     'point_number': pl.Int64,
-    'loop_number': pl.Int64,
-    'battery_cycle': pl.Int64,
     
-    # Electrochemical Core
+    # Electrochemical Core  
     'potential_v': pl.Float64,
     'current_a': pl.Float64,
     'potential_applied_v': pl.Float64,
-    'current_applied_a': pl.Float64,
     'potential_avg_v': pl.Float64,
     'current_avg_a': pl.Float64,
+    'ce_re_potential_v': pl.Float64,
     
-    # Battery Analytics
-    'charge_capacity_ah': pl.Float64,
-    'energy_wh': pl.Float64,
-    'power_w': pl.Float64,
-    'temperature_c': pl.Float64,
-    
-    # EIS
+    # EIS Measurements
     'frequency_hz': pl.Float64,
     'impedance_real_ohm': pl.Float64,
     'impedance_imag_ohm': pl.Float64,
-    'impedance_mag_ohm': pl.Float64,
     'impedance_phase_deg': pl.Float64,
     
-    # Status & Advanced
-    'current_range': pl.Int64,
-    'potential_range': pl.Int64,
-    'mode': pl.Utf8,
-    'technique_id': pl.Int64,
-    'status_flags': pl.Int64,
-    'ce_potential_v': pl.Float64,
-    'cell_potential_v': pl.Float64,
-    'ac_amplitude_v': pl.Float64,
-    'aux_voltage_v': pl.Float64,
+    # Calculated Analytics
+    'power_w': pl.Float64,
+    'charge_capacity_ah': pl.Float64,
+    'energy_wh': pl.Float64,
     
-    # Technique Tracking
+    # Environmental
+    'temperature_c': pl.Float64,
+    
+    # Experimental Context
+    'technique_id': pl.Int64,
     'technique_name': pl.Utf8,
     'fundamental_technique': pl.Utf8
 }
 
-# VersaStudio → Universal column mapping
+# VersaStudio .par → Universal column mapping (legacy for .par files)
 VERSASTUDIO_MAPPING = {
     # Time mappings
     'Elapsed Time(s)': 'time_s',
@@ -108,6 +95,32 @@ VERSASTUDIO_MAPPING = {
     'ADC Sync Input(V)': 'aux_voltage_v',
     
     # Computed columns will be added during processing
+}
+
+# VersaStudio .par.csv → Universal column mapping (calibrated export data)
+VERSASTUDIO_CSV_MAPPING = {
+    # Core measurements from .par.csv export
+    'Potential (V)': 'potential_v',
+    'Current (A)': 'current_a', 
+    'Applied Potential (V)': 'potential_applied_v',
+    'Elapsed Time (s)': 'time_s',
+    
+    # EIS measurements from .par.csv export
+    'Frequency (Hz)': 'frequency_hz',
+    'Zre (ohms)': 'impedance_real_ohm',
+    'Zim (ohms)': 'impedance_imag_ohm',
+    'Phase of Z (deg)': 'impedance_phase_deg',
+    
+    # Multi-electrode measurements
+    'CE-RE Potential (V)': 'ce_re_potential_v',
+    
+    # Experimental context
+    'ActionID': 'technique_id',
+    'Segment': 'segment_number',
+    'Point': 'point_number',
+    
+    # Note: power_w, charge_capacity_ah, energy_wh are calculated during analytics
+    # Note: potential_avg_v, current_avg_a are for BioLogic compatibility (null for VersaStudio)
 }
 
 # Technique name mapping to fundamental techniques

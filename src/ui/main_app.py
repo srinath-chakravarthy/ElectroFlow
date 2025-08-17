@@ -10,6 +10,8 @@ import param
 from pathlib import Path
 import sys
 import logging
+import pandas as pd
+from typing import List
 
 # Configure Panel
 pn.extension('plotly', 'tabulator')
@@ -132,8 +134,8 @@ class BatteryAnalyzerApp(param.Parameterized):
         """Create application footer."""
         
         # Quick actions
-        backup_btn = pn.widgets.Button(name="Backup Database", button_type="outline", width=150)
-        refresh_btn = pn.widgets.Button(name="Refresh All", button_type="outline", width=100)
+        backup_btn = pn.widgets.Button(name="Backup Database", button_type="light", width=150)
+        refresh_btn = pn.widgets.Button(name="Refresh All", button_type="light", width=100)
         
         # Status messages
         status_pane = pn.pane.HTML("", width=600)
