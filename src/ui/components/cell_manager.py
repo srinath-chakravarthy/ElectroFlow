@@ -610,7 +610,7 @@ class CellManagerTab(param.Parameterized):
         )
     
     def _create_file_listing_table(self):
-        \"\"\"Create file listing table for current directory.\"\"\"
+        """Create file listing table for current directory."""
         try:
             # Get directory contents using backend API
             result = self.api.list_directory_contents(self.current_directory)
@@ -646,7 +646,7 @@ class CellManagerTab(param.Parameterized):
                         # Format for display
                         display_df = df[['name', 'type', 'size', 'modified']].copy()
                         display_df['size'] = display_df['size'].apply(
-                            lambda x: f\"{x:,} bytes\" if x != '' and pd.notna(x) else \"\"
+                            lambda x: f"{x:,} bytes" if x != '' and pd.notna(x) else ""
                         )
                         display_df = display_df.rename(columns={
                             'name': 'Name',
@@ -688,20 +688,20 @@ class CellManagerTab(param.Parameterized):
                         table.param.watch(on_file_selection, 'selection')
                         return table
                     else:
-                        return pn.pane.HTML(\"<p>No supported files (.par, .par.csv) found in this directory</p>\", width=580)
+                        return pn.pane.HTML("<p>No supported files (.par, .par.csv) found in this directory</p>", width=580)
                 else:
-                    return pn.pane.HTML(\"<p>Directory is empty</p>\", width=580)
+                    return pn.pane.HTML("<p>Directory is empty</p>", width=580)
             else:
-                return pn.pane.HTML(f'<p style=\"color: red;\">Error: {result[\"error\"]}</p>', width=580)
+                return pn.pane.HTML(f'<p style="color: red;">Error: {result["error"]}</p>', width=580)
                 
         except Exception as e:
-            return pn.pane.HTML(f'<p style=\"color: red;\">Browser error: {str(e)}</p>', width=580)
+            return pn.pane.HTML(f'<p style="color: red;">Browser error: {str(e)}</p>', width=580)
     
     def _refresh_file_browser(self):
-        \"\"\"Refresh the file browser display.\"\"\"
+        """Refresh the file browser display."""
         try:
             # Update current directory display
-            self.current_dir_display.object = f\"<p><strong>Current Directory:</strong> {self.current_directory}</p>\"
+            self.current_dir_display.object = f"<p><strong>Current Directory:</strong> {self.current_directory}</p>"
             
             # Update path input (find it in the layout)
             if hasattr(self, 'layout') and self.layout:
@@ -717,20 +717,20 @@ class CellManagerTab(param.Parameterized):
                 browser_column[4] = self._create_file_listing_table()
                 
         except Exception as e:
-            print(f\"Error refreshing file browser: {e}\")
+            print(f"Error refreshing file browser: {e}")
     
     def _update_selected_files_display(self):
-        \"\"\"Update the selected files display.\"\"\"
+        """Update the selected files display."""
         if not self.selected_files:
-            self.selected_files_display.object = \"<p>No files selected</p>\"
+            self.selected_files_display.object = "<p>No files selected</p>"
             return
         
-        html = \"<h6>Selected Files:</h6><ul>\"
+        html = "<h6>Selected Files:</h6><ul>"
         for file_path in self.selected_files:
             file_name = Path(file_path).name
-            file_type = \"PAR\" if file_path.endswith('.par') else \"PAR CSV\" if file_path.endswith('.par.csv') else \"Unknown\"
-            html += f\"<li><strong>{file_name}</strong> ({file_type})</li>\"
-        html += \"</ul>\"
+            file_type = "PAR" if file_path.endswith('.par') else "PAR CSV" if file_path.endswith('.par.csv') else "Unknown"
+            html += f"<li><strong>{file_name}</strong> ({file_type})</li>"
+        html += "</ul>"
         
         self.selected_files_display.object = html
     
