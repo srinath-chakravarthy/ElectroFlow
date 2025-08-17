@@ -2,38 +2,77 @@
 
 ## Current Status
 
-**✅ COMPLETED**: Dual-mapping technique identification system with loop-aware structural parsing, ActionId database, and comprehensive CLI interface.
+**✅ COMPLETED**: 2-Tab Panel UI with dual file architecture, cell management, and data processing workflow.
 
-**🎯 CURRENT FOCUS**: Panel UI for cell preprocessing with SQLite database backend and calibrated CSV integration.
+**🎯 CURRENT FOCUS**: Testing complete dual file workflow (.par + .par.csv) with real VersaStudio files and production deployment.
+
+### Key Architecture Features Implemented
+
+#### ✅ Dual File System Architecture
+- **`.par` files**: Raw VersaStudio technique structure and ActionId mapping  
+- **`.par.csv` files**: Calibrated export data from VersaStudio (EIS calibrated, processed measurements)
+- **Automatic validation**: Ensures matching file pairs exist before processing
+- **Local file processing**: No web upload limits, handles GB-sized files efficiently
+- **Tab 1 integration**: Complete file browser with dual file selection and validation
+
+#### ✅ 2-Tab UI Redesign  
+- **Tab 1: Cell & File Management**: Unified cell creation + local file association workflow
+- **Tab 2: Cell Data Processing**: Technique-centric analysis with group management and manual plotting
+- **Active cell workflow**: Single cell selection carries across tabs with proper reactivity
+- **Fixed table sizing**: Responsive design instead of fixed widths
+- **Cell selection fixes**: Robust Panel Tabulator selection handling
 
 ## Active Work Instructions
 
-### Universal Schema Reference (For Development)
+### Universal Schema Reference (UPDATED - Management/Analytics Focus)
 
-**32-Column Universal Schema** (Always maintain compatibility):
+**21-Column Universal Schema** (Refined for essential measurements):
 ```python
 UNIVERSAL_COLUMNS = [
-    # Core Time & Indexing (6 columns)
-    'time_s', 'timestamp', 'segment_number', 'point_number', 'loop_number', 'battery_cycle',
+    # Core Time & Indexing (4 columns)
+    'time_s', 'timestamp', 'segment_number', 'point_number',
     
-    # Electrochemical Core (6 columns)
-    'potential_v', 'current_a', 'potential_applied_v', 'current_applied_a',
-    'potential_avg_v', 'current_avg_a',
+    # Electrochemical Core (6 columns)  
+    'potential_v', 'current_a', 'potential_applied_v', 'potential_avg_v', 'current_avg_a',
+    'ce_re_potential_v',
     
-    # Battery Analytics (4 columns)
-    'charge_capacity_ah', 'energy_wh', 'power_w', 'temperature_c',
+    # EIS Measurements (4 columns)
+    'frequency_hz', 'impedance_real_ohm', 'impedance_imag_ohm', 'impedance_phase_deg',
     
-    # EIS (5 columns)
-    'frequency_hz', 'impedance_real_ohm', 'impedance_imag_ohm', 
-    'impedance_mag_ohm', 'impedance_phase_deg',
+    # Calculated Analytics (3 columns)
+    'power_w', 'charge_capacity_ah', 'energy_wh',
     
-    # Status & Advanced (8 columns)
-    'current_range', 'potential_range', 'mode', 'technique_id', 'status_flags',
-    'ce_potential_v', 'cell_potential_v', 'ac_amplitude_v', 'aux_voltage_v',
+    # Environmental (1 column)
+    'temperature_c',
     
-    # Technique Tracking (2 columns)
-    'technique_name', 'fundamental_technique'
+    # Experimental Context (3 columns)
+    'technique_id', 'technique_name', 'fundamental_technique'
 ]
+```
+
+### VersaStudio .par.csv Calibrated Data Mapping
+```python
+VERSASTUDIO_CSV_MAPPING = {
+    # Core measurements from .par.csv export
+    'Potential (V)': 'potential_v',
+    'Current (A)': 'current_a', 
+    'Applied Potential (V)': 'potential_applied_v',
+    'Elapsed Time (s)': 'time_s',
+    
+    # EIS measurements from .par.csv export
+    'Frequency (Hz)': 'frequency_hz',
+    'Zre (ohms)': 'impedance_real_ohm',
+    'Zim (ohms)': 'impedance_imag_ohm',
+    'Phase of Z (deg)': 'impedance_phase_deg',
+    
+    # Multi-electrode measurements
+    'CE-RE Potential (V)': 'ce_re_potential_v',
+    
+    # Experimental context
+    'ActionID': 'technique_id',
+    'Segment': 'segment_number',
+    'Point': 'point_number',
+}
 ```
 
 ### Technique Mapping (Expand as Needed)
@@ -52,56 +91,148 @@ TECHNIQUE_MAPPING = {
 
 **Important**: Always classify unknown techniques as 'UNKNOWN' and expand mapping as new technique names are encountered.
 
+## Key Features Implemented
+
+### 1. Refined Universal Schema (21 Columns)
+**Status**: ✅ COMPLETED  
+**Focus**: Management and analytics rather than instrumentation debugging
+
+**Key Changes**:
+- Reduced from 32 to 21 focused columns
+- Removed instrumentation-specific debugging columns
+- Kept essential measurements and analytics
+- Added BioLogic compatibility with `potential_avg_v` and `current_avg_v`
+
+### 2. Temperature as File-Level Metadata
+**Status**: ✅ COMPLETED  
+**Implementation**: Database schema and UI integration
+
+**Features**:
+- Temperature stored in `files` table as `temperature_c` column
+- Inherits to `technique_segments` table for future analytics
+- Optional UI input during file upload
+- Database migration support for existing installations
+
+### 3. Applied Potential Configuration
+**Status**: ✅ COMPLETED  
+**Default**: 2-electrode WE-CE voltage (standard battery measurement)
+
+**UI Options**:
+- 2-electrode WE-CE voltage (default)
+- 3-electrode WE-RE voltage  
+- 3-electrode CE-RE voltage
+- Custom configuration
+- Stored as file-level metadata for user interpretation
+
+### 4. VersaStudio .par.csv Calibrated Data Support  
+**Status**: ✅ COMPLETED  
+**Critical**: Uses calibrated EIS data from manual VersaStudio CSV exports
+
+**Workflow**:
+- Dual file processing: .par (technique mapping) + .par.csv (calibrated data)
+- Column mapping for exact VersaStudio CSV export format
+- Data quality assured through VersaStudio calibration
+- Technique sequence preserved from .par file structure
+
 ## Immediate Development Priorities
 
-### 1. DataFile Abstraction for Multi-Instrument Support
-**Status**: Ready to Start (After Testing/Debugging)  
-**Priority**: High (Before BioLogic Implementation)
-
-**Current Issue**: DataFile class contains VersaStudio-specific elements that limit extensibility:
-- ActionDefinition and SegmentData are VersaStudio concepts
-- Comments reference ".par file" specifically  
-- Structure assumes VersaStudio parsing workflow
-
-**Refactoring Plan**:
-```python
-@dataclass  
-class DataFile:
-    """Universal data file for any electrochemical instrument."""
-    file_path: Path
-    timestamp: datetime
-    universal_data: pl.DataFrame      # Always 32-column universal schema
-    metadata: Dict[str, Any]          # Instrument-specific metadata
-    analysis_results: Dict[str, Any]
-    file_hash: str
-    
-    # REMOVE instrument-specific fields:
-    # actions: Dict[int, ActionDefinition]     # Move to metadata["versastudio_specific"]
-    # segments: Dict[int, SegmentData]         # Move to metadata["versastudio_specific"]
-```
-
-**Benefits**: True universality, clean parser separation, future-proof design  
-**Timing**: After current system testing reveals real-world usage patterns
-
-### 2. Diagnostic and Validation Tools
-**Status**: In Progress  
-**Priority**: High
-
-Create validation plots and diagnostic tools:
-- ActionId vs Segment# mapping plots with technique coloring
-- Analytics accuracy validation (compare with known results)
-- EIS frequency range investigation (currently showing 0 Hz)
-- Performance profiling for large files
-
-### 2. Extended Technique Classification
+### 1. Production Testing with 2-Tab Dual File Workflow
 **Status**: Ready to Start  
 **Priority**: High
+
+**Testing Plan**:
+- Test complete Tab 1 workflow: Cell creation → Active cell selection → File browser → Dual file validation → File association
+- Process real VersaStudio .par + .par.csv file pairs through local file browser
+- Validate cell selection fixes and responsive table sizing
+- Test Tab 2 technique-centric workflow with processed files
+- Verify group creation, analytics, and manual plotting functionality
+- Performance testing with large files (GB+ sizes) via local processing
+- Cross-tab active cell workflow validation
+
+### 2. Extended Technique Classification
+**Status**: Ready to Expand  
+**Priority**: Medium
 
 Expand technique mapping based on real data:
 - Analyze technique names from user files
 - Add variants to TECHNIQUE_MAPPING
 - Improve classification accuracy
 - Handle edge cases and compound techniques
+
+## Panel UI Usage Instructions
+
+### Starting the Application
+```bash
+# Quick start with default settings
+python start_ui.py
+
+# Custom configuration
+python src/ui/main_app.py --port 5007 --data-dir data
+```
+
+### 2-Tab UI Workflow (UPDATED)
+1. **Tab 1: Cell & File Management**: 
+   - Create battery cells with metadata (name, chemistry, capacity, notes)
+   - Single active cell selection (cell row selection fixes applied)
+   - **Local File Browser**: Navigate filesystem from `/Users/srinathchakravarthy/` (default)
+   - **Dual File Selection**: Select .par and .par.csv file pairs for calibrated data processing
+   - **File Validation**: Automatic validation of dual file pairs with detailed status
+   - **Local File Association**: Process files directly from local paths (no web upload limits)
+   - Set temperature metadata and applied potential interpretation per file
+   - Responsive table sizing and proper error handling
+
+2. **Tab 2: Cell Data Processing**: 
+   - Technique-centric workflow: Files → Techniques → Groups → Manual Plotting
+   - Select files from active cell and view technique segments
+   - Create user groups for comparative analysis (OCV, Rate, EIS, GITT, Cycle, Custom)
+   - Manual plotting system with 8 templated plot types
+   - Group analytics with specialized analysis per group type
+
+### Dual File Processing Workflow (NEW)
+
+#### File Browser & Selection
+- **Local filesystem navigation**: Start from `/Users/srinathchakravarthy/` (configurable)
+- **File type filtering**: Shows only .par and .par.csv files
+- **Directory navigation**: Home, Up, and direct path input
+- **Multi-file selection**: Select multiple files with validation
+
+#### Dual File Validation  
+```python
+# Example validation results
+{
+    'dual_pairs': [
+        {
+            'par_file': '/path/to/data.par',
+            'csv_file': '/path/to/data.par.csv', 
+            'valid': True,
+            'recommended': True  # Calibrated data processing
+        }
+    ],
+    'individual_files': [...],  # Single files without pairs
+    'has_valid_files': True,
+    'has_dual_pairs': True
+}
+```
+
+#### File Association Process
+1. **Select active cell** from cell management table
+2. **Browse local filesystem** using integrated file browser  
+3. **Select .par + .par.csv pairs** (or individual files)
+4. **Validate file compatibility** with detailed status feedback
+5. **Configure metadata**: Temperature (°C) and applied potential interpretation
+6. **Associate files** with active cell using local file processing (no upload)
+
+#### Key Benefits
+- **No file size limits**: Process GB-sized files directly from local storage
+- **Calibrated data support**: Dual file processing ensures VersaStudio calibration integrity  
+- **Efficient workflow**: Single tab for cell + file management
+- **Error resilience**: Comprehensive validation before processing
+
+### Database Features
+- **SQLite Backend**: Centralized metadata storage
+- **File Tracking**: Processing status and error handling  
+- **Cell Organization**: Move files between cells atomically
+- **Migration Support**: Automatic schema updates
 
 ### 3. BioLogic Parser Implementation  
 **Status**: Design Phase  
