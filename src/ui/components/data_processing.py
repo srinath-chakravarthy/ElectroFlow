@@ -10,7 +10,16 @@ import param
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import pandas as pd
+import polars as pl
 import json
+import sys
+
+# Add src directory to path for imports
+src_path = Path(__file__).parent.parent.parent
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+from visualization.plot_templates import PlotTemplates
 
 
 class DataProcessingTab(param.Parameterized):
@@ -35,6 +44,8 @@ class DataProcessingTab(param.Parameterized):
         self.techniques_table = None
         self.groups_table = None
         self.plot_panel = None
+        self.plot_templates = PlotTemplates()
+        self.selected_group_id = None
         self.setup_layout()
     
     def setup_layout(self):
@@ -400,6 +411,17 @@ class DataProcessingTab(param.Parameterized):
                     height=150
                 )
                 
+                # Handle group selection for plotting
+                def on_group_selection_change(event):
+                    if event.new:
+                        selected_index = event.new[0]
+                        selected_group = groups[selected_index]
+                        self.selected_group_id = selected_group['id']
+                    else:
+                        self.selected_group_id = None
+                
+                table.param.watch(on_group_selection_change, 'selection')
+                
                 return table
             else:
                 return pn.pane.HTML(
@@ -427,7 +449,7 @@ class DataProcessingTab(param.Parameterized):
                 "Capacity vs Voltage",
                 "Nyquist Plot (EIS)",
                 "Bode Plot (EIS)",
-                "Custom Plot"
+                "Multi-Panel Overview"
             ],
             width=200
         )
@@ -439,31 +461,156 @@ class DataProcessingTab(param.Parameterized):
             width=120
         )
         
+        # View analytics button
+        analytics_button = pn.widgets.Button(
+            name="View Analytics",
+            button_type="light",
+            width=120
+        )
+        
         # Plot display area
-        plot_display = pn.pane.HTML(
-            "<p style='color: #666;'>Select group and plot type, then click 'Generate Plot'</p>",
+        plot_display = pn.pane.Plotly(
             width=730,
-            height=300
+            height=400
+        )
+        
+        # Analytics display area
+        analytics_display = pn.pane.HTML(
+            "<p style='color: #666;'>Select a group and click 'View Analytics' to see analysis results</p>",
+            width=730,
+            height=200
         )
         
         def generate_plot_callback(event):
             """Handle plot generation."""
-            plot_display.object = """
-            <div style="padding: 20px; border: 2px dashed #ccc; text-align: center;">
-                <h4>Plot Generation</h4>
-                <p>Manual plotting will be implemented here.</p>
-                <p>Selected plot type: <strong>{}</strong></p>
-                <p>This will generate templated plots based on selected groups and data.</p>
-            </div>
-            """.format(plot_type_select.value)
+            if not self.selected_group_id:
+                plot_display.object = self.plot_templates._create_error_figure("No group selected. Please select a group from the table above.")
+                return
+            
+            try:
+                # Load group data
+                group_data = self._load_group_data_for_plotting(self.selected_group_id)
+                if group_data is None or group_data.is_empty():
+                    plot_display.object = self.plot_templates._create_error_figure("No data found for selected group")
+                    return
+                
+                # Generate plot based on selected type
+                plot_type = plot_type_select.value
+                group_info = self.api.db.get_user_group_by_id(self.selected_group_id)
+                title = f"{plot_type} - {group_info['group_name']}" if group_info else plot_type
+                
+                if plot_type == "Voltage vs Time":
+                    fig = self.plot_templates.create_voltage_time_plot(group_data, title, group_by='technique_id')
+                elif plot_type == "Current vs Time":
+                    fig = self.plot_templates.create_current_time_plot(group_data, title, group_by='technique_id')
+                elif plot_type == "Power vs Time":
+                    fig = self.plot_templates.create_power_time_plot(group_data, title, group_by='technique_id')
+                elif plot_type == "Voltage vs Current":
+                    fig = self.plot_templates.create_iv_curve_plot(group_data, title, group_by='technique_id')
+                elif plot_type == "Capacity vs Voltage":
+                    fig = self.plot_templates.create_capacity_voltage_plot(group_data, title, group_by='technique_id')
+                elif plot_type == "Nyquist Plot (EIS)":
+                    fig = self.plot_templates.create_nyquist_plot(group_data, title, group_by='technique_id')
+                elif plot_type == "Bode Plot (EIS)":
+                    fig = self.plot_templates.create_bode_plot(group_data, title, group_by='technique_id')
+                elif plot_type == "Multi-Panel Overview":
+                    fig = self.plot_templates.create_multi_panel_overview(group_data, title)
+                else:
+                    fig = self.plot_templates._create_error_figure(f"Plot type '{plot_type}' not implemented")
+                
+                plot_display.object = fig
+                
+            except Exception as e:
+                plot_display.object = self.plot_templates._create_error_figure(f"Plot generation error: {str(e)}")
+        
+        def view_analytics_callback(event):
+            """Handle analytics viewing."""
+            if not self.selected_group_id:
+                analytics_display.object = "<p style='color: red;'>No group selected. Please select a group from the table above.</p>"
+                return
+            
+            try:
+                # Get group analytics
+                result = self.api.analyze_group(self.selected_group_id)
+                if result['success']:
+                    analysis = result['analysis_result']
+                    
+                    # Format analytics for display
+                    html = f"""
+                    <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        <h4>{analysis['group_name']} Analytics ({analysis['group_type']})</h4>
+                        <p><strong>Techniques:</strong> {analysis['technique_count']}</p>
+                        <p><strong>Data Points:</strong> {analysis['total_points']:,}</p>
+                        <p><strong>Time Span:</strong> {analysis['time_span_hours']:.2f} hours</p>
+                        <p><strong>Overall Quality:</strong> {analysis['quality_metrics'].get('overall_quality', 0):.3f}</p>
+                        
+                        <details>
+                            <summary><strong>Detailed Results</strong></summary>
+                            <pre style="background: #f5f5f5; padding: 10px; border-radius: 3px; font-size: 12px; max-height: 150px; overflow-y: auto;">
+{json.dumps(analysis['analysis_results'], indent=2)}
+                            </pre>
+                        </details>
+                    </div>
+                    """
+                    analytics_display.object = html
+                else:
+                    analytics_display.object = f"<p style='color: red;'>Analytics error: {result['error']}</p>"
+                    
+            except Exception as e:
+                analytics_display.object = f"<p style='color: red;'>Analytics error: {str(e)}</p>"
         
         plot_button.on_click(generate_plot_callback)
+        analytics_button.on_click(view_analytics_callback)
         
         return pn.Column(
-            "#### Manual Plotting",
-            pn.Row(plot_type_select, plot_button),
-            plot_display
+            "#### Manual Plotting & Analytics",
+            pn.Row(plot_type_select, plot_button, analytics_button),
+            plot_display,
+            "#### Group Analytics",
+            analytics_display
         )
+    
+    def _load_group_data_for_plotting(self, group_id: int):
+        """Load and combine data for a group for plotting."""
+        try:
+            group = self.api.db.get_user_group_by_id(group_id)
+            if not group:
+                return None
+            
+            group_data = []
+            
+            for technique_ref in group['techniques']:
+                file_id = technique_ref['file_id']
+                segment_number = technique_ref['segment_number']
+                
+                # Load processed file data
+                data = self.api.storage.load_processed_file(file_id)
+                if data is None:
+                    continue
+                
+                # Filter to specific segment
+                segment_data = data.filter(pl.col('segment_number') == segment_number)
+                if segment_data.is_empty():
+                    continue
+                
+                # Add group metadata for plotting
+                segment_data = segment_data.with_columns([
+                    pl.lit(file_id).alias('source_file_id'),
+                    pl.lit(segment_number).alias('source_segment'),
+                    pl.lit(f"{file_id}_seg{segment_number}").alias('technique_id')
+                ])
+                
+                group_data.append(segment_data)
+            
+            if group_data:
+                import polars as pl
+                return pl.concat(group_data, how="vertical_relaxed")
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"Error loading group data: {e}")
+            return None
     
     def set_active_cell(self, cell_id: int, cell_name: str):
         """Set the active cell for data processing."""
