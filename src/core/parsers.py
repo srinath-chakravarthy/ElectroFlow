@@ -873,7 +873,7 @@ class VersaStudioParser(BaseParser):
             DataFrame with universal schema columns
         """
         # Use VersaStudio CSV mapping for calibrated data
-        from .data_models import VERSASTUDIO_CSV_MAPPING
+        from .data_models import VERSASTUDIO_CSV_MAPPING, UNIVERSAL_SCHEMA
         
         # Create mapping for available columns
         column_mapping = {}
@@ -881,15 +881,16 @@ class VersaStudioParser(BaseParser):
             if vs_col in df.columns:
                 column_mapping[vs_col] = universal_col
         
-        # Rename columns
+        # Rename columns to universal schema
         df = df.rename(column_mapping)
         
         # Add missing universal schema columns with null values
-        for col in UNIVERSAL_COLUMNS:
-            if col not in df.columns:
-                df = df.with_columns(pl.lit(None).alias(col))
+        for col_name, col_type in UNIVERSAL_SCHEMA.items():
+            if col_name not in df.columns:
+                df = df.with_columns(pl.lit(None, dtype=col_type).alias(col_name))
         
-        return df.select(UNIVERSAL_COLUMNS)
+        # Return dataframe with universal schema
+        return df.select(list(UNIVERSAL_SCHEMA.keys()))
     
     def _add_csv_computed_columns(self, df: pl.DataFrame) -> pl.DataFrame:
         """

@@ -76,7 +76,7 @@ class BackendAPI:
 
     def validate_files(self, file_paths: List[Path]) -> ValidationResult:
         """
-        Validate file format compatibility (fast check only).
+        Lightweight file format validation only.
         
         Args:
             file_paths: List of file paths to validate
@@ -89,30 +89,24 @@ class BackendAPI:
             csv_files = []
             invalid_files = []
             
-            # Categorize files
+            # Simple format validation only
             for file_path in file_paths:
                 if not file_path.exists():
                     invalid_files.append(f"File not found: {file_path.name}")
                     continue
                     
                 if file_path.suffix.lower() == '.par':
-                    # Fast .par validation (just format check)
                     if self.parser.validate_file(file_path):
                         par_files.append(file_path)
                     else:
                         invalid_files.append(f"Invalid .par format: {file_path.name}")
                         
                 elif str(file_path).lower().endswith('.par.csv'):
-                    # Fast .csv validation (schema check with minimal rows)
-                    try:
-                        from core.data_models import VERSASTUDIO_CSV_SCHEMA
-                        test_df = pl.read_csv(file_path, has_header=True, n_rows=5, schema=VERSASTUDIO_CSV_SCHEMA)
-                        if self.parser._validate_versastudio_csv(test_df):
-                            csv_files.append(file_path)
-                        else:
-                            invalid_files.append(f"Invalid CSV format: {file_path.name}")
-                    except Exception as e:
-                        invalid_files.append(f"CSV validation failed: {file_path.name} - {str(e)}")
+                    # Basic CSV header check only
+                    if self._validate_csv_headers(file_path):
+                        csv_files.append(file_path)
+                    else:
+                        invalid_files.append(f"Invalid CSV format: {file_path.name}")
                 else:
                     invalid_files.append(f"Unsupported file type: {file_path.name}")
             
@@ -120,16 +114,12 @@ class BackendAPI:
             dual_pairs = []
             for par_file in par_files:
                 csv_name = par_file.name + '.csv'
-                matching_csv = None
                 for csv_file in csv_files:
                     if csv_file.name == csv_name:
-                        matching_csv = csv_file
+                        dual_pairs.append((par_file, csv_file))
                         break
-                
-                if matching_csv and self.parser.validate_dual_files(par_file, matching_csv):
-                    dual_pairs.append((par_file, matching_csv))
             
-            success = len(invalid_files) == 0 and (len(par_files) > 0 or len(csv_files) > 0)
+            success = len(invalid_files) == 0 and len(dual_pairs) > 0
             
             details = {
                 'par_files': [str(f) for f in par_files],
@@ -141,15 +131,26 @@ class BackendAPI:
             }
             
             if success:
-                message = f"Validated {details['total_valid']} files successfully"
+                message = f"Validated {len(dual_pairs)} file pairs successfully"
             else:
-                message = f"Validation failed: {len(invalid_files)} invalid files"
+                message = f"Validation failed: {invalid_files}"
             
             return ValidationResult(success, message, details)
             
         except Exception as e:
             logger.error(f"File validation error: {e}")
             return ValidationResult(False, f"Validation error: {str(e)}")
+
+    def _validate_csv_headers(self, csv_path: Path) -> bool:
+        """Fast CSV header validation only."""
+        try:
+            with open(csv_path, 'r') as f:
+                header = f.readline().strip()
+                # Check for key VersaStudio CSV columns
+                required = ['Potential (V)', 'Current (A)', 'Elapsed Time (s)']
+                return all(col in header for col in required)
+        except:
+            return False
 
     # =============================================================================
     # FILE PROCESSING (Core Workflow)
@@ -203,36 +204,232 @@ class BackendAPI:
             logger.error(f"CSV file upload failed: {e}")
             return ProcessingResult(False, "", "", str(e))
 
-    def upload_dual_files(self, par_path: Path, csv_path: Path, cell_name: str) -> ProcessingResult:
+    def process_dual_files(self, par_path: Path, csv_path: Path, cell_name: str, 
+                          upload_options: Dict[str, Any] = None) -> Tuple[ProcessingResult, Optional[pl.DataFrame]]:
         """
-        Upload dual files (.par + .par.csv) for complete processing.
+        Clean processing pipeline using parser's dual file processing.
         
         Args:
             par_path: Path to .par file (metadata source)
-            csv_path: Path to .par.csv file (data source)
+            csv_path: Path to .par.csv file (data source) 
             cell_name: Target cell name
+            upload_options: Processing options (temperature, etc.)
             
         Returns:
-            ProcessingResult with complete dataset ready
+            Tuple[ProcessingResult, Optional[pl.DataFrame]]: Result and universal schema data
         """
         try:
-            # Validate dual files first
-            if not self.parser.validate_dual_files(par_path, csv_path):
-                return ProcessingResult(False, "", "", "Files are not a compatible dual pair")
+            upload_options = upload_options or {}
+            logger.info(f"Processing dual files: {par_path.name} + {csv_path.name}")
             
-            file_ids, status = self.storage.upload_dual_files(par_path, csv_path, cell_name)
+            # Use parser's dual file processing - returns universal schema
+            data_file = self.parser.parse_dual_files(par_path, csv_path)
             
-            if status == "skipped":
-                return ProcessingResult(False, "", "Upload skipped by user")
-            elif status == "failed":
-                return ProcessingResult(False, "", "", "Dual file processing failed")
+            # Commit to database atomically
+            file_id = self._commit_data_file(data_file, cell_name, par_path, csv_path, upload_options)
             
-            message = f"Dual files processed: {len(file_ids)} files (complete dataset ready)"
-            return ProcessingResult(True, ','.join(file_ids), message)
+            # Generate summary from universal schema data
+            summary = self._get_data_file_summary(data_file)
+            techniques = ', '.join(summary['techniques_detected'])
+            
+            message = f"Processed {summary['segment_count']} segments, {len(summary['techniques_detected'])} techniques: {techniques}"
+            
+            return (
+                ProcessingResult(True, file_id, message),
+                data_file.universal_data  # Return universal schema DataFrame
+            )
             
         except Exception as e:
-            logger.error(f"Dual file upload failed: {e}")
-            return ProcessingResult(False, "", "", str(e))
+            logger.error(f"Processing failed: {e}")
+            return (
+                ProcessingResult(False, "", "", str(e)),
+                None
+            )
+
+    def _commit_data_file(self, data_file, cell_name: str, par_path: Path, csv_path: Path, 
+                         upload_options: Dict[str, Any]) -> str:
+        """Commit DataFile to database and storage atomically."""
+        # Generate unique file_id
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_id = f"{cell_name}_{par_path.stem}_{timestamp}"
+        
+        # Get or create cell
+        cell = self.db.get_cell_by_name(cell_name)
+        if not cell:
+            cell_id = self.db.create_cell(cell_name)
+        else:
+            cell_id = cell['id']
+        
+        # Write parquet file to storage
+        parquet_path = self.data_dir / "processed" / f"{file_id}.parquet"
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        data_file.universal_data.write_parquet(parquet_path)
+        
+        # Prepare file info for database
+        file_info = {
+            'file_id': file_id,
+            'original_filename': par_path.name,
+            'paired_filename': csv_path.name,
+            'file_hash': self._calculate_file_hash(par_path),
+            'raw_file_path': str(par_path),
+            'parquet_file_path': str(parquet_path),
+            'acquisition_start': data_file.metadata.get('acquisition_start'),
+            'temperature_c': upload_options.get('temperature_c', 25.0),
+            'metadata': data_file.metadata
+        }
+        
+        # Generate segments from universal data
+        segments = self._generate_segments_from_universal_data(data_file, file_id)
+        
+        # Atomic database transaction
+        with self.db.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                # Add file to database
+                self.db.add_file_to_cell(cell_id, file_info)
+                
+                # Add segments to database
+                self.db.add_segments_to_file(file_id, cell_name, segments)
+                
+                # Update file status to completed
+                self.db.update_file_processing_status(file_id, 'completed')
+                
+                conn.commit()
+                logger.info(f"Successfully committed data file: {file_id}")
+                
+            except Exception as e:
+                conn.rollback()
+                # Clean up parquet file on database failure
+                if parquet_path.exists():
+                    parquet_path.unlink()
+                raise e
+        
+        return file_id
+
+    def _generate_segments_from_universal_data(self, data_file, file_id: str) -> List[Dict[str, Any]]:
+        """Generate segments from universal schema data."""
+        df = data_file.universal_data
+        segments = []
+        
+        # Use universal schema column names
+        if 'technique_id' not in df.columns:
+            # Single segment if no technique_id column
+            time_min = float(df.get_column('time_s').min()) if 'time_s' in df.columns else 0.0
+            time_max = float(df.get_column('time_s').max()) if 'time_s' in df.columns else 0.0
+            
+            return [{
+                'segment_index': 0,
+                'action_id': None,
+                'technique_name': 'Unknown',
+                'fundamental_technique': 'Unknown',
+                'start_row': 0,
+                'end_row': df.height - 1,
+                'start_time_s': time_min,
+                'end_time_s': time_max,
+                'point_count': df.height
+            }]
+        
+        # Group by technique_id to create segments
+        action_groups = df.group_by('technique_id').agg([
+            pl.col('time_s').min().alias('start_time'),
+            pl.col('time_s').max().alias('end_time'),
+            pl.len().alias('point_count')
+        ])
+        
+        for i, group in enumerate(action_groups.iter_rows(named=True)):
+            action_id = group['technique_id']
+            
+            # Get technique mapping from database
+            mapping = self.db.get_actionid_mapping(action_id)
+            if mapping:
+                technique_name = mapping['technique_name']
+                fundamental_technique = mapping['fundamental_technique']
+            else:
+                technique_name = f'ActionID_{action_id}'
+                fundamental_technique = 'Unknown'
+            
+            segments.append({
+                'segment_index': i,
+                'action_id': action_id,
+                'technique_name': technique_name,
+                'fundamental_technique': fundamental_technique,
+                'start_row': 0,  # Would need row mapping for actual start/end rows
+                'end_row': int(group['point_count']) - 1,
+                'start_time_s': float(group['start_time']),
+                'end_time_s': float(group['end_time']),
+                'point_count': int(group['point_count'])
+            })
+        
+        return segments
+
+    def _get_data_file_summary(self, data_file) -> Dict[str, Any]:
+        """Get summary from DataFile with universal schema."""
+        df = data_file.universal_data
+        techniques = []
+        
+        if 'technique_id' in df.columns:
+            unique_actions = df.get_column('technique_id').unique().to_list()
+            for action_id in unique_actions:
+                if action_id is not None:
+                    mapping = self.db.get_actionid_mapping(action_id)
+                    if mapping:
+                        techniques.append(mapping['fundamental_technique'])
+                    else:
+                        techniques.append(f'ActionID_{action_id}')
+        
+        return {
+            'file_count': 1,
+            'techniques_detected': list(set(techniques)) if techniques else ['Unknown'],
+            'segment_count': len(set(techniques)) if techniques else 1,
+            'actionid_mappings': {}
+        }
+
+
+    def _calculate_file_hash(self, file_path: Path) -> str:
+        """Calculate SHA256 hash of file."""
+        import hashlib
+        hash_sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_sha256.update(chunk)
+        return hash_sha256.hexdigest()
+
+    def _get_in_memory_summary(self, analyzed_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Get summary from in-memory analyzed data."""
+        segments = analyzed_data['segments']
+        techniques = list(set(seg['fundamental_technique'] for seg in segments))
+        
+        return {
+            'file_count': 1,
+            'techniques_detected': techniques,
+            'segment_count': len(segments),
+            'actionid_mappings': analyzed_data.get('actionid_mappings', {})
+        }
+
+    def _get_processing_summary(self, file_ids: List[str]) -> Dict[str, Any]:
+        """Get processing summary for uploaded files."""
+        try:
+            summary = {
+                'file_count': len(file_ids),
+                'techniques_detected': [],
+                'segment_count': 0,
+                'actionid_mappings': {}
+            }
+            
+            for file_id in file_ids:
+                file_data = self.get_file_data(file_id)
+                if file_data and 'fundamental_technique' in file_data.columns:
+                    techniques = file_data.get_column('fundamental_technique').unique().to_list()
+                    summary['techniques_detected'].extend(techniques)
+                    summary['segment_count'] += len(techniques)
+            
+            summary['techniques_detected'] = list(set(summary['techniques_detected']))
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Failed to get processing summary: {e}")
+            return {'file_count': len(file_ids), 'techniques_detected': [], 'segment_count': 0}
 
     # =============================================================================
     # CELL MANAGEMENT (Database Operations)
@@ -468,35 +665,35 @@ class BackendAPI:
                 'stats': {}
             }
 
-    def validate_file_compatibility(self, file_paths: List[Path]) -> Dict[str, Any]:
-        """Compatibility method for Qt widgets - returns validation in old format."""
-        validation_result = self.validate_files(file_paths)
-        
-        # Convert to old format expected by Qt widgets
-        individual_files = []
-        for file_path in file_paths:
-            file_str = str(file_path)
-            is_valid = file_str in validation_result.details.get('par_files', []) or \
-                      file_str in validation_result.details.get('csv_files', [])
+    def add_dual_files_to_cell(self, cell_name: str, par_path: Path, csv_path: Path, 
+                              upload_options: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Qt compatibility method for clean in-memory processing."""
+        try:
+            result, processed_data = self.process_dual_files(par_path, csv_path, cell_name, upload_options)
             
-            file_type = 'par' if file_path.suffix.lower() == '.par' else 'par_csv'
-            individual_files.append({
-                'file': file_str,
-                'type': file_type,
-                'valid': is_valid,
-                'error': None if is_valid else "File validation failed"
-            })
-        
-        return {
-            'success': validation_result.success,
-            'individual_files': individual_files,
-            'dual_pairs': [
-                {'par_file': p, 'csv_file': c, 'valid': True} 
-                for p, c in validation_result.details.get('dual_pairs', [])
-            ],
-            'has_valid_files': validation_result.details.get('total_valid', 0) > 0,
-            'has_dual_pairs': validation_result.details.get('has_dual_pairs', False)
-        }
+            if result.success:
+                return {
+                    'success': True,
+                    'file_ids': [result.file_id],
+                    'message': result.message,
+                    'processed_data': processed_data  # In-memory DataFrame for immediate use
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.error or result.message,
+                    'file_ids': [],
+                    'processed_data': None
+                }
+                
+        except Exception as e:
+            logger.error(f"Qt processing failed: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'file_ids': [],
+                'processed_data': None
+            }
 
 
 # =============================================================================

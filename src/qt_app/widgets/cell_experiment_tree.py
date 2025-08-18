@@ -183,7 +183,17 @@ class CellExperimentTreeWidget(QWidget):
         file_types = []
         temperatures = []
         for file_info in files:
-            file_types.append(file_info['file_type'])
+            # Determine file type from filename since 'file_type' field doesn't exist
+            filename = file_info.get('original_filename', '')
+            if filename.endswith('.par'):
+                file_types.append('PAR')
+            elif filename.endswith('.par.csv'):
+                file_types.append('CSV')
+            elif filename.endswith('.csv'):
+                file_types.append('CSV')
+            else:
+                file_types.append('DATA')
+                
             if file_info.get('temperature_c'):
                 temperatures.append(file_info['temperature_c'])
         

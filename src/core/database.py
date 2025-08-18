@@ -356,6 +356,31 @@ class DatabaseManager:
                 logger.error(f"Failed to move file {file_id}: {e}")
                 return False
     
+    def delete_file(self, file_id: str) -> bool:
+        """Delete file and all associated segments."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                # Delete segments first (due to foreign key constraints)
+                conn.execute("DELETE FROM segments WHERE file_id = ?", (file_id,))
+                
+                # Delete file record
+                cursor = conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    logger.info(f"Deleted file and segments: {file_id}")
+                    return True
+                else:
+                    conn.rollback()
+                    logger.warning(f"File not found for deletion: {file_id}")
+                    return False
+                    
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Failed to delete file {file_id}: {e}")
+                return False
+    
     # ===== SEGMENT OPERATIONS =====
     
     def add_segments_to_file(self, file_id: str, cell_name: str, segments: List[Dict[str, Any]]):

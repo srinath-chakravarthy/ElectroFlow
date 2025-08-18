@@ -58,27 +58,13 @@ class FileValidationThread(QThread):
                     'error': validation_result.message
                 })
                 return
-            
-            self.progress_updated.emit(50, "Extracting .par metadata...")
-            
-            # Extract basic metadata from .par file (no data loading)
-            try:
-                par_metadata = self._extract_par_metadata(self.par_path)
-            except Exception as e:
-                par_metadata = {
-                    'filename': self.par_path.name,
-                    'techniques': ['Unknown'],
-                    'total_actions': 0,
-                    'estimated_duration': 'Unknown',
-                    'error': f"Metadata extraction failed: {str(e)}"
-                }
-            
+
             self.progress_updated.emit(100, "Validation complete")
-            
+
             # Return validation results WITHOUT any CSV data
             self.validation_completed.emit({
                 'success': True,
-                'par_metadata': par_metadata,
+                'par_metadata': {},
                 'validation_details': validation_result.details,
                 'message': validation_result.message
             })
@@ -88,39 +74,6 @@ class FileValidationThread(QThread):
                 'success': False,
                 'error': f"Validation failed: {str(e)}"
             })
-    
-    def _extract_par_metadata(self, par_path: Path) -> Dict[str, Any]:
-        """Extract basic metadata from .par file without loading all data."""
-        metadata = {
-            'filename': par_path.name,
-            'techniques': [],
-            'total_actions': 0,
-            'estimated_duration': 'Unknown'
-        }
-        
-        try:
-            # Quick scan of .par file for metadata
-            with open(par_path, 'r', encoding='utf-8') as f:
-                content = f.read(5000)  # Only read first 5KB for metadata
-                
-                # Look for technique indicators
-                if 'Chronoamperometry' in content:
-                    metadata['techniques'].append('CA')
-                if 'Open Circuit' in content:
-                    metadata['techniques'].append('OCV') 
-                if 'EIS' in content or 'Impedance' in content:
-                    metadata['techniques'].append('EIS')
-                if 'Cyclic Voltammetry' in content:
-                    metadata['techniques'].append('CV')
-                
-                # Default if none found
-                if not metadata['techniques']:
-                    metadata['techniques'] = ['Unknown']
-                    
-        except Exception:
-            metadata['techniques'] = ['Unknown']
-            
-        return metadata
 
 
 class FourPanelPlotWidget(QWidget):
@@ -235,46 +188,17 @@ class FourPanelPlotWidget(QWidget):
             print(f"Error updating plots: {e}")
     
     def _detect_columns(self, data: pd.DataFrame) -> Dict[str, Optional[str]]:
-        """Detect column names from CSV data."""
+        """Map universal schema columns for plotting."""
         columns = data.columns.tolist()
         
-        # Common column name patterns
+        # Map to universal schema column names
         mapping = {
-            'time': None,
-            'current': None,
-            'applied_potential': None,
-            'z_real': None,
-            'z_imag': None
+            'time': 'time_s' if 'time_s' in columns else None,
+            'current': 'current_a' if 'current_a' in columns else None,
+            'applied_potential': 'potential_applied_v' if 'potential_applied_v' in columns else None,
+            'z_real': 'impedance_real_ohm' if 'impedance_real_ohm' in columns else None,
+            'z_imag': 'impedance_imag_ohm' if 'impedance_imag_ohm' in columns else None
         }
-        
-        # Time columns
-        for col in columns:
-            if any(pattern in col.lower() for pattern in ['time', 'elapsed']):
-                mapping['time'] = col
-                break
-        
-        # Current columns
-        for col in columns:
-            if any(pattern in col.lower() for pattern in ['current', ' i(', ' i ']):
-                mapping['current'] = col
-                break
-        
-        # Applied potential columns
-        for col in columns:
-            if any(pattern in col.lower() for pattern in ['applied', 'potential']):
-                mapping['applied_potential'] = col
-                break
-        
-        # Impedance columns
-        for col in columns:
-            if any(pattern in col.lower() for pattern in ['zre', 'z real', 'real']):
-                mapping['z_real'] = col
-                break
-        
-        for col in columns:
-            if any(pattern in col.lower() for pattern in ['zim', 'z imag', 'imag']):
-                mapping['z_imag'] = col
-                break
         
         return mapping
     
@@ -498,8 +422,8 @@ class UploadReviewDialog(QDialog):
         button_layout.addStretch()
         
         if self.mode == 'upload':
-            self.upload_btn = QPushButton("Upload Files")
-            self.upload_btn.clicked.connect(self.upload_files)
+            self.upload_btn = QPushButton("Process Files")
+            self.upload_btn.clicked.connect(self.process_files)
             self.upload_btn.setEnabled(False)
             button_layout.addWidget(self.upload_btn)
         else:
@@ -561,26 +485,15 @@ class UploadReviewDialog(QDialog):
         self.status_label.setText(message)
     
     def on_validation_completed(self, result: Dict[str, Any]):
-        """Handle validation completion - no data plotting during validation."""
+        """Handle validation completion - lightweight success/error handling only."""
         self.progress_bar.setVisible(False)
-        
+
         if result['success']:
-            # Clear any previous data - validation doesn't load data
-            self.current_data = None
+            # Simple validation success - no processing
+            # self.plot_widget.show_validation_placeholder()
+            self.actionid_text.setPlainText("✅ Files validated successfully - ready for upload and processing")
+            self.status_label.setText("✅ Files validated - ready for upload")
             
-            # Show placeholder in plots until actual upload/processing
-            self.plot_widget.show_validation_placeholder()
-            
-            # Update ActionID info
-            par_metadata = result['par_metadata']
-            techniques_str = ', '.join(par_metadata['techniques'])
-            self.actionid_text.setPlainText(
-                f"File: {par_metadata['filename']}\n"
-                f"Techniques detected: {techniques_str}\n"
-                f"Status: Ready for upload and processing"
-            )
-            
-            self.status_label.setText("✅ Files validated successfully - ready for upload")
             if self.mode == 'upload':
                 self.upload_btn.setEnabled(True)
             
@@ -629,8 +542,8 @@ class UploadReviewDialog(QDialog):
             self.validate_btn.setEnabled(False)
             self.status_label.setText("Please select both .par and .par.csv files")
     
-    def upload_files(self):
-        """Upload and process files, then load for plotting."""
+    def process_files(self):
+        """Process files using clean in-memory pipeline and populate all panels."""
         if not self.par_path or not self.csv_path:
             QMessageBox.warning(self, "No Files", "Please select and validate files first.")
             return
@@ -639,18 +552,17 @@ class UploadReviewDialog(QDialog):
             # Show progress
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(0)
-            self.status_label.setText("Uploading and processing files...")
+            self.status_label.setText("Processing files...")
             
-            # Prepare upload options (with safe attribute access)
+            # Prepare processing options
             upload_options = {
-                'duplicate_handling': 'replace',
-                'temperature_c': getattr(self, 'temperature_spin', None) and self.temperature_spin.value(),
-                'applied_potential_interpretation': getattr(self, 'applied_potential_combo', None) and self.applied_potential_combo.currentText() or '2-electrode WE-CE voltage'
+                'temperature_c': self.temperature_spin.value() if hasattr(self, 'temperature_spin') else 25.0,
+                'applied_potential_interpretation': self.applied_potential_combo.currentText() if hasattr(self, 'applied_potential_combo') else '2-electrode WE-CE voltage'
             }
             
             self.progress_bar.setValue(30)
             
-            # Upload and process dual files
+            # Process files through clean in-memory pipeline
             result = self.api.add_dual_files_to_cell(
                 cell_name=self.cell_name,
                 par_path=self.par_path,
@@ -661,35 +573,67 @@ class UploadReviewDialog(QDialog):
             self.progress_bar.setValue(70)
             
             if result['success']:
-                # Files processed - now load processed data for plotting
-                self.status_label.setText("Loading processed data for plotting...")
-                file_ids = result.get('file_ids', [])
+                # Use in-memory data directly (no disk I/O needed)
+                self.status_label.setText("Updating displays...")
                 
-                if file_ids:
-                    # Load processed data from the first file for plotting
-                    file_id = file_ids[0]
-                    preview_result = self.api.get_file_data_preview(file_id, n_rows=10000)
-                    
-                    if preview_result['success']:
-                        self.current_data = preview_result['preview_data']
-                        self.plot_widget.update_plots(self.current_data)
-                        self.status_label.setText("✅ Upload complete - plots updated with processed data")
+                processed_data = result.get('processed_data')
+                if processed_data is not None:
+                    self._populate_panels_with_memory_data(processed_data, result.get('message', ''))
                 
                 self.progress_bar.setValue(100)
                 self.progress_bar.setVisible(False)
                 
-                QMessageBox.information(self, "Upload Complete", 
-                    f"✅ Files uploaded and processed successfully!\n\n{result.get('message', '')}")
+                QMessageBox.information(self, "Processing Complete", 
+                    f"✅ Files processed successfully!\n\n{result.get('message', '')}")
                 
-                self.upload_completed.emit(file_ids)
+                self.upload_completed.emit(result.get('file_ids', []))
                 self.accept()
             else:
                 self.progress_bar.setVisible(False)
-                QMessageBox.critical(self, "Upload Failed", f"❌ {result['error']}")
+                QMessageBox.critical(self, "Processing Failed", f"❌ {result['error']}")
                 
         except Exception as e:
             self.progress_bar.setVisible(False)
-            QMessageBox.critical(self, "Upload Error", f"❌ Unexpected error: {str(e)}")
+            QMessageBox.critical(self, "Processing Error", f"❌ Unexpected error: {str(e)}")
+    
+    def _populate_panels_with_memory_data(self, processed_data, processing_message: str):
+        """Populate all panels with in-memory processed data - no disk I/O."""
+        try:
+            # Convert Polars DataFrame to Pandas for plotting
+            import polars as pl
+            if isinstance(processed_data, pl.DataFrame):
+                self.current_data = processed_data.to_pandas()
+            else:
+                self.current_data = processed_data
+            
+            # Update plots with in-memory data
+            self.plot_widget.update_plots(self.current_data)
+            
+            # Generate summary from universal schema data
+            techniques = []
+            if 'technique_id' in self.current_data.columns:
+                unique_actions = self.current_data['technique_id'].unique()
+                techniques = [f"ActionID_{aid}" for aid in unique_actions if not pd.isna(aid)]
+            
+            time_range = ""
+            if 'time_s' in self.current_data.columns:
+                time_min = self.current_data['time_s'].min()
+                time_max = self.current_data['time_s'].max()
+                time_range = f"{time_min:.1f} - {time_max:.1f} s"
+            
+            summary_text = (
+                f"Processing: {processing_message}\n"
+                f"Data points: {len(self.current_data):,}\n"
+                f"Techniques: {', '.join(techniques) if techniques else 'Unknown'}\n"
+                f"Time range: {time_range}\n"
+                f"✅ Data ready for analysis"
+            )
+            
+            self.actionid_text.setPlainText(summary_text)
+            self.status_label.setText("✅ Processing complete - displaying in-memory data")
+                
+        except Exception as e:
+            self.status_label.setText(f"Display update failed: {str(e)}")
     
     def save_changes(self):
         """Save metadata changes for existing experiment."""

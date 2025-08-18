@@ -7,10 +7,11 @@ import sys
 import time
 from pathlib import Path
 
-# Add src directory to path
-sys.path.insert(0, 'src')
+# Add src_clean directory to path
+sys.path.insert(0, '.')
 
-from core.parsers import VersaStudioParser
+from src_clean.parsers import VersaStudioParser
+from src_clean.backend import get_backend_api
 
 def test_parsing():
     """Test parsing with the actual files to see where the hang occurs."""
@@ -41,24 +42,24 @@ def test_parsing():
     start = time.time()
     try:
         par_valid = parser.validate_file(par_file)
-        csv_valid = parser.validate_dual_files(par_file, csv_file)
+        csv_valid = parser.validate_file(csv_file)
         elapsed = time.time() - start
         print(f"✅ Validation complete in {elapsed:.3f}s")
         print(f"   PAR valid: {par_valid}")
-        print(f"   Dual valid: {csv_valid}")
+        print(f"   CSV valid: {csv_valid}")
     except Exception as e:
         print(f"❌ Validation failed: {e}")
         return
     
-    # Test 2: Parse .par file only
+    # Test 2: Parse .par file only  
     print(f"\n📊 Step 2: Parse .par file only...")
     start = time.time()
     try:
-        par_data = parser.parse(par_file)
+        par_metadata = parser.parse_metadata(par_file)
         elapsed = time.time() - start
         print(f"✅ PAR parsing complete in {elapsed:.3f}s")
-        print(f"   Data rows: {par_data.universal_data.height:,}")
-        print(f"   Data cols: {par_data.universal_data.width}")
+        print(f"   ActionID mappings: {len(par_metadata.actionid_mappings)}")
+        print(f"   Techniques: {par_metadata.technique_count}")
     except Exception as e:
         print(f"❌ PAR parsing failed: {e}")
         import traceback
@@ -69,47 +70,50 @@ def test_parsing():
     print(f"\n📈 Step 3: Parse .csv file only...")
     start = time.time()
     try:
-        csv_data = parser.parse_calibrated_csv(csv_file)
+        csv_data = parser.parse_data(csv_file)
         elapsed = time.time() - start
         print(f"✅ CSV parsing complete in {elapsed:.3f}s")
-        print(f"   Data rows: {csv_data.height:,}")
-        print(f"   Data cols: {csv_data.width}")
+        print(f"   Data rows: {csv_data.universal_data.height:,}")
+        print(f"   Data cols: {csv_data.universal_data.width}")
     except Exception as e:
         print(f"❌ CSV parsing failed: {e}")
         import traceback
         traceback.print_exc()
         return
     
-    # Test 4: Parse dual files (this is where it likely hangs)
-    print(f"\n🔄 Step 4: Parse dual files together...")
+    # Test 4: Backend API validation (what Qt actually calls)
+    print(f"\n🔍 Step 4: Backend API validation...")
     start = time.time()
     try:
-        # Set a timeout for this test
-        import signal
-        
-        def timeout_handler(signum, frame):
-            raise TimeoutError("Dual file parsing timed out")
-        
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(30)  # 30 second timeout
-        
-        dual_data = parser.parse_dual_files(par_file, csv_file)
-        signal.alarm(0)  # Cancel timeout
-        
+        api = get_backend_api()
+        result = api.validate_dual_files(par_file, csv_file)
         elapsed = time.time() - start
-        print(f"✅ Dual parsing complete in {elapsed:.3f}s")
-        print(f"   Data rows: {dual_data.universal_data.height:,}")
-        print(f"   Data cols: {dual_data.universal_data.width}")
-        
-    except TimeoutError:
-        print(f"❌ Dual parsing TIMED OUT after 30 seconds - this is the issue!")
+        print(f"✅ Backend validation complete in {elapsed:.3f}s")
+        print(f"   Success: {result['success']}")
+        print(f"   Message: {result.get('message', 'N/A')}")
     except Exception as e:
-        print(f"❌ Dual parsing failed: {e}")
+        print(f"❌ Backend validation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+    
+    # Test 5: Backend API processing (the heavy operation)
+    print(f"\n⚙️ Step 5: Backend API processing...")
+    start = time.time()
+    try:
+        result = api.process_dual_files(par_file, csv_file, "TEST_CELL")
+        elapsed = time.time() - start
+        print(f"✅ Backend processing complete in {elapsed:.3f}s")
+        print(f"   Success: {result.success}")
+        print(f"   Message: {result.message}")
+        print(f"   File ID: {result.file_id}")
+    except Exception as e:
+        print(f"❌ Backend processing failed: {e}")
         import traceback
         traceback.print_exc()
     
     print(f"\n" + "=" * 50)
-    print("🏁 Parsing test complete")
+    print("🏁 Full workflow test complete")
 
 if __name__ == "__main__":
     test_parsing()
