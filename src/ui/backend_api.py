@@ -775,10 +775,11 @@ class BackendAPI:
                         'error': None if is_valid else "Invalid .par file format"
                     })
                 elif str(file_path).lower().endswith('.par.csv'):
-                    # Basic CSV validation
+                    # CSV validation with correct schema
                     try:
                         import polars as pl
-                        test_df = pl.read_csv(file_path, has_header=True, n_rows=5)
+                        from core.data_models import VERSASTUDIO_CSV_SCHEMA
+                        test_df = pl.read_csv(file_path, has_header=True, n_rows=5, schema=VERSASTUDIO_CSV_SCHEMA)
                         is_valid = self.parser._validate_versastudio_csv(test_df)
                         validation_results.append({
                             'file': str(file_path),
@@ -787,11 +788,15 @@ class BackendAPI:
                             'error': None if is_valid else "Invalid VersaStudio CSV format"
                         })
                     except Exception as e:
+                        # Provide detailed error message for schema mismatches
+                        error_msg = f"CSV validation failed: {str(e)}"
+                        if "column-schema names do not match" in str(e):
+                            error_msg = "CSV columns don't match VersaStudio export format. Please ensure the file is a valid .par.csv export from VersaStudio."
                         validation_results.append({
                             'file': str(file_path),
                             'type': 'par_csv',
                             'valid': False,
-                            'error': f"CSV validation failed: {str(e)}"
+                            'error': error_msg
                         })
                 else:
                     validation_results.append({

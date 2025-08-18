@@ -45,11 +45,11 @@ class FileValidationThread(QThread):
         self.api = api
     
     def run(self):
-        """Run file validation and data loading."""
+        """Run lightweight file validation only - NO data loading."""
         try:
-            self.progress_updated.emit(10, "Validating .par file...")
+            self.progress_updated.emit(20, "Validating file formats...")
             
-            # Validate dual files
+            # Basic file validation (format check only)
             validation_result = self.api.validate_file_compatibility([self.par_path, self.csv_path])
             
             if not validation_result['success']:
@@ -59,44 +59,28 @@ class FileValidationThread(QThread):
                 })
                 return
             
-            self.progress_updated.emit(30, "Loading .par.csv data...")
+            self.progress_updated.emit(50, "Extracting .par metadata...")
             
-            # Load CSV data for plotting (limit to 50k points for performance)
+            # Extract basic metadata from .par file (no data loading)
             try:
-                import polars as pl
-                df = pl.read_csv(self.csv_path, has_header=True)
-                
-                # Limit data size for UI responsiveness
-                if df.height > 50000:
-                    df = df.sample(50000)
-                
-                data_df = df.to_pandas()
-                
+                par_metadata = self._extract_par_metadata(self.par_path)
             except Exception as e:
-                self.validation_completed.emit({
-                    'success': False,
-                    'error': f"Failed to load CSV data: {str(e)}"
-                })
-                return
+                par_metadata = {
+                    'filename': self.par_path.name,
+                    'techniques': ['Unknown'],
+                    'total_actions': 0,
+                    'estimated_duration': 'Unknown',
+                    'error': f"Metadata extraction failed: {str(e)}"
+                }
             
-            self.progress_updated.emit(60, "Extracting .par metadata...")
+            self.progress_updated.emit(100, "Validation complete")
             
-            # TODO: Extract technique structure from .par file
-            # For now, use placeholder metadata
-            par_metadata = {
-                'filename': self.par_path.name,
-                'techniques': ['CC', 'OCV', 'GEIS'],  # Placeholder
-                'total_actions': 10,  # Placeholder
-                'estimated_duration': '2.5 hours'  # Placeholder
-            }
-            
-            self.progress_updated.emit(90, "Preparing plots...")
-            
+            # Return validation results WITHOUT any CSV data
             self.validation_completed.emit({
                 'success': True,
-                'csv_data': data_df,
                 'par_metadata': par_metadata,
-                'validation_result': validation_result
+                'validation_result': validation_result,
+                'message': 'Files validated - ready for upload and processing'
             })
             
         except Exception as e:
@@ -104,6 +88,39 @@ class FileValidationThread(QThread):
                 'success': False,
                 'error': f"Validation failed: {str(e)}"
             })
+    
+    def _extract_par_metadata(self, par_path: Path) -> Dict[str, Any]:
+        """Extract basic metadata from .par file without loading all data."""
+        metadata = {
+            'filename': par_path.name,
+            'techniques': [],
+            'total_actions': 0,
+            'estimated_duration': 'Unknown'
+        }
+        
+        try:
+            # Quick scan of .par file for metadata
+            with open(par_path, 'r', encoding='utf-8') as f:
+                content = f.read(5000)  # Only read first 5KB for metadata
+                
+                # Look for technique indicators
+                if 'Chronoamperometry' in content:
+                    metadata['techniques'].append('CA')
+                if 'Open Circuit' in content:
+                    metadata['techniques'].append('OCV') 
+                if 'EIS' in content or 'Impedance' in content:
+                    metadata['techniques'].append('EIS')
+                if 'Cyclic Voltammetry' in content:
+                    metadata['techniques'].append('CV')
+                
+                # Default if none found
+                if not metadata['techniques']:
+                    metadata['techniques'] = ['Unknown']
+                    
+        except Exception:
+            metadata['techniques'] = ['Unknown']
+            
+        return metadata
 
 
 class FourPanelPlotWidget(QWidget):
@@ -266,6 +283,31 @@ class FourPanelPlotWidget(QWidget):
         for plot in [self.plot_applied_pot_time, self.plot_current_time, 
                     self.plot_nyquist, self.plot_applied_pot_current]:
             plot.clear()
+    
+    def show_validation_placeholder(self):
+        """Show placeholder text indicating validation completed."""
+        self.clear_plots()
+        
+        # Add text items to plots showing validation status
+        placeholder_text = "✅ Validation Complete\nUpload files to see plots"
+        
+        text_item1 = pg.TextItem(placeholder_text, color='gray', anchor=(0.5, 0.5))
+        text_item2 = pg.TextItem(placeholder_text, color='gray', anchor=(0.5, 0.5))
+        text_item3 = pg.TextItem(placeholder_text, color='gray', anchor=(0.5, 0.5))
+        text_item4 = pg.TextItem(placeholder_text, color='gray', anchor=(0.5, 0.5))
+        
+        # Position text in center of each plot
+        self.plot_applied_pot_time.addItem(text_item1)
+        text_item1.setPos(0, 0)
+        
+        self.plot_current_time.addItem(text_item2)
+        text_item2.setPos(0, 0)
+        
+        self.plot_nyquist.addItem(text_item3)
+        text_item3.setPos(0, 0)
+        
+        self.plot_applied_pot_current.addItem(text_item4)
+        text_item4.setPos(0, 0)
 
 
 class UploadReviewDialog(QDialog):
@@ -297,6 +339,13 @@ class UploadReviewDialog(QDialog):
         self.csv_path = None
         self.current_data = None
         
+        # Remember last directory for file dialogs - start with measurement_groups if it exists
+        measurement_groups = Path("data/measurement_groups")
+        if measurement_groups.exists():
+            self.last_directory = measurement_groups
+        else:
+            self.last_directory = Path.home()
+        
         self.setup_ui()
         self.setup_connections()
         
@@ -307,6 +356,10 @@ class UploadReviewDialog(QDialog):
         screen = self.screen().availableGeometry()
         self.resize(int(screen.width() * 0.9), int(screen.height() * 0.9))
         self.setWindowTitle(f"{'Upload Files' if mode == 'upload' else 'Review Experiment'} - {cell_name}")
+        
+        # Initialize file selection state
+        if self.mode == 'upload':
+            self.check_file_selection()
     
     def setup_ui(self):
         """Setup the dialog UI."""
@@ -508,47 +561,96 @@ class UploadReviewDialog(QDialog):
         self.status_label.setText(message)
     
     def on_validation_completed(self, result: Dict[str, Any]):
-        """Handle validation completion."""
+        """Handle validation completion - no data plotting during validation."""
         self.progress_bar.setVisible(False)
         
         if result['success']:
-            self.current_data = result['csv_data']
+            # Clear any previous data - validation doesn't load data
+            self.current_data = None
             
-            # Update plots
-            self.plot_widget.update_plots(self.current_data)
+            # Show placeholder in plots until actual upload/processing
+            self.plot_widget.show_validation_placeholder()
             
             # Update ActionID info
             par_metadata = result['par_metadata']
+            techniques_str = ', '.join(par_metadata['techniques'])
             self.actionid_text.setPlainText(
-                f"Techniques detected: {', '.join(par_metadata['techniques'])}\n"
-                f"Total actions: {par_metadata['total_actions']}\n"
-                f"Estimated duration: {par_metadata['estimated_duration']}"
+                f"File: {par_metadata['filename']}\n"
+                f"Techniques detected: {techniques_str}\n"
+                f"Status: Ready for upload and processing"
             )
             
-            self.status_label.setText("Files validated successfully - ready for upload")
+            self.status_label.setText("✅ Files validated successfully - ready for upload")
             if self.mode == 'upload':
                 self.upload_btn.setEnabled(True)
             
         else:
             QMessageBox.critical(self, "Validation Error", result['error'])
-            self.status_label.setText(f"Validation failed: {result['error']}")
+            self.status_label.setText(f"❌ Validation failed: {result['error']}")
+    
+    def browse_par_file(self):
+        """Browse for .par file."""
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select .par file", 
+            str(self.last_directory),
+            "PAR files (*.par);;All files (*)"
+        )
+        
+        if file_path:
+            self.par_path = Path(file_path)
+            self.last_directory = self.par_path.parent  # Remember directory
+            self.par_file_label.setText(f"Selected: {self.par_path.name}")
+            self.check_file_selection()
+    
+    def browse_csv_file(self):
+        """Browse for .par.csv file."""
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select .par.csv file", 
+            str(self.last_directory),
+            "CSV files (*.csv *.par.csv);;All files (*)"
+        )
+        
+        if file_path:
+            self.csv_path = Path(file_path)
+            self.last_directory = self.csv_path.parent  # Remember directory
+            self.csv_file_label.setText(f"Selected: {self.csv_path.name}")
+            self.check_file_selection()
+    
+    def check_file_selection(self):
+        """Enable validate button when both files are selected."""
+        if self.par_path and self.csv_path:
+            self.validate_btn.setEnabled(True)
+            self.status_label.setText("Files selected - ready to validate")
+        else:
+            self.validate_btn.setEnabled(False)
+            self.status_label.setText("Please select both .par and .par.csv files")
     
     def upload_files(self):
-        """Upload validated files."""
-        if not self.current_data is not None:
-            QMessageBox.warning(self, "No Data", "Please validate files first.")
+        """Upload and process files, then load for plotting."""
+        if not self.par_path or not self.csv_path:
+            QMessageBox.warning(self, "No Files", "Please select and validate files first.")
             return
         
         try:
-            # Prepare upload options
+            # Show progress
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setValue(0)
+            self.status_label.setText("Uploading and processing files...")
+            
+            # Prepare upload options (with safe attribute access)
             upload_options = {
                 'duplicate_handling': 'replace',
-                'temperature_c': self.temperature_spin.value(),
-                'applied_potential_interpretation': self.applied_potential_combo.currentText(),
-                'notes': self.notes_edit.toPlainText()
+                'temperature_c': getattr(self, 'temperature_spin', None) and self.temperature_spin.value(),
+                'applied_potential_interpretation': getattr(self, 'applied_potential_combo', None) and self.applied_potential_combo.currentText() or '2-electrode WE-CE voltage'
             }
             
-            # Upload dual files
+            self.progress_bar.setValue(30)
+            
+            # Upload and process dual files
             result = self.api.add_dual_files_to_cell(
                 cell_name=self.cell_name,
                 par_path=self.par_path,
@@ -556,16 +658,38 @@ class UploadReviewDialog(QDialog):
                 upload_options=upload_options
             )
             
+            self.progress_bar.setValue(70)
+            
             if result['success']:
-                QMessageBox.information(self, "Upload Successful", 
-                                      f"Files uploaded successfully: {result['message']}")
-                self.upload_completed.emit(result.get('file_ids', []))
+                # Files processed - now load processed data for plotting
+                self.status_label.setText("Loading processed data for plotting...")
+                file_ids = result.get('file_ids', [])
+                
+                if file_ids:
+                    # Load processed data from the first file for plotting
+                    file_id = file_ids[0]
+                    preview_result = self.api.get_file_data_preview(file_id, n_rows=10000)
+                    
+                    if preview_result['success']:
+                        self.current_data = preview_result['preview_data']
+                        self.plot_widget.update_plots(self.current_data)
+                        self.status_label.setText("✅ Upload complete - plots updated with processed data")
+                
+                self.progress_bar.setValue(100)
+                self.progress_bar.setVisible(False)
+                
+                QMessageBox.information(self, "Upload Complete", 
+                    f"✅ Files uploaded and processed successfully!\n\n{result.get('message', '')}")
+                
+                self.upload_completed.emit(file_ids)
                 self.accept()
             else:
-                QMessageBox.critical(self, "Upload Failed", result['error'])
+                self.progress_bar.setVisible(False)
+                QMessageBox.critical(self, "Upload Failed", f"❌ {result['error']}")
                 
         except Exception as e:
-            QMessageBox.critical(self, "Upload Error", f"Upload failed: {str(e)}")
+            self.progress_bar.setVisible(False)
+            QMessageBox.critical(self, "Upload Error", f"❌ Unexpected error: {str(e)}")
     
     def save_changes(self):
         """Save metadata changes for existing experiment."""

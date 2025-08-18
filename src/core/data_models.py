@@ -107,23 +107,23 @@ VERSASTUDIO_CSV_MAPPING = {
     'Current (A)': 'current_a', 
     'Applied Potential (V)': 'potential_applied_v',
     'Elapsed Time (s)': 'time_s',
+    'Charge (C)': 'charge_capacity_ah',  # Direct charge measurement in Coulombs → convert to Ah
     
-    # EIS measurements from .par.csv export
+    # EIS measurements from .par.csv export  
     'Frequency (Hz)': 'frequency_hz',
+    '|Z| (ohms)': 'impedance_mag_ohm',   # Impedance magnitude directly provided
     'Zre (ohms)': 'impedance_real_ohm',
     'Zim (ohms)': 'impedance_imag_ohm',
     'Phase of Z (deg)': 'impedance_phase_deg',
     
-    # Multi-electrode measurements
-    'CE-RE Potential (V)': 'ce_re_potential_v',
-    
     # Experimental context
-    'ActionID': 'technique_id',
+    'ActionId': 'technique_id',  # Note: lowercase 'd' in CSV
     'Segment': 'segment_number',
     'Point': 'point_number',
     
-    # Note: power_w, charge_capacity_ah, energy_wh are calculated during analytics
+    # Note: power_w, energy_wh are calculated during analytics
     # Note: potential_avg_v, current_avg_a are for BioLogic compatibility (null for VersaStudio)
+    # Note: ce_re_potential_v not available in this CSV format
 }
 
 # Technique name mapping to fundamental techniques
@@ -186,6 +186,29 @@ VERSASTUDIO_SCHEMA = {
     'Z2 Imag': pl.Float64,
     'ActionId': pl.Int64,
     'AC Amplitude': pl.Float64
+}
+
+# VersaStudio .par.csv schema (for calibrated export data)
+# Based on actual VersaStudio CSV export column structure
+VERSASTUDIO_CSV_SCHEMA = {
+    # Core measurements from .par.csv export (columns 1-5)
+    'Potential (V)': pl.Float64,
+    'Current (A)': pl.Float64, 
+    'Elapsed Time (s)': pl.Float64,
+    'Charge (C)': pl.Float64,
+    'Applied Potential (V)': pl.Float64,
+    
+    # EIS measurements from .par.csv export (columns 6-10)
+    'Frequency (Hz)': pl.Float64,
+    '|Z| (ohms)': pl.Float64,
+    'Zre (ohms)': pl.Float64,
+    'Zim (ohms)': pl.Float64,
+    'Phase of Z (deg)': pl.Float64,
+    
+    # Experimental context (columns 11-13)
+    'Segment': pl.Int64,
+    'Point': pl.Int64,
+    'ActionId': pl.Int64,  # Note: lowercase 'd' in actual CSV
 }
 
 

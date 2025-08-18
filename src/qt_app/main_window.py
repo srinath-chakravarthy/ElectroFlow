@@ -261,8 +261,7 @@ class MainWindow(QMainWindow):
         """Handle experiment double-click - open upload/review modal."""
         from qt_app.dialogs.upload_review_dialog import UploadReviewDialog
         
-        dialog = UploadReviewDialog(self.api, cell_id, cell_name, self)
-        dialog.load_existing_experiment(file_id)
+        dialog = UploadReviewDialog(self.api, parent=self, mode='review', cell_name=cell_name, file_id=file_id)
         dialog.exec()
         
         # Refresh tree after modal closes
@@ -326,7 +325,7 @@ class MainWindow(QMainWindow):
         """Upload files for specific cell using modal dialog."""
         from qt_app.dialogs.upload_review_dialog import UploadReviewDialog
         
-        dialog = UploadReviewDialog(self.api, cell_id, cell_name, self)
+        dialog = UploadReviewDialog(self.api, parent=self, mode='upload', cell_name=cell_name)
         if dialog.exec() == dialog.Accepted:
             # Refresh tree after successful upload
             self.cell_tree.refresh_tree()

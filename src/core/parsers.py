@@ -11,7 +11,7 @@ import polars as pl
 from .data_models import (
     DataFile, ActionDefinition, SegmentData,
     create_universal_dataframe, UNIVERSAL_COLUMNS, UNIVERSAL_SCHEMA,
-    VERSASTUDIO_COLUMNS, VERSASTUDIO_SCHEMA, TECHNIQUE_MAPPING,
+    VERSASTUDIO_COLUMNS, VERSASTUDIO_SCHEMA, VERSASTUDIO_CSV_SCHEMA, TECHNIQUE_MAPPING,
     map_technique_name, map_actionid_to_technique, is_structural_action, 
     calculate_file_hash, prune_empty_columns
 )
@@ -792,11 +792,11 @@ class VersaStudioParser(BaseParser):
             VersaStudioParseError: If CSV parsing fails
         """
         try:
-            # Read CSV file with VersaStudio format detection
+            # First, try to read with VersaStudio CSV schema for proper type detection
             df = pl.read_csv(
                 csv_path,
                 has_header=True,
-                try_parse_dates=True,
+                schema=VERSASTUDIO_CSV_SCHEMA,
                 ignore_errors=False
             )
             
@@ -825,8 +825,8 @@ class VersaStudioParser(BaseParser):
         Returns:
             True if valid VersaStudio CSV format
         """
-        # Check for new .par.csv export column names
-        required_columns = ['Segment', 'Point', 'Potential (V)', 'Current (A)', 'Elapsed Time (s)']
+        # Check for .par.csv export column names (based on actual CSV structure)
+        required_columns = ['Segment', 'Point', 'ActionId', 'Potential (V)', 'Current (A)', 'Elapsed Time (s)']
         return all(col in df.columns for col in required_columns)
     
     def _map_csv_columns_to_universal(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -872,8 +872,11 @@ class VersaStudioParser(BaseParser):
             # Power calculation
             (pl.col('potential_v') * pl.col('current_a')).alias('power_w'),
             
-            # Note: charge_capacity_ah and energy_wh are calculated during analytics
-            # based on integration over technique segments, not raw data points
+            # Convert charge from Coulombs to Ah (1 Ah = 3600 C)
+            (pl.col('charge_capacity_ah') / 3600.0).alias('charge_capacity_ah'),
+            
+            # Energy calculation (power integrated over time, approximated)
+            (pl.col('potential_v') * pl.col('current_a') * pl.col('time_s') / 3600.0).alias('energy_wh')
         ])
         
         return df
@@ -965,12 +968,14 @@ class VersaStudioParser(BaseParser):
             if not csv_path.name.lower().endswith('.par.csv'):
                 return False
             
-            # Check if CSV file is readable
+            # Check if CSV file is readable with correct schema
             try:
-                test_df = pl.read_csv(csv_path, has_header=True, n_rows=5)
+                test_df = pl.read_csv(csv_path, has_header=True, n_rows=5, schema=VERSASTUDIO_CSV_SCHEMA)
                 if not self._validate_versastudio_csv(test_df):
                     return False
-            except:
+            except Exception as e:
+                # Log schema validation error for debugging
+                print(f"CSV validation failed for {csv_path.name}: {e}")
                 return False
             
             # Check file timestamps (CSV should be newer or same time as PAR)
