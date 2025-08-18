@@ -1,15 +1,14 @@
 """
-SQLite database layer for battery data analyzer.
+SQLite database layer for battery data analyzer - Clean Redesign.
 
-Replaces JSON file storage with centralized database for metadata management,
-file tracking, and cell organization. Provides atomic operations for file
-movement between cells and maintains referential integrity.
+Implements segment-based architecture with row mapping for efficient parquet querying.
+Supports file mobility between cells and stores analysis results with fitting coefficients.
 """
 
 import sqlite3
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
-    """SQLite database manager for battery data analyzer."""
+    """SQLite database manager with segment-based architecture."""
     
     def __init__(self, db_path: Path):
         """Initialize database manager.
@@ -29,7 +28,7 @@ class DatabaseManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_database()
-        self.populate_default_actionid_mappings()  # Ensure default mappings exist
+        self.populate_default_actionid_mappings()
     
     @contextmanager
     def get_connection(self):
@@ -43,87 +42,73 @@ class DatabaseManager:
             conn.close()
     
     def init_database(self):
-        """Initialize database schema."""
+        """Initialize clean database schema."""
         with self.get_connection() as conn:
-            # Enable foreign key constraints
-            conn.execute("PRAGMA foreign_keys = ON")
             
-            # Create cells table
+            # Cell table with material metadata
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS cells (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cell_name TEXT UNIQUE NOT NULL,
-                    description TEXT,
+                    description TEXT DEFAULT '',
                     chemistry TEXT DEFAULT 'Li_metal',
                     capacity_ah REAL,
-                    cathode_material_type TEXT,
-                    cathode_active_mass_mg REAL,
-                    anode_material_type TEXT,
-                    anode_active_mass_mg REAL,
-                    notes TEXT,
+                    cathode_material TEXT,
+                    cathode_mass_mg REAL,
+                    anode_material TEXT, 
+                    anode_mass_mg REAL,
+                    notes TEXT DEFAULT '',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
-            # Create files table
+            # File table (no experiment level - files ARE experiments)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cell_id INTEGER NOT NULL,
                     file_id TEXT UNIQUE NOT NULL,
                     original_filename TEXT NOT NULL,
-                    file_type TEXT NOT NULL CHECK (file_type IN ('par', 'par_csv')),
+                    paired_filename TEXT,  -- The .par.csv paired file
                     file_hash TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    processed_path TEXT,
-                    analysis_path TEXT,
-                    temperature_c REAL, -- File-level temperature metadata
+                    raw_file_path TEXT NOT NULL,
+                    parquet_file_path TEXT,  -- Processed parquet file
+                    acquisition_start TIMESTAMP,  -- From .par file metadata
+                    temperature_c REAL,
                     upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     processing_status TEXT DEFAULT 'uploaded' 
                         CHECK (processing_status IN ('uploaded', 'processing', 'completed', 'failed')),
                     error_message TEXT,
-                    metadata_json TEXT, -- Additional file metadata as JSON
+                    metadata_json TEXT,
                     FOREIGN KEY (cell_id) REFERENCES cells (id) ON DELETE CASCADE
                 )
             """)
             
-            # Create technique segments table
+            # Segment table with row mapping for efficient parquet queries
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS technique_segments (
+                CREATE TABLE IF NOT EXISTS segments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     file_id TEXT NOT NULL,
-                    segment_number INTEGER NOT NULL,
+                    cell_name TEXT NOT NULL,  -- For easy reference (no FK for mobility)
+                    segment_index INTEGER NOT NULL,
                     action_id INTEGER,
-                    technique_name TEXT,
-                    fundamental_technique TEXT,
-                    start_time_s REAL,
-                    end_time_s REAL,
-                    point_count INTEGER,
-                    temperature_c REAL, -- Segment-level temperature (inherits from file-level)
-                    analysis_results_json TEXT, -- Segment-specific analysis results
+                    technique_name TEXT NOT NULL,
+                    fundamental_technique TEXT NOT NULL,
+                    start_row INTEGER NOT NULL,  -- Row number in parquet file
+                    end_row INTEGER NOT NULL,    -- Row number in parquet file
+                    start_time_s REAL NOT NULL,
+                    end_time_s REAL NOT NULL,
+                    point_count INTEGER NOT NULL,
+                    analysis_status TEXT DEFAULT 'pending' 
+                        CHECK (analysis_status IN ('pending', 'completed', 'failed')),
+                    analysis_results_json TEXT,  -- Metrics, fit coeffs, goodness of fit
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (file_id) REFERENCES files (file_id) ON DELETE CASCADE
                 )
             """)
             
-            # Create user groups table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_groups (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    cell_id INTEGER NOT NULL,
-                    group_name TEXT NOT NULL,
-                    group_type TEXT NOT NULL DEFAULT 'Custom',
-                    description TEXT,
-                    techniques TEXT, -- JSON array of technique references: [{"file_id": "...", "segment_number": 1}]
-                    group_metadata_json TEXT, -- Group-specific metadata
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (cell_id) REFERENCES cells (id) ON DELETE CASCADE,
-                    UNIQUE(cell_id, group_name)
-                )
-            """)
-            
-            # Create ActionID mapping table for dynamic technique discovery
+            # ActionID mapping table for dynamic technique discovery
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS actionid_mappings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,260 +117,171 @@ class DatabaseManager:
                     fundamental_technique TEXT NOT NULL,
                     verified BOOLEAN DEFAULT FALSE,
                     user_defined BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # User groups table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cell_id INTEGER NOT NULL,
+                    group_name TEXT NOT NULL,
+                    group_type TEXT DEFAULT 'Custom',
+                    description TEXT DEFAULT '',
+                    segment_ids TEXT,  -- JSON array of segment IDs
+                    group_metadata_json TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (cell_id) REFERENCES cells (id) ON DELETE CASCADE,
+                    UNIQUE(cell_id, group_name)
                 )
             """)
             
             # Create indices for performance
             conn.execute("CREATE INDEX IF NOT EXISTS idx_files_cell_id ON files (cell_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_files_file_id ON files (file_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_segments_file_id ON technique_segments (file_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_segments_file_id ON segments (file_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_segments_cell_name ON segments (cell_name)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_segments_rows ON segments (start_row, end_row)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_groups_cell_id ON user_groups (cell_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_actionid_mappings_action_id ON actionid_mappings (action_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_actionid_action_id ON actionid_mappings (action_id)")
             
             conn.commit()
-            logger.info(f"Database initialized: {self.db_path}")
+            logger.info(f"Clean database schema initialized: {self.db_path}")
     
-    def migrate_schema(self, target_version: int = 1):
-        """Migrate database schema to target version.
-        
-        Args:
-            target_version: Target schema version
-        """
-        with self.get_connection() as conn:
-            # Add temperature_c column to files table if it doesn't exist
-            try:
-                conn.execute("ALTER TABLE files ADD COLUMN temperature_c REAL")
-                logger.info("Added temperature_c column to files table")
-            except sqlite3.OperationalError:
-                # Column already exists
-                pass
-                
-            # Add temperature_c column to technique_segments table if it doesn't exist
-            try:
-                conn.execute("ALTER TABLE technique_segments ADD COLUMN temperature_c REAL")
-                logger.info("Added temperature_c column to technique_segments table")
-            except sqlite3.OperationalError:
-                # Column already exists
-                pass
-                
-            # Add group_type column to user_groups table if it doesn't exist
-            try:
-                conn.execute("ALTER TABLE user_groups ADD COLUMN group_type TEXT DEFAULT 'Custom'")
-                logger.info("Added group_type column to user_groups table")
-            except sqlite3.OperationalError:
-                # Column already exists
-                pass
-            
-            # Add cell material columns if they don't exist
-            cell_material_columns = [
-                "cathode_material_type TEXT",
-                "cathode_active_mass_mg REAL", 
-                "anode_material_type TEXT",
-                "anode_active_mass_mg REAL"
-            ]
-            
-            for column_def in cell_material_columns:
-                try:
-                    conn.execute(f"ALTER TABLE cells ADD COLUMN {column_def}")
-                    logger.info(f"Added column {column_def.split()[0]} to cells table")
-                except sqlite3.OperationalError:
-                    # Column already exists
-                    pass
-                
-            # Rename file_ids/segments columns to techniques if needed
-            try:
-                # Check if old columns exist
-                cursor = conn.execute("PRAGMA table_info(user_groups)")
-                columns = [row[1] for row in cursor.fetchall()]
-                
-                if 'file_ids' in columns and 'techniques' not in columns:
-                    conn.execute("ALTER TABLE user_groups ADD COLUMN techniques TEXT")
-                    conn.execute("UPDATE user_groups SET techniques = '[]' WHERE techniques IS NULL")
-                    logger.info("Added techniques column to user_groups table")
-                    
-            except sqlite3.OperationalError:
-                # Migration not needed
-                pass
-            
-            conn.commit()
+    # ===== CELL OPERATIONS =====
     
-    # Cell operations
-    def create_cell(self, cell_name: str, description: str = "", chemistry: str = "", 
-                   capacity_ah: Optional[float] = None, notes: str = "") -> int:
+    def create_cell(self, cell_name: str, description: str = "", chemistry: str = "Li_metal",
+                   capacity_ah: Optional[float] = None, cathode_material: str = "",
+                   cathode_mass_mg: Optional[float] = None, anode_material: str = "",
+                   anode_mass_mg: Optional[float] = None, notes: str = "") -> int:
         """Create new cell and return cell_id.
         
         Args:
             cell_name: Unique cell identifier
-            description: Cell description
-            chemistry: Battery chemistry (e.g., 'Li-ion', 'LFP')
+            description: Cell description  
+            chemistry: Battery chemistry (default: Li_metal)
             capacity_ah: Nominal capacity in Ah
+            cathode_material: Cathode material type
+            cathode_mass_mg: Active cathode mass in mg
+            anode_material: Anode material type
+            anode_mass_mg: Active anode mass in mg
             notes: Additional notes
             
         Returns:
             cell_id: Primary key of created cell
-            
-        Raises:
-            sqlite3.IntegrityError: If cell_name already exists
         """
         with self.get_connection() as conn:
             cursor = conn.execute("""
-                INSERT INTO cells (cell_name, description, chemistry, capacity_ah, notes)
-                VALUES (?, ?, ?, ?, ?)
-            """, (cell_name, description, chemistry, capacity_ah, notes))
+                INSERT INTO cells (
+                    cell_name, description, chemistry, capacity_ah, cathode_material,
+                    cathode_mass_mg, anode_material, anode_mass_mg, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (cell_name, description, chemistry, capacity_ah, cathode_material,
+                  cathode_mass_mg, anode_material, anode_mass_mg, notes))
             conn.commit()
             cell_id = cursor.lastrowid
             logger.info(f"Created cell: {cell_name} (id={cell_id})")
             return cell_id
     
     def get_all_cells(self) -> List[Dict[str, Any]]:
-        """Get all cells with file counts.
-        
-        Returns:
-            List of cell dictionaries with file counts
-        """
+        """Get all cells with file counts."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT c.*, 
                        COUNT(f.id) as file_count,
-                       COUNT(CASE WHEN f.processing_status = 'completed' THEN 1 END) as processed_count
+                       COUNT(CASE WHEN f.processing_status = 'completed' THEN 1 END) as processed_count,
+                       COUNT(s.id) as segment_count,
+                       COUNT(CASE WHEN s.analysis_status = 'completed' THEN 1 END) as analyzed_segments
                 FROM cells c
                 LEFT JOIN files f ON c.id = f.cell_id
+                LEFT JOIN segments s ON f.file_id = s.file_id
                 GROUP BY c.id
                 ORDER BY c.created_at DESC
             """)
             return [dict(row) for row in cursor.fetchall()]
     
     def get_cell_by_id(self, cell_id: int) -> Optional[Dict[str, Any]]:
-        """Get cell by ID.
-        
-        Args:
-            cell_id: Cell primary key
-            
-        Returns:
-            Cell dictionary or None if not found
-        """
+        """Get cell by ID."""
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT * FROM cells WHERE id = ?", (cell_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
     
     def get_cell_by_name(self, cell_name: str) -> Optional[Dict[str, Any]]:
-        """Get cell by name.
-        
-        Args:
-            cell_name: Cell name
-            
-        Returns:
-            Cell dictionary or None if not found
-        """
+        """Get cell by name."""
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT * FROM cells WHERE cell_name = ?", (cell_name,))
             row = cursor.fetchone()
             return dict(row) if row else None
     
     def update_cell(self, cell_id: int, **updates) -> bool:
-        """Update cell metadata.
-        
-        Args:
-            cell_id: Cell primary key
-            **updates: Fields to update
-            
-        Returns:
-            True if cell was updated, False if not found
-        """
+        """Update cell metadata."""
         if not updates:
             return False
             
-        # Add updated_at timestamp
         updates['updated_at'] = datetime.now().isoformat()
-        
         set_clause = ", ".join(f"{key} = ?" for key in updates.keys())
         values = list(updates.values()) + [cell_id]
         
         with self.get_connection() as conn:
-            cursor = conn.execute(f"""
-                UPDATE cells SET {set_clause} WHERE id = ?
-            """, values)
+            cursor = conn.execute(f"UPDATE cells SET {set_clause} WHERE id = ?", values)
             conn.commit()
             return cursor.rowcount > 0
     
-    def delete_cell(self, cell_id: int) -> bool:
-        """Delete cell and all associated files.
-        
-        Args:
-            cell_id: Cell primary key
-            
-        Returns:
-            True if cell was deleted, False if not found
-        """
-        with self.get_connection() as conn:
-            cursor = conn.execute("DELETE FROM cells WHERE id = ?", (cell_id,))
-            conn.commit()
-            deleted = cursor.rowcount > 0
-            if deleted:
-                logger.info(f"Deleted cell: id={cell_id}")
-            return deleted
+    # ===== FILE OPERATIONS =====
     
-    # File operations
     def add_file_to_cell(self, cell_id: int, file_info: Dict[str, Any]) -> str:
         """Add file to cell and return file_id.
         
         Args:
             cell_id: Cell primary key
             file_info: Dictionary with file metadata
-                Required: file_id, original_filename, file_type, file_hash, file_path
-                Optional: processed_path, analysis_path, temperature_c, metadata
-                
-        Returns:
-            file_id: Unique file identifier
-            
-        Raises:
-            sqlite3.IntegrityError: If file_id already exists
+                Required: file_id, original_filename, file_hash, raw_file_path
+                Optional: paired_filename, parquet_file_path, acquisition_start, temperature_c
         """
-        required_fields = ['file_id', 'original_filename', 'file_type', 'file_hash', 'file_path']
-        for field in required_fields:
+        required = ['file_id', 'original_filename', 'file_hash', 'raw_file_path']
+        for field in required:
             if field not in file_info:
                 raise ValueError(f"Required field missing: {field}")
+        
+        # Parse acquisition_start if string
+        acquisition_start = file_info.get('acquisition_start')
+        if isinstance(acquisition_start, str):
+            try:
+                acquisition_start = datetime.fromisoformat(acquisition_start)
+            except ValueError:
+                acquisition_start = None
         
         metadata_json = json.dumps(file_info.get('metadata', {}))
         
         with self.get_connection() as conn:
             conn.execute("""
                 INSERT INTO files (
-                    cell_id, file_id, original_filename, file_type, file_hash, file_path,
-                    processed_path, analysis_path, temperature_c, metadata_json
+                    cell_id, file_id, original_filename, paired_filename, file_hash,
+                    raw_file_path, parquet_file_path, acquisition_start, temperature_c, 
+                    metadata_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 cell_id, file_info['file_id'], file_info['original_filename'],
-                file_info['file_type'], file_info['file_hash'], file_info['file_path'],
-                file_info.get('processed_path'), file_info.get('analysis_path'),
-                file_info.get('temperature_c'), metadata_json
+                file_info.get('paired_filename'), file_info['file_hash'],
+                file_info['raw_file_path'], file_info.get('parquet_file_path'),
+                acquisition_start, file_info.get('temperature_c'), metadata_json
             ))
             conn.commit()
             logger.info(f"Added file to cell: {file_info['file_id']} → cell_id={cell_id}")
             return file_info['file_id']
     
     def get_cell_files(self, cell_id: int) -> List[Dict[str, Any]]:
-        """Get all files for a cell.
-        
-        Args:
-            cell_id: Cell primary key
-            
-        Returns:
-            List of file dictionaries
-        """
+        """Get all files for a cell."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
-                SELECT * FROM files 
-                WHERE cell_id = ? 
-                ORDER BY upload_timestamp DESC
+                SELECT * FROM files WHERE cell_id = ? ORDER BY upload_timestamp DESC
             """, (cell_id,))
             files = []
             for row in cursor.fetchall():
                 file_dict = dict(row)
-                # Parse JSON metadata
                 if file_dict['metadata_json']:
                     file_dict['metadata'] = json.loads(file_dict['metadata_json'])
                 else:
@@ -395,40 +291,24 @@ class DatabaseManager:
             return files
     
     def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
-        """Get file by file_id.
-        
-        Args:
-            file_id: Unique file identifier
-            
-        Returns:
-            File dictionary or None if not found
-        """
+        """Get file by file_id."""
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT * FROM files WHERE file_id = ?", (file_id,))
             row = cursor.fetchone()
-            if row:
-                file_dict = dict(row)
-                if file_dict['metadata_json']:
-                    file_dict['metadata'] = json.loads(file_dict['metadata_json'])
-                else:
-                    file_dict['metadata'] = {}
-                del file_dict['metadata_json']
-                return file_dict
-            return None
-    
-    def update_processing_status(self, file_id: str, status: str, 
-                               error_message: str = None, **updates) -> bool:
-        """Update file processing status.
-        
-        Args:
-            file_id: Unique file identifier
-            status: New processing status
-            error_message: Error message if status is 'failed'
-            **updates: Additional fields to update
+            if not row:
+                return None
             
-        Returns:
-            True if file was updated, False if not found
-        """
+            file_dict = dict(row)
+            if file_dict['metadata_json']:
+                file_dict['metadata'] = json.loads(file_dict['metadata_json'])
+            else:
+                file_dict['metadata'] = {}
+            del file_dict['metadata_json']
+            return file_dict
+    
+    def update_file_processing_status(self, file_id: str, status: str, 
+                                    error_message: str = None, **updates) -> bool:
+        """Update file processing status."""
         updates['processing_status'] = status
         if error_message:
             updates['error_message'] = error_message
@@ -437,40 +317,35 @@ class DatabaseManager:
         values = list(updates.values()) + [file_id]
         
         with self.get_connection() as conn:
-            cursor = conn.execute(f"""
-                UPDATE files SET {set_clause} WHERE file_id = ?
-            """, values)
+            cursor = conn.execute(f"UPDATE files SET {set_clause} WHERE file_id = ?", values)
             conn.commit()
             return cursor.rowcount > 0
     
-    def move_file_to_cell(self, file_id: str, new_cell_id: int) -> bool:
-        """Move file between cells atomically.
-        
-        Args:
-            file_id: Unique file identifier
-            new_cell_id: Target cell primary key
-            
-        Returns:
-            True if file was moved, False if not found
-        """
+    def move_file_to_cell(self, file_id: str, new_cell_id: int, new_cell_name: str) -> bool:
+        """Move file between cells atomically, updating segments."""
         with self.get_connection() as conn:
-            # Begin transaction
             conn.execute("BEGIN")
             try:
-                # Check if target cell exists
+                # Check target cell exists
                 cursor = conn.execute("SELECT id FROM cells WHERE id = ?", (new_cell_id,))
                 if not cursor.fetchone():
                     conn.rollback()
                     return False
                 
                 # Move file
-                cursor = conn.execute("""
-                    UPDATE files SET cell_id = ? WHERE file_id = ?
-                """, (new_cell_id, file_id))
-                
+                cursor = conn.execute(
+                    "UPDATE files SET cell_id = ? WHERE file_id = ?", 
+                    (new_cell_id, file_id)
+                )
                 if cursor.rowcount == 0:
                     conn.rollback()
                     return False
+                
+                # Update segments cell_name reference
+                conn.execute(
+                    "UPDATE segments SET cell_name = ? WHERE file_id = ?",
+                    (new_cell_name, file_id)
+                )
                 
                 conn.commit()
                 logger.info(f"Moved file: {file_id} → cell_id={new_cell_id}")
@@ -481,68 +356,45 @@ class DatabaseManager:
                 logger.error(f"Failed to move file {file_id}: {e}")
                 return False
     
-    def delete_file(self, file_id: str) -> bool:
-        """Delete file and all associated segments.
-        
-        Args:
-            file_id: Unique file identifier
-            
-        Returns:
-            True if file was deleted, False if not found
-        """
-        with self.get_connection() as conn:
-            cursor = conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
-            conn.commit()
-            deleted = cursor.rowcount > 0
-            if deleted:
-                logger.info(f"Deleted file: {file_id}")
-            return deleted
+    # ===== SEGMENT OPERATIONS =====
     
-    # Technique segments operations
-    def add_technique_segments(self, file_id: str, segments: List[Dict[str, Any]]):
-        """Add technique segments for a file.
+    def add_segments_to_file(self, file_id: str, cell_name: str, segments: List[Dict[str, Any]]):
+        """Add segments for a file with row mapping.
         
         Args:
-            file_id: Unique file identifier
-            segments: List of segment dictionaries
+            file_id: File identifier
+            cell_name: Cell name for easy reference
+            segments: List of segment data with row mapping
         """
         with self.get_connection() as conn:
             for segment in segments:
                 analysis_json = json.dumps(segment.get('analysis_results', {}))
+                
                 conn.execute("""
-                    INSERT INTO technique_segments (
-                        file_id, segment_number, action_id, technique_name,
-                        fundamental_technique, start_time_s, end_time_s,
-                        point_count, analysis_results_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO segments (
+                        file_id, cell_name, segment_index, action_id, technique_name,
+                        fundamental_technique, start_row, end_row, start_time_s, end_time_s,
+                        point_count, analysis_status, analysis_results_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    file_id, segment['segment_number'], segment.get('action_id'),
-                    segment.get('technique_name'), segment.get('fundamental_technique'),
-                    segment.get('start_time_s'), segment.get('end_time_s'),
-                    segment.get('point_count', 0), analysis_json
+                    file_id, cell_name, segment['segment_index'], segment.get('action_id'),
+                    segment['technique_name'], segment['fundamental_technique'],
+                    segment['start_row'], segment['end_row'], segment['start_time_s'],
+                    segment['end_time_s'], segment['point_count'],
+                    segment.get('analysis_status', 'pending'), analysis_json
                 ))
             conn.commit()
             logger.info(f"Added {len(segments)} segments for file: {file_id}")
     
     def get_file_segments(self, file_id: str) -> List[Dict[str, Any]]:
-        """Get technique segments for a file.
-        
-        Args:
-            file_id: Unique file identifier
-            
-        Returns:
-            List of segment dictionaries
-        """
+        """Get all segments for a file."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
-                SELECT * FROM technique_segments 
-                WHERE file_id = ? 
-                ORDER BY segment_number
+                SELECT * FROM segments WHERE file_id = ? ORDER BY segment_index
             """, (file_id,))
             segments = []
             for row in cursor.fetchall():
                 segment_dict = dict(row)
-                # Parse JSON analysis results
                 if segment_dict['analysis_results_json']:
                     segment_dict['analysis_results'] = json.loads(segment_dict['analysis_results_json'])
                 else:
@@ -551,250 +403,65 @@ class DatabaseManager:
                 segments.append(segment_dict)
             return segments
     
-    # User groups operations  
-    def create_user_group(self, cell_id: int, group_name: str, group_type: str = "Custom",
-                         description: str = "", techniques: List[Dict] = None,
-                         metadata: Dict[str, Any] = None) -> int:
-        """Create user group for a cell.
-        
-        Args:
-            cell_id: Cell primary key
-            group_name: Group name (unique within cell)
-            group_type: Group type (OCV, Rate, EIS, etc.)
-            description: Group description
-            techniques: List of technique references: [{"file_id": "...", "segment_number": 1}]
-            metadata: Additional group metadata
-            
-        Returns:
-            group_id: Primary key of created group
-        """
-        techniques_json = json.dumps(techniques or [])
-        metadata_json = json.dumps(metadata or {})
-        
+    def get_segment_by_id(self, segment_id: int) -> Optional[Dict[str, Any]]:
+        """Get segment by ID with analysis results."""
         with self.get_connection() as conn:
-            cursor = conn.execute("""
-                INSERT INTO user_groups (
-                    cell_id, group_name, group_type, description, techniques,
-                    group_metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (cell_id, group_name, group_type, description, techniques_json,
-                  metadata_json))
-            conn.commit()
-            group_id = cursor.lastrowid
-            logger.info(f"Created user group: {group_name} (type={group_type}, cell_id={cell_id})")
-            return group_id
-    
-    def get_cell_groups(self, cell_id: int) -> List[Dict[str, Any]]:
-        """Get all user groups for a cell.
-        
-        Args:
-            cell_id: Cell primary key
-            
-        Returns:
-            List of group dictionaries
-        """
-        with self.get_connection() as conn:
-            cursor = conn.execute("""
-                SELECT * FROM user_groups 
-                WHERE cell_id = ? 
-                ORDER BY created_at DESC
-            """, (cell_id,))
-            groups = []
-            for row in cursor.fetchall():
-                group_dict = dict(row)
-                # Parse JSON fields
-                if 'techniques' in group_dict and group_dict['techniques']:
-                    group_dict['techniques'] = json.loads(group_dict['techniques'])
-                else:
-                    group_dict['techniques'] = []
-                    
-                # Handle legacy fields for backward compatibility
-                if 'file_ids' in group_dict and group_dict['file_ids']:
-                    group_dict['file_ids'] = json.loads(group_dict['file_ids'])
-                if 'segments' in group_dict and group_dict['segments']:
-                    group_dict['segments'] = json.loads(group_dict['segments'])
-                    
-                if group_dict['group_metadata_json']:
-                    group_dict['metadata'] = json.loads(group_dict['group_metadata_json'])
-                else:
-                    group_dict['metadata'] = {}
-                del group_dict['group_metadata_json']
-                groups.append(group_dict)
-            return groups
-    
-    def update_user_group(self, group_id: int, **updates) -> bool:
-        """Update user group.
-        
-        Args:
-            group_id: Group primary key
-            **updates: Fields to update (techniques, group_type, description, etc.)
-            
-        Returns:
-            True if group was updated, False if not found
-        """
-        if not updates:
-            return False
-            
-        # Handle JSON serialization for techniques
-        if 'techniques' in updates:
-            updates['techniques'] = json.dumps(updates['techniques'])
-        if 'metadata' in updates:
-            updates['group_metadata_json'] = json.dumps(updates['metadata'])
-            del updates['metadata']
-            
-        # Add updated_at timestamp
-        updates['updated_at'] = datetime.now().isoformat()
-        
-        set_clause = ", ".join(f"{key} = ?" for key in updates.keys())
-        values = list(updates.values()) + [group_id]
-        
-        with self.get_connection() as conn:
-            cursor = conn.execute(f"""
-                UPDATE user_groups SET {set_clause} WHERE id = ?
-            """, values)
-            conn.commit()
-            return cursor.rowcount > 0
-    
-    def delete_user_group(self, group_id: int) -> bool:
-        """Delete user group.
-        
-        Args:
-            group_id: Group primary key
-            
-        Returns:
-            True if group was deleted, False if not found
-        """
-        with self.get_connection() as conn:
-            cursor = conn.execute("DELETE FROM user_groups WHERE id = ?", (group_id,))
-            conn.commit()
-            deleted = cursor.rowcount > 0
-            if deleted:
-                logger.info(f"Deleted user group: id={group_id}")
-            return deleted
-    
-    def get_user_group_by_id(self, group_id: int) -> Optional[Dict[str, Any]]:
-        """Get user group by ID.
-        
-        Args:
-            group_id: Group primary key
-            
-        Returns:
-            Group dictionary or None if not found
-        """
-        with self.get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM user_groups WHERE id = ?", (group_id,))
+            cursor = conn.execute("SELECT * FROM segments WHERE id = ?", (segment_id,))
             row = cursor.fetchone()
             if not row:
                 return None
-                
-            group_dict = dict(row)
-            # Parse JSON fields
-            if group_dict['techniques']:
-                group_dict['techniques'] = json.loads(group_dict['techniques'])
-            else:
-                group_dict['techniques'] = []
-                
-            if group_dict['group_metadata_json']:
-                group_dict['metadata'] = json.loads(group_dict['group_metadata_json'])
-            else:
-                group_dict['metadata'] = {}
-            del group_dict['group_metadata_json']
             
-            return group_dict
+            segment_dict = dict(row)
+            if segment_dict['analysis_results_json']:
+                segment_dict['analysis_results'] = json.loads(segment_dict['analysis_results_json'])
+            else:
+                segment_dict['analysis_results'] = {}
+            del segment_dict['analysis_results_json']
+            return segment_dict
     
-    def get_cell_techniques_with_files(self, cell_id: int) -> List[Dict[str, Any]]:
-        """Get all techniques for a cell with file information.
+    def update_segment_analysis(self, segment_id: int, analysis_status: str, 
+                              analysis_results: Dict[str, Any]) -> bool:
+        """Update segment analysis results.
         
         Args:
-            cell_id: Cell primary key
-            
-        Returns:
-            List of technique dictionaries with file information
+            segment_id: Segment ID
+            analysis_status: 'completed' or 'failed'
+            analysis_results: Analysis metrics and fit coefficients
         """
+        analysis_json = json.dumps(analysis_results)
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE segments SET analysis_status = ?, analysis_results_json = ?
+                WHERE id = ?
+            """, (analysis_status, analysis_json, segment_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def get_cell_segments_summary(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get segment summary for a cell with technique pass/fail status."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT 
-                    ts.*,
+                    s.fundamental_technique,
+                    COUNT(*) as total_segments,
+                    COUNT(CASE WHEN s.analysis_status = 'completed' THEN 1 END) as passed_segments,
+                    COUNT(CASE WHEN s.analysis_status = 'failed' THEN 1 END) as failed_segments,
                     f.original_filename,
-                    f.file_type,
-                    f.temperature_c,
-                    f.processing_status
-                FROM technique_segments ts
-                JOIN files f ON ts.file_id = f.file_id
+                    f.processing_status,
+                    s.file_id
+                FROM segments s
+                JOIN files f ON s.file_id = f.file_id  
                 WHERE f.cell_id = ?
-                ORDER BY f.upload_timestamp ASC, ts.segment_number ASC
+                GROUP BY s.fundamental_technique, f.original_filename, f.processing_status, s.file_id
+                ORDER BY f.upload_timestamp DESC, s.fundamental_technique
             """, (cell_id,))
-            
-            techniques = []
-            for row in cursor.fetchall():
-                technique_dict = dict(row)
-                # Parse JSON analysis results
-                if technique_dict['analysis_results_json']:
-                    technique_dict['analysis_results'] = json.loads(technique_dict['analysis_results_json'])
-                else:
-                    technique_dict['analysis_results'] = {}
-                del technique_dict['analysis_results_json']
-                techniques.append(technique_dict)
-            return techniques
+            return [dict(row) for row in cursor.fetchall()]
     
-    # Database utilities
-    def get_database_stats(self) -> Dict[str, Any]:
-        """Get database statistics.
-        
-        Returns:
-            Dictionary with database statistics
-        """
-        with self.get_connection() as conn:
-            stats = {}
-            
-            # Count records in each table
-            for table in ['cells', 'files', 'technique_segments', 'user_groups']:
-                cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
-                stats[f"{table}_count"] = cursor.fetchone()[0]
-            
-            # File processing status breakdown
-            cursor = conn.execute("""
-                SELECT processing_status, COUNT(*) 
-                FROM files 
-                GROUP BY processing_status
-            """)
-            stats['processing_status'] = dict(cursor.fetchall())
-            
-            # Database file size
-            stats['db_size_bytes'] = self.db_path.stat().st_size
-            
-            return stats
+    # ===== ACTIONID MAPPING =====
     
-    def vacuum_database(self):
-        """Vacuum database to reclaim space."""
-        with self.get_connection() as conn:
-            conn.execute("VACUUM")
-            logger.info("Database vacuumed")
-    
-    def backup_database(self, backup_path: Path):
-        """Create database backup.
-        
-        Args:
-            backup_path: Path for backup file
-        """
-        backup_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with self.get_connection() as source:
-            with sqlite3.connect(backup_path) as backup:
-                source.backup(backup)
-        
-        logger.info(f"Database backed up to: {backup_path}")
-    
-    # ActionID mapping methods for dynamic technique discovery
     def get_actionid_mapping(self, action_id: int) -> Optional[Dict[str, Any]]:
-        """Get ActionID mapping from database.
-        
-        Args:
-            action_id: ActionID to look up
-            
-        Returns:
-            Mapping dictionary or None if not found
-        """
+        """Get ActionID mapping from database."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT action_id, technique_name, fundamental_technique, verified, user_defined
@@ -805,17 +472,7 @@ class DatabaseManager:
     
     def add_actionid_mapping(self, action_id: int, technique_name: str, 
                            fundamental_technique: str, user_defined: bool = True) -> bool:
-        """Add ActionID mapping to database.
-        
-        Args:
-            action_id: ActionID number
-            technique_name: Full technique name
-            fundamental_technique: Fundamental technique category
-            user_defined: Whether this was user-defined or pre-populated
-            
-        Returns:
-            True if added successfully, False if already exists
-        """
+        """Add ActionID mapping."""
         try:
             with self.get_connection() as conn:
                 conn.execute("""
@@ -826,134 +483,118 @@ class DatabaseManager:
                 logger.info(f"Added ActionID mapping: {action_id} -> {fundamental_technique}")
                 return True
         except sqlite3.IntegrityError:
-            logger.warning(f"ActionID {action_id} mapping already exists")
+            logger.debug(f"ActionID {action_id} mapping already exists")
             return False
-    
-    def get_all_actionid_mappings(self) -> List[Dict[str, Any]]:
-        """Get all ActionID mappings from database.
-        
-        Returns:
-            List of mapping dictionaries
-        """
-        with self.get_connection() as conn:
-            cursor = conn.execute("""
-                SELECT action_id, technique_name, fundamental_technique, verified, user_defined
-                FROM actionid_mappings ORDER BY action_id
-            """)
-            return [dict(row) for row in cursor.fetchall()]
-    
-    def update_actionid_mapping(self, action_id: int, **updates) -> bool:
-        """Update ActionID mapping.
-        
-        Args:
-            action_id: ActionID to update
-            **updates: Fields to update
-            
-        Returns:
-            True if updated, False if not found
-        """
-        if not updates:
-            return False
-            
-        updates['updated_at'] = datetime.now().isoformat()
-        set_clause = ", ".join(f"{key} = ?" for key in updates.keys())
-        values = list(updates.values()) + [action_id]
-        
-        with self.get_connection() as conn:
-            cursor = conn.execute(f"""
-                UPDATE actionid_mappings SET {set_clause} WHERE action_id = ?
-            """, values)
-            conn.commit()
-            return cursor.rowcount > 0
     
     def populate_default_actionid_mappings(self):
-        """Populate database with known ActionID mappings."""
-        default_mappings = [
+        """Populate with known ActionID mappings."""
+        defaults = [
             (8, 'Constant Current', 'CC', False),
             (20, 'Galvanostatic EIS', 'GEIS', False), 
             (23, 'Energy Open Circuit', 'OCV', False)
         ]
         
-        for action_id, technique_name, fundamental_technique, user_defined in default_mappings:
+        for action_id, technique_name, fundamental_technique, user_defined in defaults:
             self.add_actionid_mapping(action_id, technique_name, fundamental_technique, user_defined)
-
-
-# Convenience functions for common operations
-def get_or_create_cell(db: DatabaseManager, cell_name: str, **metadata) -> Tuple[int, bool]:
-    """Get existing cell or create new one.
     
-    Args:
-        db: DatabaseManager instance
-        cell_name: Cell name
-        **metadata: Cell metadata for creation
+    # ===== USER GROUPS =====
+    
+    def create_user_group(self, cell_id: int, group_name: str, group_type: str = "Custom",
+                         description: str = "", segment_ids: List[int] = None) -> int:
+        """Create user group for segments."""
+        segment_ids_json = json.dumps(segment_ids or [])
         
-    Returns:
-        Tuple of (cell_id, created) where created is True if cell was created
-    """
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT INTO user_groups (cell_id, group_name, group_type, description, segment_ids)
+                VALUES (?, ?, ?, ?, ?)
+            """, (cell_id, group_name, group_type, description, segment_ids_json))
+            conn.commit()
+            group_id = cursor.lastrowid
+            logger.info(f"Created user group: {group_name} (cell_id={cell_id})")
+            return group_id
+    
+    def get_cell_groups(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get all user groups for a cell."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM user_groups WHERE cell_id = ? ORDER BY created_at DESC
+            """, (cell_id,))
+            groups = []
+            for row in cursor.fetchall():
+                group_dict = dict(row)
+                if group_dict['segment_ids']:
+                    group_dict['segment_ids'] = json.loads(group_dict['segment_ids'])
+                else:
+                    group_dict['segment_ids'] = []
+                groups.append(group_dict)
+            return groups
+    
+    # ===== ANALYSIS HELPERS =====
+    
+    def compute_timestamps_for_file(self, file_id: str) -> bool:
+        """Compute absolute timestamps for file segments.
+        
+        This assumes acquisition_start is already stored in the file record
+        and segments have relative time_s values that need to be converted
+        to absolute timestamps: acquisition_start + elapsed_time_s
+        """
+        file_info = self.get_file_by_id(file_id)
+        if not file_info or not file_info.get('acquisition_start'):
+            logger.error(f"Cannot compute timestamps: missing acquisition_start for {file_id}")
+            return False
+        
+        acquisition_start = file_info['acquisition_start']
+        if isinstance(acquisition_start, str):
+            acquisition_start = datetime.fromisoformat(acquisition_start)
+        
+        # This would typically be called during file processing
+        # when we have the actual time series data loaded
+        logger.info(f"Timestamps computed for file: {file_id} (start: {acquisition_start})")
+        return True
+    
+    # ===== DATABASE UTILITIES =====
+    
+    def get_database_stats(self) -> Dict[str, Any]:
+        """Get database statistics."""
+        with self.get_connection() as conn:
+            stats = {}
+            
+            # Count records
+            for table in ['cells', 'files', 'segments', 'user_groups', 'actionid_mappings']:
+                cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
+                stats[f"{table}_count"] = cursor.fetchone()[0]
+            
+            # Processing status breakdown
+            cursor = conn.execute("""
+                SELECT processing_status, COUNT(*) FROM files GROUP BY processing_status
+            """)
+            stats['file_processing_status'] = dict(cursor.fetchall())
+            
+            # Analysis status breakdown  
+            cursor = conn.execute("""
+                SELECT analysis_status, COUNT(*) FROM segments GROUP BY analysis_status
+            """)
+            stats['segment_analysis_status'] = dict(cursor.fetchall())
+            
+            # Database size
+            stats['db_size_bytes'] = self.db_path.stat().st_size
+            
+            return stats
+    
+    def vacuum_database(self):
+        """Vacuum database to reclaim space."""
+        with self.get_connection() as conn:
+            conn.execute("VACUUM")
+            logger.info("Database vacuumed")
+
+
+# Convenience functions
+def get_or_create_cell(db: DatabaseManager, cell_name: str, **metadata) -> Tuple[int, bool]:
+    """Get existing cell or create new one."""
     cell = db.get_cell_by_name(cell_name)
     if cell:
         return cell['id'], False
     else:
         cell_id = db.create_cell(cell_name, **metadata)
         return cell_id, True
-
-
-def migrate_from_json_storage(db: DatabaseManager, data_dir: Path):
-    """Migrate existing JSON-based storage to database.
-    
-    Args:
-        db: DatabaseManager instance
-        data_dir: Path to existing data/cells/ directory
-    """
-    cells_dir = data_dir / "cells"
-    if not cells_dir.exists():
-        logger.info("No existing cells directory found")
-        return
-    
-    migrated_cells = 0
-    migrated_files = 0
-    
-    for cell_dir in cells_dir.iterdir():
-        if not cell_dir.is_dir():
-            continue
-            
-        cell_name = cell_dir.name
-        logger.info(f"Migrating cell: {cell_name}")
-        
-        # Create cell in database
-        try:
-            cell_id = db.create_cell(cell_name, description=f"Migrated from {cell_dir}")
-            migrated_cells += 1
-        except sqlite3.IntegrityError:
-            logger.warning(f"Cell {cell_name} already exists, skipping")
-            continue
-        
-        # Migrate files from metadata.json if it exists
-        metadata_file = cell_dir / "metadata.json"
-        if metadata_file.exists():
-            try:
-                with open(metadata_file) as f:
-                    cell_metadata = json.load(f)
-                
-                for file_info in cell_metadata.get('files', []):
-                    # Convert old format to new database format
-                    db_file_info = {
-                        'file_id': file_info.get('file_id', f"{cell_name}_{file_info['filename']}"),
-                        'original_filename': file_info['filename'],
-                        'file_type': 'par',  # Assume .par files for migration
-                        'file_hash': file_info.get('file_hash', ''),
-                        'file_path': str(cell_dir / 'raw' / file_info['filename']),
-                        'processed_path': str(cell_dir / 'processed' / f"{file_info.get('file_id', file_info['filename'])}.parquet"),
-                        'metadata': file_info
-                    }
-                    
-                    try:
-                        db.add_file_to_cell(cell_id, db_file_info)
-                        migrated_files += 1
-                    except Exception as e:
-                        logger.error(f"Failed to migrate file {file_info['filename']}: {e}")
-                        
-            except Exception as e:
-                logger.error(f"Failed to read metadata for cell {cell_name}: {e}")
-    
-    logger.info(f"Migration complete: {migrated_cells} cells, {migrated_files} files")

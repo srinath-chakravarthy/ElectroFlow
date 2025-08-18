@@ -44,7 +44,7 @@ class BackendAPI:
             db_path: Path to SQLite database
         """
         self.data_dir = data_dir or Path("data")
-        self.db_path = db_path or (self.data_dir / "battery_analyzer.db")
+        self.db_path = db_path or (self.data_dir / "battery_data.db")
         
         # Initialize backend components
         self.db = DatabaseManager(self.db_path)
@@ -63,7 +63,7 @@ class BackendAPI:
             Dict with success status and cells data
         """
         try:
-            cells = self.storage.get_all_cells()
+            cells = self.db.get_all_cells()
             return {
                 'success': True,
                 'cells': cells,
@@ -77,20 +77,26 @@ class BackendAPI:
                 'cells': []
             }
 
-    def create_cell(self, cell_name: str, description: str = "", chemistry: str = "",
-                   capacity_ah: Optional[float] = None, notes: str = "") -> Dict[str, Any]:
+    def create_cell(self, cell_name: str, description: str = "", chemistry: str = "Li_metal",
+                   capacity_ah: Optional[float] = None, cathode_material: str = "",
+                   cathode_mass_mg: Optional[float] = None, anode_material: str = "",
+                   anode_mass_mg: Optional[float] = None, notes: str = "") -> Dict[str, Any]:
         """
-        Create new cell with validation.
+        Create new cell with material metadata.
         
         Args:
             cell_name: Unique cell identifier
             description: Cell description
-            chemistry: Battery chemistry
+            chemistry: Battery chemistry (default: Li_metal)
             capacity_ah: Nominal capacity
+            cathode_material: Cathode material type
+            cathode_mass_mg: Active cathode mass in mg
+            anode_material: Anode material type
+            anode_mass_mg: Active anode mass in mg
             notes: Additional notes
             
         Returns:
-            Dict with success status and cell_id or error message
+            Dict with success status and cell_data or error message
         """
         try:
             # Validate cell name
@@ -103,22 +109,33 @@ class BackendAPI:
             cell_name = cell_name.strip()
             
             # Check if cell already exists
-            existing_cell = self.storage.get_cell_by_name(cell_name)
+            existing_cell = self.db.get_cell_by_name(cell_name)
             if existing_cell:
                 return {
                     'success': False,
                     'error': f"Cell '{cell_name}' already exists"
                 }
             
-            # Create cell
-            cell_id = self.storage.create_cell(
-                cell_name, description, chemistry, capacity_ah, notes
+            # Create cell with material metadata
+            cell_id = self.db.create_cell(
+                cell_name=cell_name,
+                description=description,
+                chemistry=chemistry,
+                capacity_ah=capacity_ah,
+                cathode_material=cathode_material,
+                cathode_mass_mg=cathode_mass_mg,
+                anode_material=anode_material,
+                anode_mass_mg=anode_mass_mg,
+                notes=notes
             )
+            
+            # Get created cell data
+            cell_data = self.db.get_cell_by_id(cell_id)
             
             return {
                 'success': True,
                 'cell_id': cell_id,
-                'cell_name': cell_name,
+                'cell_data': cell_data,
                 'message': f"Cell '{cell_name}' created successfully"
             }
             
@@ -127,6 +144,174 @@ class BackendAPI:
             return {
                 'success': False,
                 'error': f"Failed to create cell: {str(e)}"
+            }
+
+    def get_cell_files(self, cell_id: int) -> Dict[str, Any]:
+        """
+        Get all files for a cell.
+        
+        Args:
+            cell_id: Cell ID
+            
+        Returns:
+            Dict with success status and files data
+        """
+        try:
+            files = self.db.get_cell_files(cell_id)
+            return {
+                'success': True,
+                'files': files,
+                'total_files': len(files)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get files for cell {cell_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'files': []
+            }
+    
+    def get_file_analysis_results(self, file_id: str) -> Dict[str, Any]:
+        """
+        Get analysis results for a file (segments).
+        
+        Args:
+            file_id: File ID
+            
+        Returns:
+            Dict with success status and analysis results
+        """
+        try:
+            segments = self.db.get_file_segments(file_id)
+            return {
+                'success': True,
+                'analysis_results': {
+                    'segments': segments,
+                    'total_segments': len(segments)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Failed to get analysis results for file {file_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'analysis_results': {}
+            }
+    
+    def get_file_data_preview(self, file_id: str, n_rows: int = 1000) -> Dict[str, Any]:
+        """
+        Get preview of file data.
+        
+        Args:
+            file_id: File ID
+            n_rows: Number of rows to preview
+            
+        Returns:
+            Dict with success status and preview data
+        """
+        try:
+            file_info = self.db.get_file_by_id(file_id)
+            if not file_info:
+                return {
+                    'success': False,
+                    'error': f"File {file_id} not found"
+                }
+            
+            # Get segments for technique info
+            segments = self.db.get_file_segments(file_id)
+            techniques = []
+            if segments:
+                techniques = list(set([s['fundamental_technique'] for s in segments]))
+            
+            # Try to load parquet data if available
+            import pandas as pd
+            preview_df = pd.DataFrame()
+            stats = {
+                'techniques': techniques,
+                'total_segments': len(segments),
+                'file_info': file_info,
+                'total_rows': 0,
+                'total_columns': 0,
+                'time_range': {'min': 0, 'max': 0}
+            }
+            
+            parquet_path = file_info.get('parquet_file_path')
+            if parquet_path and Path(parquet_path).exists():
+                try:
+                    # Load first n_rows from parquet
+                    import polars as pl
+                    df_pl = pl.read_parquet(parquet_path)
+                    
+                    # Convert to pandas for UI compatibility
+                    preview_df = df_pl.limit(n_rows).to_pandas()
+                    
+                    stats.update({
+                        'total_rows': df_pl.height,
+                        'total_columns': df_pl.width,
+                    })
+                    
+                    # Get time range if time_s column exists
+                    if 'time_s' in df_pl.columns:
+                        time_stats = df_pl.select([pl.col('time_s').min(), pl.col('time_s').max()]).to_pandas().iloc[0]
+                        stats['time_range'] = {
+                            'min': float(time_stats[0]) if not pd.isna(time_stats[0]) else 0,
+                            'max': float(time_stats[1]) if not pd.isna(time_stats[1]) else 0
+                        }
+                        
+                except Exception as e:
+                    logger.warning(f"Could not load parquet data from {parquet_path}: {e}")
+            
+            return {
+                'success': True,
+                'preview_data': preview_df,
+                'stats': stats
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get preview for file {file_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'preview_data': pd.DataFrame(),
+                'stats': {}
+            }
+    
+    def get_group_analytics_summary(self, cell_id: int) -> Dict[str, Any]:
+        """
+        Get group analytics summary for a cell.
+        
+        Args:
+            cell_id: Cell ID
+            
+        Returns:
+            Dict with success status and groups summary
+        """
+        try:
+            groups = self.db.get_cell_groups(cell_id)
+            
+            # Convert to expected format for UI
+            groups_summary = []
+            for group in groups:
+                summary = {
+                    'group_id': group['id'],
+                    'group_name': group['group_name'],
+                    'group_type': group['group_type'],
+                    'technique_count': len(group.get('segment_ids', [])),
+                    'overall_quality': 0.95  # TODO: Calculate from analysis results
+                }
+                groups_summary.append(summary)
+            
+            return {
+                'success': True,
+                'groups_summary': groups_summary
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get group analytics for cell {cell_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'groups_summary': []
             }
 
     def get_cell_details(self, cell_name: str) -> Dict[str, Any]:

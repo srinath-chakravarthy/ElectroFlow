@@ -134,16 +134,27 @@ class ActionsSegmentsTreeWidget(QWidget):
             stats = preview_result.get('stats', {})
             techniques = stats.get('techniques', [])
             
-            # Create action items (simplified - using placeholder data)
-            for i, technique in enumerate(techniques):
-                action_item = self._create_action_item(i, technique, analysis_data)
-                self.tree.addTopLevelItem(action_item)
+            # Get actual segments from analysis data
+            segments = analysis_data.get('segments', [])
             
-            # If no techniques found, create placeholder
-            if not techniques:
+            if segments:
+                # Group segments by technique or action_id
+                technique_groups = {}
+                for segment in segments:
+                    technique = segment.get('fundamental_technique', 'Unknown')
+                    if technique not in technique_groups:
+                        technique_groups[technique] = []
+                    technique_groups[technique].append(segment)
+                
+                # Create action items for each technique group
+                for technique, technique_segments in technique_groups.items():
+                    action_item = self._create_action_item_from_segments(technique, technique_segments)
+                    self.tree.addTopLevelItem(action_item)
+            else:
+                # No segments found - show message
                 placeholder_item = QTreeWidgetItem([
                     "No segments found",
-                    "Unknown",
+                    "File not processed yet",
                     "N/A",
                     "N/A"
                 ])
@@ -162,9 +173,85 @@ class ActionsSegmentsTreeWidget(QWidget):
         except Exception as e:
             self._show_error(f"Error loading segments: {str(e)}")
     
+    def _create_action_item_from_segments(self, technique: str, segments: List[Dict]) -> QTreeWidgetItem:
+        """Create tree item for technique with actual segments."""
+        
+        # Technique-level item  
+        technique_name = f"{technique} Technique"
+        technique_item = QTreeWidgetItem([
+            technique_name,
+            technique,
+            f"{len(segments)} segments",
+            "N/A"
+        ])
+        
+        # Make technique item bold
+        font = QFont()
+        font.setBold(True)
+        technique_item.setFont(0, font)
+        
+        # Store technique data
+        technique_item.setData(0, Qt.UserRole, {
+            'type': 'technique',
+            'technique': technique,
+            'segment_count': len(segments)
+        })
+        
+        # Create segment items from actual data
+        for segment in segments:
+            segment_item = self._create_segment_item_from_data(segment)
+            technique_item.addChild(segment_item)
+        
+        return technique_item
+    
+    def _create_segment_item_from_data(self, segment: Dict) -> QTreeWidgetItem:
+        """Create tree item for individual segment from database data."""
+        
+        segment_id = str(segment.get('id', 'unknown'))
+        segment_name = f"Segment {segment.get('segment_index', '?')}"
+        technique = segment.get('fundamental_technique', 'Unknown')
+        
+        # Calculate duration and points from segment data
+        start_time = segment.get('start_time_s', 0)
+        end_time = segment.get('end_time_s', 0)
+        duration = f"{end_time - start_time:.1f}s" if end_time > start_time else "N/A"
+        
+        points = str(segment.get('point_count', 0))
+        
+        segment_item = QTreeWidgetItem([
+            segment_name,
+            technique,
+            duration,
+            points
+        ])
+        
+        # Color code by analysis status
+        analysis_status = segment.get('analysis_status', 'pending')
+        if analysis_status == 'completed':
+            segment_item.setForeground(1, QBrush(QColor(50, 150, 50)))  # Green
+        elif analysis_status == 'failed':
+            segment_item.setForeground(1, QBrush(QColor(200, 50, 50)))  # Red
+        else:
+            segment_item.setForeground(1, QBrush(QColor(150, 150, 50)))  # Yellow
+        
+        # Store segment data
+        segment_item.setData(0, Qt.UserRole, {
+            'type': 'segment',
+            'segment_id': segment_id,
+            'segment_index': segment.get('segment_index'),
+            'technique': technique,
+            'file_id': segment.get('file_id'),
+            'start_row': segment.get('start_row'),
+            'end_row': segment.get('end_row'),
+            'analysis_status': analysis_status,
+            'segment_data': segment
+        })
+        
+        return segment_item
+
     def _create_action_item(self, action_index: int, technique: str, 
                            analysis_data: Dict) -> QTreeWidgetItem:
-        """Create tree item for action with segments."""
+        """Legacy method - Create tree item for action with segments."""
         
         # Action-level item
         action_name = f"Action {action_index + 1}"

@@ -7,7 +7,7 @@ Supports single-click for data loading and double-click for review modal.
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QLabel, QMenu, QMessageBox
+    QPushButton, QLabel, QMenu, QMessageBox, QDialog
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QBrush, QColor
@@ -307,9 +307,13 @@ class CellExperimentTreeWidget(QWidget):
             QMessageBox.information(self, "Remove Experiment", "Experiment removal not yet implemented")
     
     def create_new_cell(self):
-        """Create new cell - delegate to parent."""
-        # TODO: Open cell creation dialog
-        QMessageBox.information(self, "New Cell", "Cell creation dialog not yet implemented")
+        """Create new cell using creation dialog."""
+        from qt_app.dialogs.cell_creation_dialog import CellCreationDialog
+        
+        dialog = CellCreationDialog(self.api, self)
+        if dialog.exec() == QDialog.Accepted:
+            # Refresh tree to show new cell
+            self.refresh_tree()
     
     def upload_files(self):
         """Upload files for selected cell."""

@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
         
         # Left: Cell/Experiment Tree
         self.cell_tree = CellExperimentTreeWidget(self.api)
-        self.cell_tree.setMaximumWidth(300)
+        self.cell_tree.setMinimumWidth(200)  # Set minimum instead of maximum
         top_splitter.addWidget(self.cell_tree)
         
         # Right: Data Viewer
@@ -158,14 +158,17 @@ class MainWindow(QMainWindow):
         
         # Bottom Left: Actions/Segments Tree
         self.actions_tree = ActionsSegmentsTreeWidget(self.api)
+        self.actions_tree.setMinimumWidth(250)
         bottom_splitter.addWidget(self.actions_tree)
         
         # Bottom Center: Group Management Tree
         self.group_tree = GroupManagementTreeWidget(self.api)
+        self.group_tree.setMinimumWidth(200)
         bottom_splitter.addWidget(self.group_tree)
         
         # Bottom Right: Analysis Tabs
         self.analysis_tabs = AnalysisTabsWidget(self.api)
+        self.analysis_tabs.setMinimumWidth(300)
         bottom_splitter.addWidget(self.analysis_tabs)
         
         # Set proportions for bottom splitter (33% each)
