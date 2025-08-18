@@ -1,1 +1,1 @@
-# Qt App Dialogs Package
+# Qt Application Dialogs
