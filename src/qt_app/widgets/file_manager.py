@@ -12,16 +12,16 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, 
     QLabel, QProgressBar, QFileDialog, QListWidgetItem, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal, QThread, pyqtSignal
+from PySide6.QtCore import Qt, Signal, QThread
 from pathlib import Path
 
 
 class FileUploadThread(QThread):
     """Background thread for file upload processing."""
     
-    progress_updated = pyqtSignal(int)  # Progress percentage
-    file_processed = pyqtSignal(str, bool)  # filename, success
-    upload_completed = pyqtSignal(int)  # successful_count
+    progress_updated = Signal(int)  # Progress percentage
+    file_processed = Signal(str, bool)  # filename, success
+    upload_completed = Signal(int)  # successful_count
     
     def __init__(self, api, cell_name, file_paths):
         super().__init__()

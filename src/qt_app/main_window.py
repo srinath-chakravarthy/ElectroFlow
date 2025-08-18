@@ -197,7 +197,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(new_group_btn)
     
     def setup_connections(self):
-        \"\"\"Setup signal/slot connections between widgets.\"\"\"
+        """Setup signal/slot connections between widgets."""
         
         # Cell selection changes
         self.cell_selector.cell_selected.connect(self.set_active_cell)
@@ -216,18 +216,18 @@ class MainWindow(QMainWindow):
         self.data_viewer.segments_selected.connect(self.group_manager.enable_group_creation)
     
     def auto_select_first_cell(self):
-        \"\"\"Automatically select the first available cell.\"\"\"
+        """Automatically select the first available cell."""
         QTimer.singleShot(100, self._auto_select_first_cell)
     
     def _auto_select_first_cell(self):
-        \"\"\"Internal method to select first cell after UI is ready.\"\"\"
+        """Internal method to select first cell after UI is ready."""
         result = self.api.get_all_cells()
         if result['success'] and result['cells']:
             first_cell = result['cells'][0]
             self.set_active_cell(first_cell['id'], first_cell['cell_name'])
     
     def set_active_cell(self, cell_id: int, cell_name: str):
-        \"\"\"Set the active cell and update all widgets.\"\"\"
+        """Set the active cell and update all widgets."""
         if cell_id != self.active_cell_id:
             self.active_cell_id = cell_id
             self.active_cell_name = cell_name
@@ -242,7 +242,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Active cell changed to: {cell_name}")
     
     def update_cell_combo(self):
-        \"\"\"Update the cell combo box.\"\"\"
+        """Update the cell combo box."""
         self.cell_combo.blockSignals(True)
         self.cell_combo.clear()
         
@@ -260,7 +260,7 @@ class MainWindow(QMainWindow):
         self.cell_combo.blockSignals(False)
     
     def on_cell_combo_changed(self, cell_name: str):
-        \"\"\"Handle cell combo box changes.\"\"\"
+        """Handle cell combo box changes."""
         if cell_name and cell_name != self.active_cell_name:
             # Find cell ID
             result = self.api.get_all_cells()
@@ -271,16 +271,16 @@ class MainWindow(QMainWindow):
                         break
     
     def on_files_uploaded(self, count: int):
-        \"\"\"Handle successful file upload.\"\"\"
+        """Handle successful file upload."""
         self.status_bar.showMessage(f"Uploaded {count} files successfully", 3000)
     
     # Menu actions
     def new_cell(self):
-        \"\"\"Create a new cell.\"\"\"
+        """Create a new cell."""
         self.cell_selector.create_new_cell()
     
     def upload_files(self):
-        \"\"\"Upload files to active cell.\"\"\"
+        """Upload files to active cell."""
         if not self.active_cell_id:
             QMessageBox.warning(self, "No Cell Selected", 
                               "Please select a cell before uploading files.")
@@ -289,7 +289,7 @@ class MainWindow(QMainWindow):
         self.file_manager.upload_files()
     
     def create_group(self):
-        \"\"\"Create a new group.\"\"\"
+        """Create a new group."""
         if not self.active_cell_id:
             QMessageBox.warning(self, "No Cell Selected", 
                               "Please select a cell before creating groups.")
@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
         self.group_manager.create_new_group()
     
     def show_about(self):
-        \"\"\"Show about dialog.\"\"\"
+        """Show about dialog."""
         QMessageBox.about(self, "About Battery Data Analyzer",
                          "Battery Data Analyzer 2.0\\n\\n"
                          "Qt-based desktop application for\\n"
@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
     
     # Settings management
     def save_settings(self):
-        \"\"\"Save application settings.\"\"\"
+        """Save application settings."""
         settings = QSettings()
         settings.setValue("geometry", self.saveGeometry())
         settings.setValue("windowState", self.saveState())
@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
             settings.setValue("activeCell", self.active_cell_id)
     
     def restore_settings(self):
-        \"\"\"Restore application settings.\"\"\"
+        """Restore application settings."""
         settings = QSettings()
         
         geometry = settings.value("geometry")
@@ -327,6 +327,6 @@ class MainWindow(QMainWindow):
             self.restoreState(window_state)
     
     def closeEvent(self, event):
-        \"\"\"Handle application close event.\"\"\"
+        """Handle application close event."""
         self.save_settings()
         event.accept()
