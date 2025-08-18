@@ -12,6 +12,9 @@ import numpy as np
 from enum import Enum
 import hashlib
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Universal schema - focused on essential measurements and analytics
@@ -146,17 +149,8 @@ TECHNIQUE_MAPPING = {
 }
 
 # VersaStudio ActionId → Fundamental Technique mapping
-# This is a simpler, direct mapping that bypasses complex hierarchy parsing
-# ONLY CONTAINS VERIFIED ActionIds from real data files
-VERSASTUDIO_ACTIONID_MAPPING = {
-    # Verified from GITT_EIS_Charge_cycle1_Channel 2.par
-    8: 'CC',     # Constant Current (confirmed from real data)
-    20: 'GEIS',  # Galvanostatic EIS (confirmed from real data)
-    23: 'OCV',   # Energy Open Circuit (confirmed from real data)
-    
-    # TODO: Add more ActionIds as we encounter them in additional real data files
-    # Only add ActionIds that are actually observed in parsed files
-}
+# NOTE: This is now database-driven. See DatabaseManager.actionid_mappings table
+# Default mappings are populated automatically on first database initialization
 
 # Legacy VersaStudio schema for backward compatibility
 VERSASTUDIO_COLUMNS = [
@@ -517,20 +511,60 @@ def is_structural_action(action_name: str) -> bool:
         
     return False
 
-def map_actionid_to_technique(action_id: int) -> str:
+def map_actionid_to_technique(action_id: int, db_manager=None) -> str:
     """
-    Map VersaStudio ActionId directly to fundamental technique.
+    Map VersaStudio ActionId to fundamental technique using database.
     
-    This is a simpler alternative to hierarchy-based mapping.
-    Returns 'UNKNOWN' for unmapped ActionIds.
+    Uses database-driven mapping with dynamic discovery for unknown ActionIds.
+    Returns 'UNKNOWN' for unmapped ActionIds when no database available.
     
     Args:
         action_id: VersaStudio ActionId number
+        db_manager: DatabaseManager instance for lookup (optional)
         
     Returns:
         Fundamental technique type (OCV, CC, CV, GEIS, PEIS, UNKNOWN)
     """
-    return VERSASTUDIO_ACTIONID_MAPPING.get(action_id, 'UNKNOWN')
+    if db_manager is None:
+        logger.warning(f"No database manager provided for ActionID {action_id}, returning UNKNOWN")
+        return 'UNKNOWN'
+    
+    try:
+        # Try to get mapping from database
+        mapping = db_manager.get_actionid_mapping(action_id)
+        if mapping:
+            return mapping['fundamental_technique']
+        else:
+            logger.info(f"Unknown ActionID {action_id} encountered - requires user input")
+            return 'UNKNOWN'
+    except Exception as e:
+        logger.error(f"Error looking up ActionID {action_id}: {e}")
+        return 'UNKNOWN'
+
+def discover_and_map_actionid(action_id: int, technique_name: str, 
+                             fundamental_technique: str, db_manager) -> bool:
+    """
+    Add new ActionID mapping to database after user confirmation.
+    
+    Args:
+        action_id: ActionID number to map
+        technique_name: Full technique name from user
+        fundamental_technique: Fundamental technique category
+        db_manager: DatabaseManager instance
+        
+    Returns:
+        True if mapping was added successfully
+    """
+    try:
+        success = db_manager.add_actionid_mapping(
+            action_id, technique_name, fundamental_technique, user_defined=True
+        )
+        if success:
+            logger.info(f"Added user-defined ActionID mapping: {action_id} -> {fundamental_technique}")
+        return success
+    except Exception as e:
+        logger.error(f"Failed to add ActionID mapping {action_id}: {e}")
+        return False
 
 def map_technique_name(action_name: str) -> str:
     """

@@ -29,6 +29,7 @@ class DatabaseManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_database()
+        self.populate_default_actionid_mappings()  # Ensure default mappings exist
     
     @contextmanager
     def get_connection(self):
