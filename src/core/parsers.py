@@ -71,26 +71,29 @@ class VersaStudioParser(BaseParser):
 
     def parse(self, file_path: Path) -> DataFile:
         """
-        Parse a .par file into a DataFile object.
+        Parse a .par file for METADATA ONLY - no segment data parsing.
+        
+        For dual file processing, use parse_dual_files() which gets metadata from .par 
+        and data from .par.csv files.
 
         Args:
             file_path: Path to the .par file
 
         Returns:
-            DataFile object with standardized data
+            DataFile object with metadata and empty universal_data DataFrame
 
         Raises:
             VersaStudioParseError: If parsing fails
         """
         try:
-            # Line-by-line parsing for metadata and boundaries
+            # Line-by-line parsing for metadata and ActionID mappings only
             self._parse_file_structure(file_path)
 
-            # Use Polars for data sections
-            self._parse_data_with_polars(file_path)
+            # Skip all segment data parsing - metadata only approach
+            # Data will come from .par.csv files in dual file processing
 
-            # Create DataFile object
-            data_file = self._create_data_file(file_path)
+            # Create DataFile object with metadata only
+            data_file = self._create_metadata_only_data_file(file_path)
 
             return data_file
 
@@ -98,10 +101,10 @@ class VersaStudioParser(BaseParser):
             raise VersaStudioParseError(f"Failed to parse {file_path}: {str(e)}") from e
 
     def _parse_file_structure(self, file_path: Path) -> None:
-        """Parse file structure line by line to find sections and boundaries."""
+        """Parse file structure line by line for METADATA ONLY - skip segment data."""
         self.sections = {}
         self.actions = {}
-        self.segment_boundaries = {}
+        # Note: No segment_boundaries tracking - we skip all segment data
 
         current_section = None
         current_section_content = []
@@ -125,10 +128,9 @@ class VersaStudioParser(BaseParser):
                         current_section = line[1:-1]  # Remove < >
                         current_section_content = []
 
-                        # Track segment boundaries
+                        # Skip segment sections entirely - metadata-only parsing
                         if current_section.startswith('Segment'):
-                            segment_id = int(re.search(r'Segment(\d+)', current_section).group(1))
-                            self.segment_boundaries[segment_id] = {'start_line': line_num}
+                            current_section = None  # Ignore segment sections completely
 
                     # Section end
                     elif line.startswith('</') and line.endswith('>'):
@@ -138,11 +140,8 @@ class VersaStudioParser(BaseParser):
                             current_section = None
                             current_section_content = []
 
-                        # Track segment end
-                        if 'Segment' in line:
-                            segment_id = int(re.search(r'Segment(\d+)', line).group(1))
-                            if segment_id in self.segment_boundaries:
-                                self.segment_boundaries[segment_id]['end_line'] = line_num
+                        # Skip segment end tracking - metadata-only parsing
+                        # No segment boundary tracking needed
 
                     # Section content
                     elif current_section:
@@ -159,7 +158,7 @@ class VersaStudioParser(BaseParser):
                 pass
 
     def _process_section(self, section_name: str, content: List[Tuple[int, str]]) -> None:
-        """Process a parsed section."""
+        """Process a parsed section - metadata only, skip segments entirely."""
         if section_name.startswith('Action'):
             action = self._parse_action(section_name, content)
             if action:  # Only experimental actions (structural ones filtered out)
@@ -169,9 +168,8 @@ class VersaStudioParser(BaseParser):
                 self.original_action_mapping[action.action_id] = self.experimental_action_counter
                 self.experimental_action_counter += 1
         elif section_name.startswith('Segment'):
-            # Segment metadata will be handled separately
-            segment_id = int(re.search(r'Segment(\d+)', section_name).group(1))
-            self._parse_segment_metadata(segment_id, content)
+            # SKIP ALL SEGMENT PROCESSING - metadata-only approach
+            pass  # Completely ignore segment sections
         else:
             # Regular section
             section_dict = {}
@@ -662,6 +660,41 @@ class VersaStudioParser(BaseParser):
             universal_data=universal_data,
             actions=self.actions,
             segments=self.segments,
+            metadata=metadata,
+            file_hash=calculate_file_hash(file_path)
+        )
+
+    def _create_metadata_only_data_file(self, file_path: Path) -> DataFile:
+        """Create DataFile object with metadata only - no segment data."""
+        # Extract timestamp
+        timestamp = self._extract_timestamp()
+
+        # Create empty universal schema DataFrame - no data from .par file
+        from .data_models import UNIVERSAL_SCHEMA
+        universal_data = pl.DataFrame(schema=UNIVERSAL_SCHEMA)
+
+        # Extract metadata (same as regular parsing)
+        metadata = self._extract_metadata()
+        
+        # Add ActionID to technique mapping for database building
+        actionid_mappings = []
+        for action in self.actions.values():
+            if action:  # Only valid actions
+                actionid_mappings.append({
+                    'ActionId': action.action_id,
+                    'technique_name': action.name,
+                    'primary_technique': action.technique.value if hasattr(action, 'technique') else 'UNKNOWN'
+                })
+        
+        metadata['actionid_to_technique_database'] = actionid_mappings
+        metadata['parsing_mode'] = 'metadata_only'
+
+        return DataFile(
+            file_path=file_path,
+            timestamp=timestamp,
+            universal_data=universal_data,  # Empty DataFrame
+            actions=self.actions,
+            segments={},  # No segments in metadata-only mode
             metadata=metadata,
             file_hash=calculate_file_hash(file_path)
         )
