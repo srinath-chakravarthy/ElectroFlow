@@ -2,9 +2,11 @@
 
 ## Current Status
 
-**✅ COMPLETED**: 2-Tab Panel UI with dual file architecture, cell management, and data processing workflow.
+**✅ COMPLETED**: Core backend architecture with universal schema, SQLite storage, and fundamental analytics.
 
-**🎯 CURRENT FOCUS**: Testing complete dual file workflow (.par + .par.csv) with real VersaStudio files and production deployment.
+**⚠️ ARCHITECTURAL PIVOT**: Moving from Panel UI to native Qt application due to Panel reliability issues (websocket disconnections, FileInput widget crashes).
+
+**🎯 CURRENT FOCUS**: Qt desktop application with single-cell workflow - file upload, data visualization, grouping, and analysis.
 
 ### Key Architecture Features Implemented
 
@@ -15,12 +17,11 @@
 - **Local file processing**: No web upload limits, handles GB-sized files efficiently
 - **Tab 1 integration**: Complete file browser with dual file selection and validation
 
-#### ✅ 2-Tab UI Redesign  
-- **Tab 1: Cell & File Management**: Unified cell creation + local file association workflow
-- **Tab 2: Cell Data Processing**: Technique-centric analysis with group management and manual plotting
-- **Active cell workflow**: Single cell selection carries across tabs with proper reactivity
-- **Fixed table sizing**: Responsive design instead of fixed widths
-- **Cell selection fixes**: Robust Panel Tabulator selection handling
+#### 🔄 UI Architecture Transition
+- **Previous**: Panel web UI (deprecated due to reliability issues)
+- **Current**: Qt desktop application development
+- **Backend**: Preserved - all core functionality works via BackendAPI
+- **Benefits**: Native performance, reliable file handling, proper event system
 
 ## Active Work Instructions
 
@@ -136,18 +137,18 @@ TECHNIQUE_MAPPING = {
 
 ## Immediate Development Priorities
 
-### 1. Production Testing with 2-Tab Dual File Workflow
-**Status**: Ready to Start  
+### 1. Qt Desktop Application Development
+**Status**: In Progress  
 **Priority**: High
 
-**Testing Plan**:
-- Test complete Tab 1 workflow: Cell creation → Active cell selection → File browser → Dual file validation → File association
-- Process real VersaStudio .par + .par.csv file pairs through local file browser
-- Validate cell selection fixes and responsive table sizing
-- Test Tab 2 technique-centric workflow with processed files
-- Verify group creation, analytics, and manual plotting functionality
-- Performance testing with large files (GB+ sizes) via local processing
-- Cross-tab active cell workflow validation
+**Qt Application Roadmap**:
+- **Phase 1**: Core window structure with single-cell workflow
+- **Phase 2**: File upload system with native dialogs and drag & drop
+- **Phase 3**: Data visualization using pyqtgraph
+- **Phase 4**: Group management and analysis integration
+- **Architecture**: PySide6 + pyqtgraph + existing BackendAPI
+
+**Directory Structure**: `src/qt_app/` (separate from Panel attempts)
 
 ### 2. Extended Technique Classification
 **Status**: Ready to Expand  
@@ -159,16 +160,57 @@ Expand technique mapping based on real data:
 - Improve classification accuracy
 - Handle edge cases and compound techniques
 
-## Panel UI Usage Instructions
+## Application Usage Instructions
 
-### Starting the Application
+### Qt Desktop Application (CURRENT)
 ```bash
-# Quick start with default settings
-python start_ui.py
+# Start Qt application
+python src/qt_app/main.py
 
-# Custom configuration
-python src/ui/main_app.py --port 5007 --data-dir data
+# With custom data directory
+python src/qt_app/main.py --data-dir /path/to/data
 ```
+
+### Alternative Access Methods
+```bash
+# Command line interface
+python cli_tools/battery_cli.py list-cells
+python cli_tools/battery_cli.py upload 0 file1.par file2.par.csv
+
+# Jupyter notebook (planned)
+jupyter lab notebooks/battery_analysis.ipynb
+```
+
+## Architecture Transition Notes
+
+### Why Qt Instead of Panel?
+**Panel Issues Encountered**:
+- FileInput widget crashes causing websocket disconnections
+- Unreliable event handling (param watchers failing)
+- Browser compatibility issues with file uploads
+- Performance problems with large datasets
+- Debugging difficulties in web environment
+
+**Qt Advantages**:
+- Native desktop performance and reliability
+- Proven file handling with drag & drop
+- pyqtgraph for high-performance plotting
+- Professional native UI/UX
+- Better development/debugging experience
+
+### Preserved Backend Architecture
+**All core functionality retained**:
+- ✅ BackendAPI: Common interface for all UI types
+- ✅ Universal schema and parsers
+- ✅ SQLite database with technique analytics
+- ✅ Fundamental analysis algorithms
+- ✅ File processing pipeline
+
+**Multiple Access Patterns**:
+- **Qt Desktop**: Primary user interface
+- **CLI**: Scripting and automation
+- **Jupyter**: Interactive analysis and research
+- **API**: Future web integration
 
 ### 2-Tab UI Workflow (UPDATED)
 1. **Tab 1: Cell & File Management**: 
