@@ -581,7 +581,7 @@ class DataPreviewWidget(QWidget):
             QMessageBox.information(self, "Info", "No suitable columns found for plotting")
     
     def plot_column(self, column: str, label: str):
-        """Plot specific column vs time."""
+        """Plot specific column vs time with technique-based color coding."""
         if not PYQTGRAPH_AVAILABLE or self.current_data is None:
             return
         
@@ -590,33 +590,111 @@ class DataPreviewWidget(QWidget):
             return
         
         try:
-            # Convert to pandas for plotting
-            df = self.current_data.to_pandas()
-            
             # Clear previous plot
             self.plot_widget.clear()
             
-            # Plot data
-            time_data = df['time_s'].values
-            y_data = df[column].values
+            # Direct Polars to NumPy conversion (no pandas overhead)
+            time_data = self.current_data.get_column('time_s').to_numpy()
+            y_data = self.current_data.get_column(column).to_numpy()
             
-            # Use different colors for different plots
-            colors = {'potential_v': 'b', 'current_a': 'r', 'power_w': 'm'}
-            color = colors.get(column, 'g')
+            # Remove any null values
+            mask = ~(self.current_data.get_column('time_s').is_null() | 
+                    self.current_data.get_column(column).is_null())
+            time_data = time_data[mask.to_numpy()]
+            y_data = y_data[mask.to_numpy()]
             
-            self.plot_widget.plot(time_data, y_data, pen=pg.mkPen(color, width=1))
+            # Check if technique information is available for color coding
+            if 'technique_id' in self.current_data.columns:
+                technique_data = self.current_data.get_column('technique_id').to_numpy()[mask.to_numpy()]
+                self._plot_with_technique_colors(time_data, y_data, technique_data, label)
+            else:
+                # Fallback to basic color coding
+                basic_colors = {'potential_v': 'b', 'current_a': 'r', 'power_w': 'm'}
+                color = basic_colors.get(column, 'g')
+                self.plot_widget.plot(time_data, y_data, pen=pg.mkPen(color, width=1), name=label)
+            
+            # Set labels and title
             self.plot_widget.setLabel('left', label)
             self.plot_widget.setLabel('bottom', 'Time (s)')
             self.plot_widget.setTitle(f'{label} vs Time - {self.current_file_id}')
             
+            # Auto-range only if this is a new plot (prevent scrolling)
+            self.plot_widget.getViewBox().autoRange()
+            
         except Exception as e:
             QMessageBox.critical(self, "Plot Error", f"Failed to plot data: {str(e)}")
     
+    def _plot_with_technique_colors(self, time_data, y_data, technique_data, label):
+        """Plot data with different colors for different techniques."""
+        try:
+            # Define colors for different fundamental techniques
+            technique_colors = {
+                'rest': '#2E8B57',      # Sea Green
+                'cc': '#FF6347',        # Tomato Red  
+                'cv': '#4169E1',        # Royal Blue
+                'cp': '#FF8C00',        # Dark Orange
+                'pulse': '#9932CC',     # Dark Orchid
+                'eis': '#DC143C',       # Crimson
+                'custom': '#696969'     # Dim Gray
+            }
+            
+            # Get unique techniques in the data
+            unique_techniques = set(technique_data)
+            
+            # Get ActionID mappings from API to determine fundamental techniques
+            try:
+                mappings = self.api.get_actionid_mappings()
+                actionid_to_fundamental = {m['action_id']: m['fundamental_technique'] for m in mappings}
+            except:
+                actionid_to_fundamental = {}
+            
+            # Plot each technique segment with its color
+            for technique_id in unique_techniques:
+                if technique_id is None or str(technique_id) == 'nan':
+                    continue
+                    
+                # Find indices for this technique
+                mask = (technique_data == technique_id)
+                if not mask.any():
+                    continue
+                
+                t_segment = time_data[mask]
+                y_segment = y_data[mask]
+                
+                # Determine fundamental technique and color
+                fundamental = actionid_to_fundamental.get(int(technique_id), 'custom')
+                color = technique_colors.get(fundamental, technique_colors['custom'])
+                
+                # Create technique name for legend
+                technique_name = f"ActionID {int(technique_id)} ({fundamental})"
+                
+                # Plot this technique segment
+                self.plot_widget.plot(
+                    t_segment, y_segment, 
+                    pen=pg.mkPen(color, width=2), 
+                    name=technique_name
+                )
+            
+            # Add legend if multiple techniques
+            if len(unique_techniques) > 1:
+                self.plot_widget.addLegend()
+                
+        except Exception as e:
+            # Fallback to single color if technique plotting fails
+            basic_colors = {'potential_v': 'b', 'current_a': 'r', 'power_w': 'm'}
+            color = basic_colors.get(label.split()[0].lower(), 'g')
+            self.plot_widget.plot(time_data, y_data, pen=pg.mkPen(color, width=1), name=label)
+    
     def clear_plot(self):
-        """Clear the plot."""
+        """Clear the plot and reset view."""
         if PYQTGRAPH_AVAILABLE:
             self.plot_widget.clear()
             self.plot_widget.setTitle('Data Preview')
+            # Clear any existing legend
+            legend = self.plot_widget.plotItem.legend
+            if legend is not None:
+                legend.scene().removeItem(legend)
+                self.plot_widget.plotItem.legend = None
 
 
 class FileListWidget(QWidget):

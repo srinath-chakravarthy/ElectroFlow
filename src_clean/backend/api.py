@@ -200,8 +200,12 @@ class BackendAPI:
                                cell: Dict[str, Any], metadata_path: Path, 
                                data_path: Path, options: Dict[str, Any]):
         """Store DataFile atomically with database transaction."""
+        # Ensure processed directory exists
+        processed_dir = self.data_dir / "processed"
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        
         # Prepare file information
-        parquet_path = self.data_dir / "processed" / f"{file_id}.parquet"
+        parquet_path = processed_dir / f"{file_id}.parquet"
         
         # Convert metadata to JSON-serializable format
         metadata_dict = {
