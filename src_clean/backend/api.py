@@ -382,6 +382,77 @@ class BackendAPI:
             logger.error(f"Failed to get segments for technique '{technique}': {e}")
             return []
     
+    def delete_file(self, file_id: str) -> bool:
+        """Delete a file and all associated data."""
+        try:
+            # Get file info first to access parquet file path
+            file_info = self.db.get_file_by_id(file_id)
+            if not file_info:
+                logger.warning(f"File {file_id} not found in database")
+                return False
+            
+            # Delete from database (this will cascade to segments)
+            success = self.db.delete_file(file_id)
+            
+            if success:
+                # Delete parquet file if it exists
+                parquet_path = file_info.get('parquet_file_path')
+                if parquet_path and Path(parquet_path).exists():
+                    try:
+                        Path(parquet_path).unlink()
+                        logger.info(f"Deleted parquet file: {parquet_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete parquet file {parquet_path}: {e}")
+                
+                logger.info(f"Successfully deleted file: {file_id}")
+                return True
+            else:
+                logger.error(f"Failed to delete file {file_id} from database")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to delete file '{file_id}': {e}")
+            return False
+    
+    def delete_cell(self, cell_name: str) -> bool:
+        """Delete a cell and all associated data (cascade delete)."""
+        try:
+            # Get cell info first
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                logger.warning(f"Cell '{cell_name}' not found")
+                return False
+            
+            cell_id = cell['id']
+            
+            # Get all files for the cell to delete parquet files
+            files = self.db.get_cell_files(cell_id)
+            
+            # Delete all parquet files first
+            deleted_parquet_count = 0
+            for file_info in files:
+                parquet_path = file_info.get('parquet_file_path')
+                if parquet_path and Path(parquet_path).exists():
+                    try:
+                        Path(parquet_path).unlink()
+                        deleted_parquet_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to delete parquet file {parquet_path}: {e}")
+            
+            # Delete cell from database (this will cascade to files and segments)
+            success = self.db.delete_cell(cell_id)
+            
+            if success:
+                logger.info(f"Successfully deleted cell '{cell_name}' with {deleted_parquet_count} parquet files")
+                return True
+            else:
+                logger.error(f"Failed to delete cell '{cell_name}' from database")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to delete cell '{cell_name}': {e}")
+            return False
+    
     # =============================================================================
     # ACTIONID MANAGEMENT
     # =============================================================================

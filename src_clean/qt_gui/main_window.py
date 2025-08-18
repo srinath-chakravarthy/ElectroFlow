@@ -107,18 +107,31 @@ class CellSelectionWidget(QWidget):
         self.cell_list.itemClicked.connect(self.on_cell_selected)
         layout.addWidget(self.cell_list)
         
-        # Buttons
+        # Cell operations buttons
         button_layout = QHBoxLayout()
         
         self.new_cell_btn = QPushButton("New Cell")
         self.new_cell_btn.clicked.connect(self.create_new_cell)
         button_layout.addWidget(self.new_cell_btn)
         
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.refresh_cells)
-        button_layout.addWidget(self.refresh_btn)
+        self.delete_cell_btn = QPushButton("Delete Cell")
+        self.delete_cell_btn.clicked.connect(self.delete_selected_cell)
+        self.delete_cell_btn.setEnabled(False)
+        self.delete_cell_btn.setStyleSheet("QPushButton { color: red; }")
+        button_layout.addWidget(self.delete_cell_btn)
         
         layout.addLayout(button_layout)
+        
+        # Utility buttons
+        util_layout = QHBoxLayout()
+        
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.refresh_cells)
+        util_layout.addWidget(self.refresh_btn)
+        
+        util_layout.addStretch()
+        
+        layout.addLayout(util_layout)
     
     def refresh_cells(self):
         """Refresh the cell list."""
@@ -138,7 +151,12 @@ class CellSelectionWidget(QWidget):
     def on_cell_selected(self, item: QListWidgetItem):
         """Handle cell selection."""
         cell_name = item.data(Qt.UserRole)
-        self.cell_selected.emit(cell_name)
+        if cell_name:
+            self.cell_selected.emit(cell_name)
+            # Enable delete button when cell is selected
+            self.delete_cell_btn.setEnabled(True)
+        else:
+            self.delete_cell_btn.setEnabled(False)
     
     def create_new_cell(self):
         """Create new cell with simple dialog."""
@@ -158,6 +176,67 @@ class CellSelectionWidget(QWidget):
                     QMessageBox.warning(self, "Error", result.error)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to create cell: {str(e)}")
+    
+    def delete_selected_cell(self):
+        """Delete the currently selected cell."""
+        current_item = self.cell_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "No Selection", "Please select a cell to delete.")
+            return
+        
+        cell_name = current_item.data(Qt.UserRole)
+        if not cell_name:
+            return
+        
+        # Confirmation dialog with detailed warning
+        reply = QMessageBox.question(
+            self, "Confirm Cell Deletion",
+            f"Are you sure you want to delete cell '{cell_name}'?\n\n"
+            f"⚠️  This will permanently remove:\n"
+            f"• All files associated with this cell\n"
+            f"• All processed data and parquet files\n"
+            f"• All experimental segments and analysis\n"
+            f"• All metadata and notes\n\n"
+            f"🚨 THIS ACTION CANNOT BE UNDONE!\n\n"
+            f"Type the cell name to confirm deletion:",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Additional confirmation - require typing cell name
+            from PySide6.QtWidgets import QInputDialog
+            
+            confirmation_name, ok = QInputDialog.getText(
+                self, "Final Confirmation",
+                f"Type '{cell_name}' exactly to confirm deletion:"
+            )
+            
+            if ok and confirmation_name == cell_name:
+                try:
+                    # Delete cell through API (should implement cascade delete)
+                    success = self.api.delete_cell(cell_name)
+                    if success:
+                        QMessageBox.information(
+                            self, "Success", 
+                            f"Cell '{cell_name}' and all associated data has been deleted."
+                        )
+                        # Refresh the cell list
+                        self.refresh_cells()
+                        # Disable delete button
+                        self.delete_cell_btn.setEnabled(False)
+                        # Emit empty cell selection to clear other widgets
+                        self.cell_selected.emit("")
+                    else:
+                        QMessageBox.warning(self, "Error", f"Failed to delete cell '{cell_name}'.")
+                        
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Error deleting cell: {str(e)}")
+            elif ok:
+                QMessageBox.information(
+                    self, "Cancelled", 
+                    "Cell name did not match. Deletion cancelled for safety."
+                )
 
 
 class FileUploadWidget(QWidget):
@@ -399,7 +478,11 @@ class DataPreviewWidget(QWidget):
     def set_file_for_preview(self, file_id: str):
         """Set file for data preview."""
         self.current_file_id = file_id
-        self.load_data_preview()
+        if file_id:  # Only load if file_id is not empty
+            self.load_data_preview()
+        else:
+            # Clear preview when file_id is empty (e.g., after deletion)
+            self.clear_preview()
     
     def load_data_preview(self):
         """Load data preview for current file."""
@@ -473,6 +556,16 @@ class DataPreviewWidget(QWidget):
             self.plot_current_btn.setEnabled(False)
             self.plot_power_btn.setEnabled(False)
             self.clear_plot_btn.setEnabled(False)
+    
+    def clear_preview(self):
+        """Clear the data preview."""
+        self.current_data = None
+        self.current_file_id = None
+        self.data_info.clear()
+        self.data_info.setPlaceholderText("Select a file to preview data...")
+        self.update_button_states()
+        if PYQTGRAPH_AVAILABLE:
+            self.clear_plot()
     
     def plot_data(self):
         """Plot basic overview of data."""
@@ -551,6 +644,23 @@ class FileListWidget(QWidget):
         self.file_list.itemClicked.connect(self.on_file_selected)
         layout.addWidget(self.file_list)
         
+        # File operations buttons
+        file_ops_layout = QHBoxLayout()
+        
+        self.delete_file_btn = QPushButton("Delete File")
+        self.delete_file_btn.clicked.connect(self.delete_selected_file)
+        self.delete_file_btn.setEnabled(False)
+        self.delete_file_btn.setStyleSheet("QPushButton { color: red; }")
+        file_ops_layout.addWidget(self.delete_file_btn)
+        
+        file_ops_layout.addStretch()
+        
+        self.refresh_files_btn = QPushButton("Refresh")
+        self.refresh_files_btn.clicked.connect(self.refresh_files)
+        file_ops_layout.addWidget(self.refresh_files_btn)
+        
+        layout.addLayout(file_ops_layout)
+        
         # File info
         self.file_info = QTextEdit()
         self.file_info.setMaximumHeight(100)
@@ -563,6 +673,54 @@ class FileListWidget(QWidget):
         if file_info:
             file_id = file_info['file_id']
             self.file_selected.emit(file_id)
+            # Enable delete button when file is selected
+            self.delete_file_btn.setEnabled(True)
+        else:
+            self.delete_file_btn.setEnabled(False)
+    
+    def delete_selected_file(self):
+        """Delete the currently selected file."""
+        current_item = self.file_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "No Selection", "Please select a file to delete.")
+            return
+        
+        file_info = current_item.data(Qt.UserRole)
+        if not file_info:
+            return
+        
+        file_id = file_info['file_id']
+        filename = file_info['original_filename']
+        
+        # Confirmation dialog
+        reply = QMessageBox.question(
+            self, "Confirm Deletion",
+            f"Are you sure you want to delete '{filename}'?\n\n"
+            f"This will permanently remove:\n"
+            f"• File data and metadata\n"
+            f"• All associated segments\n"
+            f"• Any analysis results\n\n"
+            f"This action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # Delete file through API
+                success = self.api.delete_file(file_id)
+                if success:
+                    QMessageBox.information(self, "Success", f"File '{filename}' has been deleted.")
+                    # Refresh the file list
+                    self.refresh_files()
+                    # Disable delete button
+                    self.delete_file_btn.setEnabled(False)
+                    # Clear data preview if this file was selected
+                    self.file_selected.emit("")  # Emit empty to clear preview
+                else:
+                    QMessageBox.warning(self, "Error", f"Failed to delete file '{filename}'.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error deleting file: {str(e)}")
     
     def set_current_cell(self, cell_name: str):
         """Set current cell and refresh file list."""
