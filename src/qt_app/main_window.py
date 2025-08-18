@@ -23,10 +23,12 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from ui.backend_api import BackendAPI
-from qt_app.widgets.cell_selector import CellSelectorWidget
-from qt_app.widgets.file_manager import FileManagerWidget
+from qt_app.widgets.cell_experiment_tree import CellExperimentTreeWidget
 from qt_app.widgets.data_viewer import DataViewerWidget
-from qt_app.widgets.group_manager import GroupManagerWidget
+from qt_app.widgets.actions_segments_tree import ActionsSegmentsTreeWidget
+from qt_app.widgets.group_management_tree import GroupManagementTreeWidget
+from qt_app.widgets.analysis_tabs import AnalysisTabsWidget
+from qt_app.dialogs.upload_review_dialog import UploadReviewDialog
 
 
 class MainWindow(QMainWindow):
@@ -66,25 +68,18 @@ class MainWindow(QMainWindow):
             sys.exit(1)
     
     def setup_ui(self):
-        """Setup the main user interface."""
-        self.setWindowTitle("Battery Data Analyzer")
-        self.setMinimumSize(1200, 800)
+        """Setup the main user interface with 3-panel layout."""
+        self.setWindowTitle("Battery Data Analyzer - Qt Application")
+        self.setMinimumSize(1400, 900)
         
         # Create menu bar
         self.create_menu_bar()
         
-        # Create central widget (data viewer)
-        self.data_viewer = DataViewerWidget(self.api)
-        self.setCentralWidget(self.data_viewer)
-        
-        # Create docked widgets
-        self.create_dock_widgets()
+        # Create main splitter layout
+        self.create_main_layout()
         
         # Create status bar
         self.create_status_bar()
-        
-        # Create toolbar
-        self.create_toolbar()
     
     def create_menu_bar(self):
         """Create the application menu bar."""
@@ -134,32 +129,57 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
     
-    def create_dock_widgets(self):
-        """Create dockable widgets for the interface."""
+    def create_main_layout(self):
+        """Create the main 3-panel layout."""
+        # Create central widget with splitters
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
         
-        # Cell selector dock (top)
-        self.cell_dock = QDockWidget("Cell Selection", self)
-        self.cell_selector = CellSelectorWidget(self.api)
-        self.cell_dock.setWidget(self.cell_selector)
-        self.cell_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
-        self.addDockWidget(Qt.TopDockWidgetArea, self.cell_dock)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(5, 5, 5, 5)
         
-        # File manager dock (left)
-        self.file_dock = QDockWidget("File Management", self)
-        self.file_manager = FileManagerWidget(self.api)
-        self.file_dock.setWidget(self.file_manager)
-        self.file_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.file_dock)
+        # Create main horizontal splitter (top area)
+        top_splitter = QSplitter(Qt.Horizontal)
         
-        # Group manager dock (left, below file manager)
-        self.group_dock = QDockWidget("Group Management", self)
-        self.group_manager = GroupManagerWidget(self.api)
-        self.group_dock.setWidget(self.group_manager)
-        self.group_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.group_dock)
+        # Left: Cell/Experiment Tree
+        self.cell_tree = CellExperimentTreeWidget(self.api)
+        self.cell_tree.setMaximumWidth(300)
+        top_splitter.addWidget(self.cell_tree)
         
-        # Split the left docks vertically
-        self.splitDockWidget(self.file_dock, self.group_dock, Qt.Vertical)
+        # Right: Data Viewer
+        self.data_viewer = DataViewerWidget(self.api)
+        top_splitter.addWidget(self.data_viewer)
+        
+        # Set proportions for top splitter (25% left, 75% right)
+        top_splitter.setSizes([300, 900])
+        
+        # Create bottom horizontal splitter (bottom area)
+        bottom_splitter = QSplitter(Qt.Horizontal)
+        
+        # Bottom Left: Actions/Segments Tree
+        self.actions_tree = ActionsSegmentsTreeWidget(self.api)
+        bottom_splitter.addWidget(self.actions_tree)
+        
+        # Bottom Center: Group Management Tree
+        self.group_tree = GroupManagementTreeWidget(self.api)
+        bottom_splitter.addWidget(self.group_tree)
+        
+        # Bottom Right: Analysis Tabs
+        self.analysis_tabs = AnalysisTabsWidget(self.api)
+        bottom_splitter.addWidget(self.analysis_tabs)
+        
+        # Set proportions for bottom splitter (33% each)
+        bottom_splitter.setSizes([400, 400, 400])
+        
+        # Create main vertical splitter
+        main_splitter = QSplitter(Qt.Vertical)
+        main_splitter.addWidget(top_splitter)
+        main_splitter.addWidget(bottom_splitter)
+        
+        # Set proportions (60% top, 40% bottom)
+        main_splitter.setSizes([540, 360])
+        
+        main_layout.addWidget(main_splitter)
     
     def create_status_bar(self):
         """Create the status bar."""
@@ -173,43 +193,29 @@ class MainWindow(QMainWindow):
         # Status message
         self.status_bar.showMessage("Ready")
     
-    def create_toolbar(self):
-        """Create the main toolbar."""
-        toolbar = self.addToolBar("Main")
-        toolbar.setMovable(False)
-        
-        # Quick cell selection
-        toolbar.addWidget(QLabel("Active Cell:"))
-        self.cell_combo = QComboBox()
-        self.cell_combo.setMinimumWidth(200)
-        self.cell_combo.currentTextChanged.connect(self.on_cell_combo_changed)
-        toolbar.addWidget(self.cell_combo)
-        
-        toolbar.addSeparator()
-        
-        # Quick actions
-        new_group_btn = QPushButton("New Group")
-        new_group_btn.clicked.connect(self.create_group)
-        toolbar.addWidget(new_group_btn)
     
     def setup_connections(self):
         """Setup signal/slot connections between widgets."""
         
-        # Cell selection changes
-        self.cell_selector.cell_selected.connect(self.set_active_cell)
-        self.active_cell_changed.connect(self.file_manager.set_active_cell)
-        self.active_cell_changed.connect(self.group_manager.set_active_cell)
+        # Cell/Experiment Tree connections
+        self.cell_tree.cell_selected.connect(self.set_active_cell)
+        self.cell_tree.experiment_selected.connect(self.on_experiment_selected)
+        self.cell_tree.experiment_double_clicked.connect(self.on_experiment_double_clicked)
+        self.cell_tree.upload_files_requested.connect(self.on_upload_files_requested)
+        
+        # Actions/Segments Tree connections
+        self.actions_tree.segments_selected.connect(self.on_segments_selected)
+        self.actions_tree.create_group_requested.connect(self.group_tree.add_segments_to_group)
+        
+        # Group Management Tree connections
+        self.group_tree.group_selected.connect(self.on_group_selected)
+        self.group_tree.group_analysis_requested.connect(self.on_group_analysis_requested)
+        self.group_tree.group_plotting_requested.connect(self.on_group_plotting_requested)
+        
+        # Active cell changes - update all widgets
+        self.active_cell_changed.connect(lambda cell_id, cell_name: self.group_tree.set_active_cell(cell_id))
         self.active_cell_changed.connect(self.data_viewer.set_active_cell)
-        
-        # File management events
-        self.file_manager.files_uploaded.connect(self.on_files_uploaded)
-        self.file_manager.file_selected.connect(self.data_viewer.show_file_data)
-        
-        # Group management events
-        self.group_manager.group_selected.connect(self.data_viewer.show_group_analysis)
-        
-        # Data viewer events
-        self.data_viewer.segments_selected.connect(self.group_manager.enable_group_creation)
+        self.active_cell_changed.connect(self.analysis_tabs.clear_data)
     
     def auto_select_first_cell(self):
         """Automatically select the first available cell."""
@@ -230,41 +236,70 @@ class MainWindow(QMainWindow):
             
             # Update UI
             self.active_cell_label.setText(f"Active: {cell_name}")
-            self.update_cell_combo()
             
             # Emit signal to update other widgets
             self.active_cell_changed.emit(cell_id, cell_name)
             
             self.status_bar.showMessage(f"Active cell changed to: {cell_name}")
     
-    def update_cell_combo(self):
-        """Update the cell combo box."""
-        self.cell_combo.blockSignals(True)
-        self.cell_combo.clear()
+    
+    def on_experiment_selected(self, cell_id: int, cell_name: str, file_id: str):
+        """Handle experiment selection - load data in other widgets."""
+        if cell_id != self.active_cell_id:
+            self.set_active_cell(cell_id, cell_name)
         
+        # Load experiment data in actions tree and data viewer
+        self.actions_tree.set_file_data(cell_id, file_id)
+        self.data_viewer.show_file_data(file_id)
+        
+        self.status_bar.showMessage(f"Loaded experiment: {file_id}")
+    
+    def on_experiment_double_clicked(self, cell_id: int, cell_name: str, file_id: str):
+        """Handle experiment double-click - open upload/review modal."""
+        from qt_app.dialogs.upload_review_dialog import UploadReviewDialog
+        
+        dialog = UploadReviewDialog(self.api, cell_id, cell_name, self)
+        dialog.load_existing_experiment(file_id)
+        dialog.exec()
+        
+        # Refresh tree after modal closes
+        self.cell_tree.refresh_tree()
+    
+    def on_upload_files_requested(self, cell_name: str):
+        """Handle upload files request from tree."""
+        # Find cell ID
         result = self.api.get_all_cells()
         if result['success']:
             for cell in result['cells']:
-                self.cell_combo.addItem(cell['cell_name'], cell['id'])
-            
-            # Set current cell
-            if self.active_cell_name:
-                index = self.cell_combo.findText(self.active_cell_name)
-                if index >= 0:
-                    self.cell_combo.setCurrentIndex(index)
-        
-        self.cell_combo.blockSignals(False)
+                if cell['cell_name'] == cell_name:
+                    self.upload_files_for_cell(cell['id'], cell_name)
+                    break
     
-    def on_cell_combo_changed(self, cell_name: str):
-        """Handle cell combo box changes."""
-        if cell_name and cell_name != self.active_cell_name:
-            # Find cell ID
-            result = self.api.get_all_cells()
-            if result['success']:
-                for cell in result['cells']:
-                    if cell['cell_name'] == cell_name:
-                        self.set_active_cell(cell['id'], cell_name)
-                        break
+    def on_segments_selected(self, segment_ids: list):
+        """Handle segment selection - update analysis tabs."""
+        self.analysis_tabs.update_selected_data(segment_ids, "segments")
+        
+        if segment_ids:
+            self.status_bar.showMessage(f"Selected {len(segment_ids)} segments")
+        else:
+            self.status_bar.showMessage("No segments selected")
+    
+    def on_group_selected(self, group_id: int):
+        """Handle group selection - update analysis tabs."""
+        self.analysis_tabs.update_selected_group(group_id)
+        self.status_bar.showMessage(f"Selected group: {group_id}")
+    
+    def on_group_analysis_requested(self, group_id: int):
+        """Handle group analysis request - switch to analysis tab."""
+        self.analysis_tabs.update_selected_group(group_id)
+        self.analysis_tabs.tabs.setCurrentIndex(1)  # Switch to Analysis tab
+        self.status_bar.showMessage(f"Analyzing group: {group_id}")
+    
+    def on_group_plotting_requested(self, group_id: int):
+        """Handle group plotting request - switch to plotting tab."""
+        self.analysis_tabs.update_selected_group(group_id)
+        self.analysis_tabs.tabs.setCurrentIndex(2)  # Switch to Plotting tab
+        self.status_bar.showMessage(f"Plotting group: {group_id}")
     
     def on_files_uploaded(self, count: int):
         """Handle successful file upload."""
@@ -273,7 +308,7 @@ class MainWindow(QMainWindow):
     # Menu actions
     def new_cell(self):
         """Create a new cell."""
-        self.cell_selector.create_new_cell()
+        self.cell_tree.create_new_cell()
     
     def upload_files(self):
         """Upload files to active cell."""
@@ -282,7 +317,16 @@ class MainWindow(QMainWindow):
                               "Please select a cell before uploading files.")
             return
         
-        self.file_manager.upload_files()
+        self.upload_files_for_cell(self.active_cell_id, self.active_cell_name)
+    
+    def upload_files_for_cell(self, cell_id: int, cell_name: str):
+        """Upload files for specific cell using modal dialog."""
+        from qt_app.dialogs.upload_review_dialog import UploadReviewDialog
+        
+        dialog = UploadReviewDialog(self.api, cell_id, cell_name, self)
+        if dialog.exec() == dialog.Accepted:
+            # Refresh tree after successful upload
+            self.cell_tree.refresh_tree()
     
     def create_group(self):
         """Create a new group."""
@@ -291,7 +335,7 @@ class MainWindow(QMainWindow):
                               "Please select a cell before creating groups.")
             return
         
-        self.group_manager.create_new_group()
+        self.group_tree.create_new_group()
     
     def show_about(self):
         """Show about dialog."""

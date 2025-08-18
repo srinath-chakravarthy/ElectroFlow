@@ -4,9 +4,9 @@
 
 **✅ COMPLETED**: Core backend architecture with universal schema, SQLite storage, and fundamental analytics.
 
-**⚠️ ARCHITECTURAL PIVOT**: Moving from Panel UI to native Qt application due to Panel reliability issues (websocket disconnections, FileInput widget crashes).
+**⚠️ ARCHITECTURAL PIVOT**: Successfully transitioned from Panel UI to native Qt application due to Panel reliability issues.
 
-**🎯 CURRENT FOCUS**: Qt desktop application with single-cell workflow - file upload, data visualization, grouping, and analysis.
+**🎯 CURRENT FOCUS**: Major Qt application redesign - implementing modal upload workflow, dynamic ActionID database integration, and 3-panel group management system.
 
 ### Key Architecture Features Implemented
 
@@ -17,11 +17,18 @@
 - **Local file processing**: No web upload limits, handles GB-sized files efficiently
 - **Tab 1 integration**: Complete file browser with dual file selection and validation
 
-#### 🔄 UI Architecture Transition
-- **Previous**: Panel web UI (deprecated due to reliability issues)
-- **Current**: Qt desktop application development
+#### ✅ Qt Desktop Application (MAJOR UPDATE)
+- **Completed**: Basic Qt application with file management and data visualization
+- **Enhanced**: Dual file processing, comprehensive data overview, interactive plotting
+- **Current Work**: Complete UI redesign with modal upload workflow and group management
 - **Backend**: Preserved - all core functionality works via BackendAPI
 - **Benefits**: Native performance, reliable file handling, proper event system
+
+#### 🔄 Dynamic ActionID Database Integration (IN PROGRESS)
+- **Goal**: Replace hardcoded ActionID mappings with database-driven system
+- **Feature**: Dynamic discovery and user-prompted ActionID classification
+- **Benefit**: Expandable technique mapping without code changes
+- **Implementation**: data_models integration with database dependency
 
 ## Active Work Instructions
 
@@ -137,18 +144,35 @@ TECHNIQUE_MAPPING = {
 
 ## Immediate Development Priorities
 
-### 1. Qt Desktop Application Development
-**Status**: In Progress  
+### 1. Qt Desktop Application Complete Redesign
+**Status**: Major Redesign In Progress  
 **Priority**: High
 
-**Qt Application Roadmap**:
-- **Phase 1**: Core window structure with single-cell workflow
-- **Phase 2**: File upload system with native dialogs and drag & drop
-- **Phase 3**: Data visualization using pyqtgraph
-- **Phase 4**: Group management and analysis integration
-- **Architecture**: PySide6 + pyqtgraph + existing BackendAPI
+**New Qt Architecture (3-Panel Design)**:
+```
+┌─────────────────┬─────────────────────────────────────────┐
+│ Cell/Exp Tree   │ Data Viewer (File Overview/Table/Plots) │
+│ 📁 CELL_001     │                                         │
+│ ├─ ✅ exp1      │                                         │
+│ ├─ ❌ exp2 (red)│                                         │ 
+│ └─ 🔄 exp3      │                                         │
+├─────────────────┼─────────────────────────────────────────┤
+│ Actions/Segments│ Groups Management    │ Tabbed Panel     │
+│ Tree (Multi-sel)│ Hierarchical Tree    │ ├─ Data View    │
+│ Action_1 (CC)   │ 📁 Formation_Group   │ ├─ Analysis     │ 
+│ Action_2 (OCV)  │ ├─ Rest_Phases      │ └─ Plotting     │
+│ └─ Action_3     │ └─ CC_Phases        │                  │
+└─────────────────┴──────────────────────┴──────────────────┘
+```
 
-**Directory Structure**: `src/qt_app/` (separate from Panel attempts)
+**Key Features**:
+- **Modal Upload/Review**: Large modal for file upload and experiment review
+- **4-Panel Plots**: Applied Pot vs Time, Current vs Time, Nyquist scatter, Applied Pot vs Current
+- **Dynamic ActionID**: Database-driven technique mapping with user prompts
+- **Group Management**: Hierarchical groups with multi-select segment assignment
+- **Cell-Level Metadata**: Cathode/anode materials and masses for specific capacity calculations
+
+**Directory Structure**: `src/qt_app/` (major refactor in progress)
 
 ### 2. Extended Technique Classification
 **Status**: Ready to Expand  
