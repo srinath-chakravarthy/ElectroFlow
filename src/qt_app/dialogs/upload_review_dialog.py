@@ -29,7 +29,7 @@ src_path = Path(__file__).parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from ui.backend_api import BackendAPI
+from backend_api import BackendAPI
 
 
 class FileValidationThread(QThread):
@@ -49,13 +49,13 @@ class FileValidationThread(QThread):
         try:
             self.progress_updated.emit(20, "Validating file formats...")
             
-            # Basic file validation (format check only)
-            validation_result = self.api.validate_file_compatibility([self.par_path, self.csv_path])
+            # Use new simplified validation API
+            validation_result = self.api.validate_files([self.par_path, self.csv_path])
             
-            if not validation_result['success']:
+            if not validation_result.success:
                 self.validation_completed.emit({
                     'success': False,
-                    'error': validation_result['error']
+                    'error': validation_result.message
                 })
                 return
             
@@ -79,8 +79,8 @@ class FileValidationThread(QThread):
             self.validation_completed.emit({
                 'success': True,
                 'par_metadata': par_metadata,
-                'validation_result': validation_result,
-                'message': 'Files validated - ready for upload and processing'
+                'validation_details': validation_result.details,
+                'message': validation_result.message
             })
             
         except Exception as e:

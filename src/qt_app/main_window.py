@@ -22,7 +22,7 @@ src_path = Path(__file__).parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from ui.backend_api import BackendAPI
+from backend_api import BackendAPI
 from qt_app.widgets.cell_experiment_tree import CellExperimentTreeWidget
 from qt_app.widgets.data_viewer import DataViewerWidget
 from qt_app.widgets.actions_segments_tree import ActionsSegmentsTreeWidget

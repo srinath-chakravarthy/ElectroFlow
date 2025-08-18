@@ -779,7 +779,7 @@ class BackendAPI:
                     try:
                         import polars as pl
                         from core.data_models import VERSASTUDIO_CSV_SCHEMA
-                        test_df = pl.read_csv(file_path, has_header=True, n_rows=5, schema=VERSASTUDIO_CSV_SCHEMA)
+                        test_df = pl.read_csv(file_path, has_header=True, n_rows=200, schema=VERSASTUDIO_CSV_SCHEMA)
                         is_valid = self.parser._validate_versastudio_csv(test_df)
                         validation_results.append({
                             'file': str(file_path),
