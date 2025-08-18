@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
     QWidget, QSplitter, QGroupBox, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QMessageBox, QProgressBar, QTextEdit,
-    QMenuBar, QStatusBar, QFileDialog, QTabWidget
+    QMenuBar, QStatusBar, QFileDialog, QTabWidget,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialog
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QFont, QAction
@@ -407,30 +408,82 @@ class DataPreviewWidget(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        """Setup the data preview UI."""
+        """Setup the data preview UI with tabbed interface."""
         layout = QVBoxLayout(self)
         
-        # Header with plot button
-        header_layout = QHBoxLayout()
+        # Header
         header = QLabel("Data Preview")
         header.setFont(QFont("Arial", 12, QFont.Bold))
-        header_layout.addWidget(header)
+        layout.addWidget(header)
         
-        header_layout.addStretch()
+        # Data info (compact summary)
+        self.data_info = QTextEdit()
+        self.data_info.setMaximumHeight(80)
+        self.data_info.setReadOnly(True)
+        self.data_info.setPlaceholderText("Select a file to preview data...")
+        layout.addWidget(self.data_info)
+        
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+        
+        # Tab 1: DataFrame Preview
+        self.setup_dataframe_tab()
+        
+        # Tab 2: Plot View
+        self.setup_plot_tab()
+    
+    def setup_dataframe_tab(self):
+        """Setup the DataFrame preview tab."""
+        dataframe_widget = QWidget()
+        dataframe_layout = QVBoxLayout(dataframe_widget)
+        
+        # Table view for data
+        self.data_table = QTableWidget()
+        self.data_table.setAlternatingRowColors(True)
+        self.data_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.data_table.horizontalHeader().setStretchLastSection(True)
+        dataframe_layout.addWidget(self.data_table)
+        
+        # Controls for dataframe view
+        df_controls = QHBoxLayout()
+        
+        self.show_info_btn = QPushButton("Column Info")
+        self.show_info_btn.clicked.connect(self.show_column_info)
+        self.show_info_btn.setEnabled(False)
+        df_controls.addWidget(self.show_info_btn)
+        
+        self.show_stats_btn = QPushButton("Statistics")
+        self.show_stats_btn.clicked.connect(self.show_data_stats)
+        self.show_stats_btn.setEnabled(False)
+        df_controls.addWidget(self.show_stats_btn)
+        
+        df_controls.addStretch()
+        
+        rows_label = QLabel("Showing first 100 rows")
+        rows_label.setStyleSheet("color: gray; font-style: italic;")
+        df_controls.addWidget(rows_label)
+        
+        dataframe_layout.addLayout(df_controls)
+        
+        self.tab_widget.addTab(dataframe_widget, "📊 DataFrame")
+    
+    def setup_plot_tab(self):
+        """Setup the plotting tab."""
+        plot_widget = QWidget()
+        plot_layout = QVBoxLayout(plot_widget)
+        
+        # Plot controls
+        plot_controls = QHBoxLayout()
         
         self.plot_btn = QPushButton("Plot Data")
         self.plot_btn.clicked.connect(self.plot_data)
         self.plot_btn.setEnabled(False)
-        header_layout.addWidget(self.plot_btn)
+        plot_controls.addWidget(self.plot_btn)
         
-        layout.addLayout(header_layout)
+        plot_controls.addStretch()
         
-        # Data info
-        self.data_info = QTextEdit()
-        self.data_info.setMaximumHeight(120)
-        self.data_info.setReadOnly(True)
-        self.data_info.setPlaceholderText("Select a file to preview data...")
-        layout.addWidget(self.data_info)
+        plot_layout.addLayout(plot_controls)
         
         # Plot area
         if PYQTGRAPH_AVAILABLE:
@@ -441,39 +494,238 @@ class DataPreviewWidget(QWidget):
             self.plot_widget.setTitle('Data Preview')
             self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
             self.plot_widget.setMinimumHeight(300)
-            layout.addWidget(self.plot_widget)
+            plot_layout.addWidget(self.plot_widget)
             
             # Plot controls
-            plot_controls = QHBoxLayout()
+            plot_specific_controls = QHBoxLayout()
             
             self.plot_potential_btn = QPushButton("Potential vs Time")
             self.plot_potential_btn.clicked.connect(lambda: self.plot_column('potential_v', 'Potential (V)'))
             self.plot_potential_btn.setEnabled(False)
-            plot_controls.addWidget(self.plot_potential_btn)
+            plot_specific_controls.addWidget(self.plot_potential_btn)
             
             self.plot_current_btn = QPushButton("Current vs Time")
             self.plot_current_btn.clicked.connect(lambda: self.plot_column('current_a', 'Current (A)'))
             self.plot_current_btn.setEnabled(False)
-            plot_controls.addWidget(self.plot_current_btn)
+            plot_specific_controls.addWidget(self.plot_current_btn)
             
             self.plot_power_btn = QPushButton("Power vs Time")
             self.plot_power_btn.clicked.connect(lambda: self.plot_column('power_w', 'Power (W)'))
             self.plot_power_btn.setEnabled(False)
-            plot_controls.addWidget(self.plot_power_btn)
+            plot_specific_controls.addWidget(self.plot_power_btn)
             
-            plot_controls.addStretch()
+            plot_specific_controls.addStretch()
             
             self.clear_plot_btn = QPushButton("Clear Plot")
             self.clear_plot_btn.clicked.connect(self.clear_plot)
             self.clear_plot_btn.setEnabled(False)
-            plot_controls.addWidget(self.clear_plot_btn)
+            plot_specific_controls.addWidget(self.clear_plot_btn)
             
-            layout.addLayout(plot_controls)
+            plot_layout.addLayout(plot_specific_controls)
         else:
             # Fallback if pyqtgraph not available
             no_plot_label = QLabel("PyQtGraph not available - install for plotting functionality")
             no_plot_label.setStyleSheet("color: orange; font-style: italic;")
-            layout.addWidget(no_plot_label)
+            plot_layout.addWidget(no_plot_label)
+        
+        self.tab_widget.addTab(plot_widget, "📈 Plot")
+        
+        # Set DataFrame tab as default (first tab)
+        self.tab_widget.setCurrentIndex(0)
+    
+    def update_dataframe_table(self):
+        """Update the DataFrame table with current data."""
+        if self.current_data is None:
+            self.data_table.setRowCount(0)
+            self.data_table.setColumnCount(0)
+            return
+        
+        try:
+            # Limit rows for performance (first 100 rows)
+            display_data = self.current_data.head(100)
+            
+            # Setup table dimensions
+            row_count = display_data.height
+            col_count = display_data.width
+            column_names = display_data.columns
+            
+            self.data_table.setRowCount(row_count)
+            self.data_table.setColumnCount(col_count)
+            
+            # Set column headers
+            self.data_table.setHorizontalHeaderLabels(column_names)
+            
+            # Populate table data
+            for row in range(row_count):
+                for col, column_name in enumerate(column_names):
+                    value = display_data[column_name][row]
+                    
+                    # Format value for display
+                    if value is None:
+                        display_value = "null"
+                    elif isinstance(value, float):
+                        # Scientific notation for very small/large numbers
+                        if abs(value) < 1e-3 or abs(value) > 1e6:
+                            display_value = f"{value:.3e}"
+                        else:
+                            display_value = f"{value:.6f}"
+                    else:
+                        display_value = str(value)
+                    
+                    item = QTableWidgetItem(display_value)
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Read-only
+                    self.data_table.setItem(row, col, item)
+            
+            # Auto-resize columns to content
+            self.data_table.resizeColumnsToContents()
+            
+            # Limit column width to prevent very wide columns
+            header = self.data_table.horizontalHeader()
+            for col in range(col_count):
+                if header.sectionSize(col) > 150:
+                    header.resizeSection(col, 150)
+                    
+        except Exception as e:
+            QMessageBox.warning(self, "DataFrame Error", f"Error updating DataFrame table: {str(e)}")
+    
+    def show_column_info(self):
+        """Show information about data columns."""
+        if self.current_data is None:
+            return
+        
+        try:
+            # Generate column information
+            info_lines = []
+            info_lines.append(f"Dataset: {self.current_file_id}")
+            info_lines.append(f"Total Columns: {self.current_data.width}")
+            info_lines.append(f"Total Rows: {self.current_data.height:,}")
+            info_lines.append("")
+            info_lines.append("Column Information:")
+            info_lines.append("-" * 50)
+            
+            for i, column_name in enumerate(self.current_data.columns):
+                column_data = self.current_data.get_column(column_name)
+                dtype = str(column_data.dtype)
+                null_count = column_data.null_count()
+                non_null_count = len(column_data) - null_count
+                
+                info_lines.append(f"{i+1:2d}. {column_name}")
+                info_lines.append(f"    Type: {dtype}")
+                info_lines.append(f"    Non-null: {non_null_count:,} ({100*non_null_count/len(column_data):.1f}%)")
+                
+                # Add range info for numeric columns
+                if dtype in ['Float64', 'Float32', 'Int64', 'Int32']:
+                    try:
+                        min_val = column_data.min()
+                        max_val = column_data.max()
+                        info_lines.append(f"    Range: {min_val:.6g} to {max_val:.6g}")
+                    except:
+                        pass
+                
+                info_lines.append("")
+            
+            # Show in dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Column Information")
+            dialog.setMinimumSize(500, 600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            text_area = QTextEdit()
+            text_area.setPlainText("\n".join(info_lines))
+            text_area.setReadOnly(True)
+            text_area.setFont(QFont("Courier", 9))
+            layout.addWidget(text_area)
+            
+            button_box = QHBoxLayout()
+            button_box.addStretch()
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.accept)
+            button_box.addWidget(close_btn)
+            layout.addLayout(button_box)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Error showing column info: {str(e)}")
+    
+    def show_data_stats(self):
+        """Show basic statistics for numeric columns."""
+        if self.current_data is None:
+            return
+        
+        try:
+            # Generate statistics for numeric columns
+            stats_lines = []
+            stats_lines.append(f"Dataset: {self.current_file_id}")
+            stats_lines.append(f"Shape: {self.current_data.height:,} rows × {self.current_data.width} columns")
+            stats_lines.append("")
+            stats_lines.append("Numeric Column Statistics:")
+            stats_lines.append("=" * 50)
+            
+            numeric_columns = []
+            for column_name in self.current_data.columns:
+                column_data = self.current_data.get_column(column_name)
+                dtype = str(column_data.dtype)
+                if dtype in ['Float64', 'Float32', 'Int64', 'Int32']:
+                    numeric_columns.append(column_name)
+            
+            if not numeric_columns:
+                stats_lines.append("No numeric columns found.")
+            else:
+                for column_name in numeric_columns:
+                    column_data = self.current_data.get_column(column_name)
+                    
+                    try:
+                        # Calculate statistics
+                        non_null_data = column_data.drop_nulls()
+                        if len(non_null_data) == 0:
+                            continue
+                            
+                        count = len(non_null_data)
+                        mean_val = non_null_data.mean()
+                        std_val = non_null_data.std()
+                        min_val = non_null_data.min()
+                        max_val = non_null_data.max()
+                        median_val = non_null_data.median()
+                        
+                        stats_lines.append(f"\n{column_name}:")
+                        stats_lines.append(f"  Count:  {count:,}")
+                        stats_lines.append(f"  Mean:   {mean_val:.6g}")
+                        stats_lines.append(f"  Std:    {std_val:.6g}")
+                        stats_lines.append(f"  Min:    {min_val:.6g}")
+                        stats_lines.append(f"  25%:    {non_null_data.quantile(0.25):.6g}")
+                        stats_lines.append(f"  50%:    {median_val:.6g}")
+                        stats_lines.append(f"  75%:    {non_null_data.quantile(0.75):.6g}")
+                        stats_lines.append(f"  Max:    {max_val:.6g}")
+                        
+                    except Exception:
+                        stats_lines.append(f"\n{column_name}: Error calculating statistics")
+            
+            # Show in dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Data Statistics")
+            dialog.setMinimumSize(500, 600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            text_area = QTextEdit()
+            text_area.setPlainText("\n".join(stats_lines))
+            text_area.setReadOnly(True)
+            text_area.setFont(QFont("Courier", 9))
+            layout.addWidget(text_area)
+            
+            button_box = QHBoxLayout()
+            button_box.addStretch()
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.accept)
+            button_box.addWidget(close_btn)
+            layout.addLayout(button_box)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Error showing statistics: {str(e)}")
     
     def set_file_for_preview(self, file_id: str):
         """Set file for data preview."""
@@ -532,6 +784,9 @@ class DataPreviewWidget(QWidget):
             summary_lines.extend(available_cols)
             self.data_info.setText("\n".join(summary_lines))
             
+            # Update DataFrame table
+            self.update_dataframe_table()
+            
             self.update_button_states()
             
         except Exception as e:
@@ -543,6 +798,11 @@ class DataPreviewWidget(QWidget):
         """Update button states based on available data."""
         has_data = self.current_data is not None
         
+        # DataFrame tab buttons
+        self.show_info_btn.setEnabled(has_data)
+        self.show_stats_btn.setEnabled(has_data)
+        
+        # Plot tab buttons
         self.plot_btn.setEnabled(has_data)
         
         if PYQTGRAPH_AVAILABLE and has_data:
@@ -563,6 +823,11 @@ class DataPreviewWidget(QWidget):
         self.current_file_id = None
         self.data_info.clear()
         self.data_info.setPlaceholderText("Select a file to preview data...")
+        
+        # Clear DataFrame table
+        self.data_table.setRowCount(0)
+        self.data_table.setColumnCount(0)
+        
         self.update_button_states()
         if PYQTGRAPH_AVAILABLE:
             self.clear_plot()
