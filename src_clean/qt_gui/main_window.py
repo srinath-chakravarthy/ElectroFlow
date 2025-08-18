@@ -19,10 +19,17 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
     QWidget, QSplitter, QGroupBox, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QMessageBox, QProgressBar, QTextEdit,
-    QMenuBar, QStatusBar, QFileDialog
+    QMenuBar, QStatusBar, QFileDialog, QTabWidget
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QFont, QAction
+
+# Import pyqtgraph for plotting
+try:
+    import pyqtgraph as pg
+    PYQTGRAPH_AVAILABLE = True
+except ImportError:
+    PYQTGRAPH_AVAILABLE = False
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -310,8 +317,219 @@ class FileUploadWidget(QWidget):
             )
 
 
+class DataPreviewWidget(QWidget):
+    """Widget for data preview with basic plotting."""
+    
+    def __init__(self, api, parent=None):
+        super().__init__(parent)
+        self.api = api
+        self.current_data = None
+        self.current_file_id = None
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Setup the data preview UI."""
+        layout = QVBoxLayout(self)
+        
+        # Header with plot button
+        header_layout = QHBoxLayout()
+        header = QLabel("Data Preview")
+        header.setFont(QFont("Arial", 12, QFont.Bold))
+        header_layout.addWidget(header)
+        
+        header_layout.addStretch()
+        
+        self.plot_btn = QPushButton("Plot Data")
+        self.plot_btn.clicked.connect(self.plot_data)
+        self.plot_btn.setEnabled(False)
+        header_layout.addWidget(self.plot_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Data info
+        self.data_info = QTextEdit()
+        self.data_info.setMaximumHeight(120)
+        self.data_info.setReadOnly(True)
+        self.data_info.setPlaceholderText("Select a file to preview data...")
+        layout.addWidget(self.data_info)
+        
+        # Plot area
+        if PYQTGRAPH_AVAILABLE:
+            # Create plot widget
+            self.plot_widget = pg.PlotWidget()
+            self.plot_widget.setLabel('left', 'Value')
+            self.plot_widget.setLabel('bottom', 'Time (s)')
+            self.plot_widget.setTitle('Data Preview')
+            self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
+            self.plot_widget.setMinimumHeight(300)
+            layout.addWidget(self.plot_widget)
+            
+            # Plot controls
+            plot_controls = QHBoxLayout()
+            
+            self.plot_potential_btn = QPushButton("Potential vs Time")
+            self.plot_potential_btn.clicked.connect(lambda: self.plot_column('potential_v', 'Potential (V)'))
+            self.plot_potential_btn.setEnabled(False)
+            plot_controls.addWidget(self.plot_potential_btn)
+            
+            self.plot_current_btn = QPushButton("Current vs Time")
+            self.plot_current_btn.clicked.connect(lambda: self.plot_column('current_a', 'Current (A)'))
+            self.plot_current_btn.setEnabled(False)
+            plot_controls.addWidget(self.plot_current_btn)
+            
+            self.plot_power_btn = QPushButton("Power vs Time")
+            self.plot_power_btn.clicked.connect(lambda: self.plot_column('power_w', 'Power (W)'))
+            self.plot_power_btn.setEnabled(False)
+            plot_controls.addWidget(self.plot_power_btn)
+            
+            plot_controls.addStretch()
+            
+            self.clear_plot_btn = QPushButton("Clear Plot")
+            self.clear_plot_btn.clicked.connect(self.clear_plot)
+            self.clear_plot_btn.setEnabled(False)
+            plot_controls.addWidget(self.clear_plot_btn)
+            
+            layout.addLayout(plot_controls)
+        else:
+            # Fallback if pyqtgraph not available
+            no_plot_label = QLabel("PyQtGraph not available - install for plotting functionality")
+            no_plot_label.setStyleSheet("color: orange; font-style: italic;")
+            layout.addWidget(no_plot_label)
+    
+    def set_file_for_preview(self, file_id: str):
+        """Set file for data preview."""
+        self.current_file_id = file_id
+        self.load_data_preview()
+    
+    def load_data_preview(self):
+        """Load data preview for current file."""
+        if not self.current_file_id:
+            return
+        
+        try:
+            # Get file data (limited to first 10000 rows for preview)
+            data = self.api.get_file_data(self.current_file_id)
+            
+            if data is None:
+                self.data_info.setText(f"❌ Could not load data for file: {self.current_file_id}")
+                self.current_data = None
+                self.update_button_states()
+                return
+            
+            # Store data and show info
+            self.current_data = data.head(10000)  # Limit for performance
+            
+            # Generate summary
+            summary_lines = [
+                f"📄 File ID: {self.current_file_id}",
+                f"📊 Data Points: {data.height:,} (showing first {min(10000, data.height):,})",
+                f"📈 Columns: {data.width}",
+                f"⏱️ Time Range: {data['time_s'].min():.1f} - {data['time_s'].max():.1f} seconds",
+                ""
+            ]
+            
+            # Check available columns
+            available_cols = []
+            if 'potential_v' in data.columns:
+                potential_range = f"{data['potential_v'].min():.3f} to {data['potential_v'].max():.3f} V"
+                available_cols.append(f"• Potential: {potential_range}")
+            
+            if 'current_a' in data.columns:
+                current_range = f"{data['current_a'].min():.6f} to {data['current_a'].max():.6f} A"
+                available_cols.append(f"• Current: {current_range}")
+            
+            if 'power_w' in data.columns:
+                power_range = f"{data['power_w'].min():.6f} to {data['power_w'].max():.6f} W"
+                available_cols.append(f"• Power: {power_range}")
+            
+            if 'technique_id' in data.columns:
+                techniques = data['technique_id'].unique().drop_nulls().to_list()
+                available_cols.append(f"• Techniques: {len(techniques)} unique ActionIDs")
+            
+            summary_lines.extend(available_cols)
+            self.data_info.setText("\n".join(summary_lines))
+            
+            self.update_button_states()
+            
+        except Exception as e:
+            self.data_info.setText(f"❌ Error loading data: {str(e)}")
+            self.current_data = None
+            self.update_button_states()
+    
+    def update_button_states(self):
+        """Update button states based on available data."""
+        has_data = self.current_data is not None
+        
+        self.plot_btn.setEnabled(has_data)
+        
+        if PYQTGRAPH_AVAILABLE and has_data:
+            columns = self.current_data.columns
+            self.plot_potential_btn.setEnabled('potential_v' in columns)
+            self.plot_current_btn.setEnabled('current_a' in columns)
+            self.plot_power_btn.setEnabled('power_w' in columns)
+            self.clear_plot_btn.setEnabled(True)
+        elif PYQTGRAPH_AVAILABLE:
+            self.plot_potential_btn.setEnabled(False)
+            self.plot_current_btn.setEnabled(False)
+            self.plot_power_btn.setEnabled(False)
+            self.clear_plot_btn.setEnabled(False)
+    
+    def plot_data(self):
+        """Plot basic overview of data."""
+        if not PYQTGRAPH_AVAILABLE or self.current_data is None:
+            return
+        
+        # Default to potential vs time if available
+        if 'potential_v' in self.current_data.columns:
+            self.plot_column('potential_v', 'Potential (V)')
+        elif 'current_a' in self.current_data.columns:
+            self.plot_column('current_a', 'Current (A)')
+        else:
+            QMessageBox.information(self, "Info", "No suitable columns found for plotting")
+    
+    def plot_column(self, column: str, label: str):
+        """Plot specific column vs time."""
+        if not PYQTGRAPH_AVAILABLE or self.current_data is None:
+            return
+        
+        if column not in self.current_data.columns or 'time_s' not in self.current_data.columns:
+            QMessageBox.warning(self, "Error", f"Column '{column}' or 'time_s' not found in data")
+            return
+        
+        try:
+            # Convert to pandas for plotting
+            df = self.current_data.to_pandas()
+            
+            # Clear previous plot
+            self.plot_widget.clear()
+            
+            # Plot data
+            time_data = df['time_s'].values
+            y_data = df[column].values
+            
+            # Use different colors for different plots
+            colors = {'potential_v': 'b', 'current_a': 'r', 'power_w': 'm'}
+            color = colors.get(column, 'g')
+            
+            self.plot_widget.plot(time_data, y_data, pen=pg.mkPen(color, width=1))
+            self.plot_widget.setLabel('left', label)
+            self.plot_widget.setLabel('bottom', 'Time (s)')
+            self.plot_widget.setTitle(f'{label} vs Time - {self.current_file_id}')
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Plot Error", f"Failed to plot data: {str(e)}")
+    
+    def clear_plot(self):
+        """Clear the plot."""
+        if PYQTGRAPH_AVAILABLE:
+            self.plot_widget.clear()
+            self.plot_widget.setTitle('Data Preview')
+
+
 class FileListWidget(QWidget):
     """Widget to display files for current cell."""
+    
+    file_selected = Signal(str)  # file_id
     
     def __init__(self, api, parent=None):
         super().__init__(parent)
@@ -330,6 +548,7 @@ class FileListWidget(QWidget):
         
         # File list
         self.file_list = QListWidget()
+        self.file_list.itemClicked.connect(self.on_file_selected)
         layout.addWidget(self.file_list)
         
         # File info
@@ -337,6 +556,13 @@ class FileListWidget(QWidget):
         self.file_info.setMaximumHeight(100)
         self.file_info.setReadOnly(True)
         layout.addWidget(self.file_info)
+    
+    def on_file_selected(self, item: QListWidgetItem):
+        """Handle file selection."""
+        file_info = item.data(Qt.UserRole)
+        if file_info:
+            file_id = file_info['file_id']
+            self.file_selected.emit(file_id)
     
     def set_current_cell(self, cell_name: str):
         """Set current cell and refresh file list."""
@@ -380,7 +606,7 @@ class ElectrochemicalMainWindow(QMainWindow):
         
         # Set window properties
         self.setWindowTitle("Electrochemical Analysis Suite")
-        self.resize(1200, 800)
+        self.resize(1400, 900)  # Larger window for data preview
     
     def setup_ui(self):
         """Setup the main UI."""
@@ -389,25 +615,42 @@ class ElectrochemicalMainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         layout = QHBoxLayout(central_widget)
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter)
+        main_splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(main_splitter)
         
         # Left panel - Cell selection
         self.cell_widget = CellSelectionWidget(self.api)
         self.cell_widget.setMaximumWidth(300)
-        splitter.addWidget(self.cell_widget)
+        main_splitter.addWidget(self.cell_widget)
         
         # Middle panel - File upload
         self.upload_widget = FileUploadWidget(self.api)
         self.upload_widget.setMaximumWidth(400)
-        splitter.addWidget(self.upload_widget)
+        main_splitter.addWidget(self.upload_widget)
         
-        # Right panel - File list
+        # Right panel - Combined file list and data preview
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        
+        # Create right-side splitter (vertical)
+        right_splitter = QSplitter(Qt.Vertical)
+        right_layout.addWidget(right_splitter)
+        
+        # File list (top half)
         self.file_list_widget = FileListWidget(self.api)
-        splitter.addWidget(self.file_list_widget)
+        right_splitter.addWidget(self.file_list_widget)
         
-        # Set splitter proportions
-        splitter.setSizes([250, 350, 400])
+        # Data preview (bottom half)
+        self.data_preview_widget = DataPreviewWidget(self.api)
+        right_splitter.addWidget(self.data_preview_widget)
+        
+        # Set right splitter proportions (file list smaller, preview larger)
+        right_splitter.setSizes([200, 600])
+        
+        main_splitter.addWidget(right_widget)
+        
+        # Set main splitter proportions
+        main_splitter.setSizes([250, 350, 800])
         
         # Menu bar
         self.create_menu_bar()
@@ -447,11 +690,19 @@ class ElectrochemicalMainWindow(QMainWindow):
         """Setup signal connections."""
         self.cell_widget.cell_selected.connect(self.on_cell_selected)
         self.upload_widget.file_processed.connect(self.on_file_processed)
+        self.file_list_widget.file_selected.connect(self.on_file_selected)
     
     def on_cell_selected(self, cell_name: str):
         """Handle cell selection."""
         self.upload_widget.set_current_cell(cell_name)
         self.file_list_widget.set_current_cell(cell_name)
+        # Clear data preview when switching cells
+        self.data_preview_widget.current_data = None
+        self.data_preview_widget.current_file_id = None
+        self.data_preview_widget.data_info.clear()
+        self.data_preview_widget.update_button_states()
+        if PYQTGRAPH_AVAILABLE:
+            self.data_preview_widget.clear_plot()
         self.status_bar.showMessage(f"Selected cell: {cell_name}")
     
     def on_file_processed(self, file_id: str):
@@ -459,6 +710,11 @@ class ElectrochemicalMainWindow(QMainWindow):
         # Refresh file list
         self.file_list_widget.refresh_files()
         self.status_bar.showMessage(f"File processed: {file_id}")
+    
+    def on_file_selected(self, file_id: str):
+        """Handle file selection for data preview."""
+        self.data_preview_widget.set_file_for_preview(file_id)
+        self.status_bar.showMessage(f"Previewing data: {file_id}")
     
     def show_database_stats(self):
         """Show database statistics."""
