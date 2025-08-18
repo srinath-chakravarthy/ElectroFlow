@@ -188,10 +188,6 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         
         # Quick actions
-        upload_btn = QPushButton("Upload Files")
-        upload_btn.clicked.connect(self.upload_files)
-        toolbar.addWidget(upload_btn)
-        
         new_group_btn = QPushButton("New Group")
         new_group_btn.clicked.connect(self.create_group)
         toolbar.addWidget(new_group_btn)

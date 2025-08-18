@@ -60,6 +60,54 @@ class FileUploadThread(QThread):
         self.upload_completed.emit(successful_count)
 
 
+class DualFileUploadThread(QThread):
+    """Background thread for dual file upload processing."""
+    
+    progress_updated = Signal(int)  # Progress percentage
+    file_processed = Signal(str, bool)  # filename, success
+    upload_completed = Signal(int)  # successful_count
+    
+    def __init__(self, api, cell_name, dual_pairs):
+        super().__init__()
+        self.api = api
+        self.cell_name = cell_name
+        self.dual_pairs = dual_pairs
+    
+    def run(self):
+        """Run the dual file upload process."""
+        successful_count = 0
+        total_pairs = len(self.dual_pairs)
+        
+        for i, pair in enumerate(self.dual_pairs):
+            try:
+                # Update progress
+                progress = int((i / total_pairs) * 100)
+                self.progress_updated.emit(progress)
+                
+                # Upload dual file pair
+                par_path = Path(pair['par_file'])
+                csv_path = Path(pair['csv_file'])
+                
+                result = self.api.add_dual_files_to_cell(
+                    cell_name=self.cell_name,
+                    par_path=par_path,
+                    csv_path=csv_path,
+                    upload_options={'duplicate_handling': 'replace'}
+                )
+                
+                if result['success']:
+                    successful_count += 1
+                    self.file_processed.emit(f"{par_path.name} + {csv_path.name}", True)
+                else:
+                    self.file_processed.emit(f"{par_path.name} + {csv_path.name}", False)
+                
+            except Exception as e:
+                self.file_processed.emit(f"Pair {i+1}", False)
+        
+        self.progress_updated.emit(100)
+        self.upload_completed.emit(successful_count)
+
+
 class FileManagerWidget(QWidget):
     """Widget for file management operations."""
     
@@ -154,20 +202,80 @@ class FileManagerWidget(QWidget):
                               "Please select a cell before uploading files.")
             return
         
-        # File dialog
+        # File dialog for dual file support
         file_paths, _ = QFileDialog.getOpenFileNames(
             self, 
-            "Select Battery Data Files",
+            "Select Battery Data Files (.par and .par.csv)",
             "",
-            "Battery Data Files (*.par *.csv);;PAR Files (*.par);;CSV Files (*.csv);;All Files (*.*)"
+            "Battery Data Files (*.par *.par.csv);;PAR Files (*.par);;PAR CSV Files (*.par.csv);;All Files (*.*)"
         )
         
         if file_paths:
             # Convert to Path objects
             path_objects = [Path(p) for p in file_paths]
             
-            # Start upload in background thread
-            self.start_upload(path_objects)
+            # Check for dual file pairs and validate
+            self.validate_and_upload(path_objects)
+    
+    def validate_and_upload(self, file_paths):
+        """Validate files and determine upload strategy."""
+        # Validate files through backend API
+        validation_result = self.api.validate_file_compatibility(file_paths)
+        
+        if not validation_result['success']:
+            QMessageBox.critical(self, "Validation Error", 
+                               f"File validation failed: {validation_result['error']}")
+            return
+        
+        dual_pairs = validation_result.get('dual_pairs', [])
+        individual_files = validation_result.get('individual_files', [])
+        
+        # If we have dual pairs, prioritize dual processing
+        if dual_pairs:
+            self.show_dual_file_dialog(dual_pairs, file_paths)
+        else:
+            # Process individual files
+            valid_files = [Path(f['file']) for f in individual_files if f['valid']]
+            if valid_files:
+                self.start_upload(valid_files)
+            else:
+                QMessageBox.warning(self, "No Valid Files", 
+                                  "No valid battery data files found.")
+    
+    def show_dual_file_dialog(self, dual_pairs, all_files):
+        """Show dialog for dual file processing options."""
+        message = "Detected .par and .par.csv file pairs:\n\n"
+        for pair in dual_pairs:
+            message += f"• {Path(pair['par_file']).name} + {Path(pair['csv_file']).name}\n"
+        
+        message += "\nFor calibrated data processing, use dual file mode (.par for technique metadata, .par.csv for calibrated data)."
+        
+        reply = QMessageBox.question(
+            self, "Dual File Processing", 
+            message + "\n\nUse dual file processing mode?",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Process as dual files
+            self.start_dual_upload(dual_pairs)
+        elif reply == QMessageBox.No:
+            # Process as individual files
+            self.start_upload(all_files)
+        # Cancel does nothing
+    
+    def start_dual_upload(self, dual_pairs):
+        """Start dual file upload processing."""
+        self.upload_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
+        # Create and start dual upload thread
+        self.upload_thread = DualFileUploadThread(self.api, self.active_cell_name, dual_pairs)
+        self.upload_thread.progress_updated.connect(self.progress_bar.setValue)
+        self.upload_thread.file_processed.connect(self.on_file_processed)
+        self.upload_thread.upload_completed.connect(self.on_upload_completed)
+        self.upload_thread.start()
     
     def start_upload(self, file_paths):
         """Start file upload in background thread."""
