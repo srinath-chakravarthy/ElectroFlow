@@ -53,8 +53,12 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cell_name TEXT UNIQUE NOT NULL,
                     description TEXT,
-                    chemistry TEXT,
+                    chemistry TEXT DEFAULT 'Li_metal',
                     capacity_ah REAL,
+                    cathode_material_type TEXT,
+                    cathode_active_mass_mg REAL,
+                    anode_material_type TEXT,
+                    anode_active_mass_mg REAL,
                     notes TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -118,11 +122,26 @@ class DatabaseManager:
                 )
             """)
             
+            # Create ActionID mapping table for dynamic technique discovery
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS actionid_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action_id INTEGER NOT NULL UNIQUE,
+                    technique_name TEXT NOT NULL,
+                    fundamental_technique TEXT NOT NULL,
+                    verified BOOLEAN DEFAULT FALSE,
+                    user_defined BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Create indices for performance
             conn.execute("CREATE INDEX IF NOT EXISTS idx_files_cell_id ON files (cell_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_files_file_id ON files (file_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_segments_file_id ON technique_segments (file_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_groups_cell_id ON user_groups (cell_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_actionid_mappings_action_id ON actionid_mappings (action_id)")
             
             conn.commit()
             logger.info(f"Database initialized: {self.db_path}")
@@ -157,6 +176,22 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 # Column already exists
                 pass
+            
+            # Add cell material columns if they don't exist
+            cell_material_columns = [
+                "cathode_material_type TEXT",
+                "cathode_active_mass_mg REAL", 
+                "anode_material_type TEXT",
+                "anode_active_mass_mg REAL"
+            ]
+            
+            for column_def in cell_material_columns:
+                try:
+                    conn.execute(f"ALTER TABLE cells ADD COLUMN {column_def}")
+                    logger.info(f"Added column {column_def.split()[0]} to cells table")
+                except sqlite3.OperationalError:
+                    # Column already exists
+                    pass
                 
             # Rename file_ids/segments columns to techniques if needed
             try:
@@ -748,6 +783,98 @@ class DatabaseManager:
                 source.backup(backup)
         
         logger.info(f"Database backed up to: {backup_path}")
+    
+    # ActionID mapping methods for dynamic technique discovery
+    def get_actionid_mapping(self, action_id: int) -> Optional[Dict[str, Any]]:
+        """Get ActionID mapping from database.
+        
+        Args:
+            action_id: ActionID to look up
+            
+        Returns:
+            Mapping dictionary or None if not found
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT action_id, technique_name, fundamental_technique, verified, user_defined
+                FROM actionid_mappings WHERE action_id = ?
+            """, (action_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    
+    def add_actionid_mapping(self, action_id: int, technique_name: str, 
+                           fundamental_technique: str, user_defined: bool = True) -> bool:
+        """Add ActionID mapping to database.
+        
+        Args:
+            action_id: ActionID number
+            technique_name: Full technique name
+            fundamental_technique: Fundamental technique category
+            user_defined: Whether this was user-defined or pre-populated
+            
+        Returns:
+            True if added successfully, False if already exists
+        """
+        try:
+            with self.get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO actionid_mappings (action_id, technique_name, fundamental_technique, user_defined)
+                    VALUES (?, ?, ?, ?)
+                """, (action_id, technique_name, fundamental_technique, user_defined))
+                conn.commit()
+                logger.info(f"Added ActionID mapping: {action_id} -> {fundamental_technique}")
+                return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"ActionID {action_id} mapping already exists")
+            return False
+    
+    def get_all_actionid_mappings(self) -> List[Dict[str, Any]]:
+        """Get all ActionID mappings from database.
+        
+        Returns:
+            List of mapping dictionaries
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT action_id, technique_name, fundamental_technique, verified, user_defined
+                FROM actionid_mappings ORDER BY action_id
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def update_actionid_mapping(self, action_id: int, **updates) -> bool:
+        """Update ActionID mapping.
+        
+        Args:
+            action_id: ActionID to update
+            **updates: Fields to update
+            
+        Returns:
+            True if updated, False if not found
+        """
+        if not updates:
+            return False
+            
+        updates['updated_at'] = datetime.now().isoformat()
+        set_clause = ", ".join(f"{key} = ?" for key in updates.keys())
+        values = list(updates.values()) + [action_id]
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute(f"""
+                UPDATE actionid_mappings SET {set_clause} WHERE action_id = ?
+            """, values)
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def populate_default_actionid_mappings(self):
+        """Populate database with known ActionID mappings."""
+        default_mappings = [
+            (8, 'Constant Current', 'CC', False),
+            (20, 'Galvanostatic EIS', 'GEIS', False), 
+            (23, 'Energy Open Circuit', 'OCV', False)
+        ]
+        
+        for action_id, technique_name, fundamental_technique, user_defined in default_mappings:
+            self.add_actionid_mapping(action_id, technique_name, fundamental_technique, user_defined)
 
 
 # Convenience functions for common operations
