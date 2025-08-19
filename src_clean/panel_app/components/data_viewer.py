@@ -9,15 +9,6 @@ import param
 import numpy as np
 import pandas as pd
 import hvplot.pandas
-import holoviews as hv
-
-# Try to import decimate, fallback to manual sampling
-try:
-    from holoviews.operation.datashader import decimate
-    HAS_DATASHADER = True
-except ImportError:
-    HAS_DATASHADER = False
-    decimate = None
 
 class DataViewer(param.Parameterized):
     """
@@ -321,7 +312,7 @@ class DataViewer(param.Parameterized):
             self.show_data_btn.name = "Show Data Preview"
     
     def _create_hvplot(self, x_col, y_col, title, x_label, y_label):
-        """Create hvplot with decimate for time series data using hv.Curve."""
+        """Create hvplot for time series data."""
         df = self.current_data.to_pandas()
         
         # Check required columns
@@ -332,16 +323,16 @@ class DataViewer(param.Parameterized):
             return
         
         try:
-            # Manual decimation first to avoid NdOverlay issues
+            # Manual decimation for performance
             if len(df) > 5000:
                 step = max(1, len(df) // 5000)
                 df = df.iloc[::step].copy()
             
-            # Create base curve using hvplot
+            # Create plot with segment coloring
             color_by = 'segment_number' if 'segment_number' in df.columns else None
             
             if color_by and color_by in df.columns and df[color_by].nunique() > 1:
-                # Group by segment for coloring - creates NdOverlay
+                # Group by segment for coloring
                 plot = df.hvplot.line(
                     x=x_col, 
                     y=y_col,
@@ -354,10 +345,8 @@ class DataViewer(param.Parameterized):
                     line_width=2,
                     alpha=0.8
                 )
-                # Don't apply decimate to NdOverlay
-                decimated_plot = plot
             else:
-                # Single color line - can be decimated
+                # Single color line
                 plot = df.hvplot.line(
                     x=x_col, 
                     y=y_col,
@@ -370,21 +359,12 @@ class DataViewer(param.Parameterized):
                     alpha=0.8,
                     color='blue'
                 )
-                
-                # Apply decimate only to single curves
-                if HAS_DATASHADER:
-                    try:
-                        decimated_plot = decimate(plot, max_samples=5000)
-                    except Exception:
-                        decimated_plot = plot
-                else:
-                    decimated_plot = plot
             
             # Update plot pane
-            self.plot_pane.object = decimated_plot
+            self.plot_pane.object = plot
             self.plot_pane.visible = True
             self.plot_message.visible = False
-            self.status_message = f"Plotted {title} - {len(df):,} points (decimated to 5000)"
+            self.status_message = f"Plotted {title} - {len(df):,} points"
             
         except Exception as e:
             self.plot_message.object = f"<p style='color: red;'>❌ Error creating {title}: {str(e)}</p>"
@@ -392,7 +372,7 @@ class DataViewer(param.Parameterized):
             self.plot_pane.visible = False
     
     def _create_nyquist_plot(self):
-        """Create Nyquist plot using hv.Points with decimate."""
+        """Create Nyquist plot."""
         df = self.current_data.to_pandas()
         
         # Check for impedance columns
@@ -415,7 +395,7 @@ class DataViewer(param.Parameterized):
             return
         
         try:
-            # Manual decimation first to avoid NdOverlay issues
+            # Manual decimation for performance
             if len(impedance_data) > 5000:
                 step = max(1, len(impedance_data) // 5000)
                 impedance_data = impedance_data.iloc[::step].copy()
@@ -423,7 +403,7 @@ class DataViewer(param.Parameterized):
             color_by = 'segment_number' if 'segment_number' in impedance_data.columns else None
             
             if color_by and color_by in impedance_data.columns and impedance_data[color_by].nunique() > 1:
-                # Group by segment for coloring - creates NdOverlay
+                # Group by segment for coloring
                 plot = impedance_data.hvplot.scatter(
                     x=real_col,
                     y=imag_col,
@@ -436,10 +416,8 @@ class DataViewer(param.Parameterized):
                     size=50,
                     alpha=0.8
                 )
-                # Don't apply decimate to NdOverlay
-                decimated_plot = plot
             else:
-                # Single color points - can be decimated
+                # Single color points
                 plot = impedance_data.hvplot.scatter(
                     x=real_col,
                     y=imag_col,
@@ -452,21 +430,12 @@ class DataViewer(param.Parameterized):
                     alpha=0.8,
                     color='blue'
                 )
-                
-                # Apply decimate only to single scatter plots
-                if HAS_DATASHADER:
-                    try:
-                        decimated_plot = decimate(plot, max_samples=5000)
-                    except Exception:
-                        decimated_plot = plot
-                else:
-                    decimated_plot = plot
             
             # Update plot pane
-            self.plot_pane.object = decimated_plot
+            self.plot_pane.object = plot
             self.plot_pane.visible = True
             self.plot_message.visible = False
-            self.status_message = f"Plotted Nyquist - {len(impedance_data):,} points (decimated to 5000)"
+            self.status_message = f"Plotted Nyquist - {len(impedance_data):,} points"
             
         except Exception as e:
             self.plot_message.object = f"<p style='color: red;'>❌ Error creating Nyquist plot: {str(e)}</p>"
