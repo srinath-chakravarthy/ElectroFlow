@@ -58,36 +58,20 @@ Successfully implemented a clean, modular battery data analysis system for elect
 ## 🐛 Known Issues (To Be Fixed)
 
 ### High Priority
-1. **Plot Scrolling Bug** 🔴
-   - **Issue:** Data preview plots continuously scroll/refresh
-   - **Impact:** Poor user experience, potential performance issues
-   - **Location:** `src_clean/qt_gui/main_window.py:477-527`
+1. **Technique Color Mapping Bug** 🔴
+   - **Issue:** technique_id not mapping correctly to colors in plots
+   - **Impact:** All plots show same color instead of technique-based coloring
+   - **Location:** `src_clean/qt_gui/main_window.py` color mapping logic
+   - **Status:** Data loads correctly, issue is in ActionID → technique mapping
 
-2. **File Storage Mechanism Bug** 🔴
-   - **Issue:** Small bug in file storage/organization
-   - **Impact:** Potential data integrity issues
-   - **Location:** To be investigated in backend API
-
-### Medium Priority
-3. **File Deletion Missing** 🟡
-   - **Issue:** No way to delete files from GUI
-   - **Impact:** Cannot clean up incorrect uploads
-   - **Solution:** Add delete button to file list widget
-
-4. **Basic Plot Colors** 🟡
-   - **Issue:** All plots use same color, no technique-based coloring
-   - **Impact:** Difficult to distinguish different experimental phases
-   - **Solution:** Implement color coding by fundamental technique
-
-5. **Plotting Performance** 🟡
-   - **Issue:** Using Polars→Pandas→NumPy conversion chain
-   - **Impact:** Unnecessary memory overhead for large datasets
-   - **Solution:** Direct Polars→NumPy conversion for PyQtGraph
-
-6. **Cell Deletion Missing** 🟡
-   - **Issue:** No cascade delete when removing cells
-   - **Impact:** Cannot clean up experimental cells and associated data
-   - **Solution:** Add cell deletion with cascade to files/segments
+### Recently Fixed ✅
+- **Plot Scrolling Issue:** Fixed continuous scroll/refresh in data preview
+- **File Storage Bug:** Resolved directory creation and path handling issues  
+- **File Deletion:** Added comprehensive file deletion with cascade operations
+- **Cell Deletion:** Implemented cascade delete for cells and associated data
+- **Plotting Performance:** Optimized with direct Polars→NumPy conversion
+- **Validation Architecture:** Fixed dual-path detection causing Jupyter failures
+- **DataFrame Preview:** Added comprehensive data inspection with statistics
 
 ## 📊 System Architecture
 
