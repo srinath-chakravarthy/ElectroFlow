@@ -4,6 +4,10 @@ Electrochemical Analysis Suite - Panel Web Interface
 
 Launch the Panel web application for electrochemical data analysis.
 Modern, reliable web interface with Bokeh plotting.
+
+Usage:
+  Command Line: python echem_web.py
+  PyCharm IDE:  Run this file directly or use run_panel_app.py
 """
 
 import panel as pn
@@ -23,9 +27,9 @@ def main():
     """Launch the Panel web application."""
     
     # Configure Panel
-    pn.extension('bokeh', template='material', theme='dark')
+    pn.extension('bokeh')
     
-    # Create and serve the application
+    # Create the application
     app = ElectrochemicalApp()
     
     print("🔬 Electrochemical Analysis Suite - Panel Web Interface")
@@ -43,8 +47,28 @@ def main():
     print("Press Ctrl+C to stop the server")
     print("=" * 60)
     
-    # Serve the application
-    app.servable().show(port=5006, autoreload=True, show=True)
+    # Serve the application with correct parameters
+    try:
+        # Method 1: Using pn.serve for PyCharm compatibility
+        pn.serve(
+            app.servable(), 
+            port=5006, 
+            show=True,
+            autoreload=True,
+            title="Electrochemical Analysis Suite"
+        )
+    except Exception as e:
+        print(f"Error starting server with pn.serve: {e}")
+        print("Trying alternative method...")
+        
+        # Method 2: Alternative approach
+        app.servable().show(port=5006)
+
+def run_in_jupyter():
+    """Alternative entry point for Jupyter/PyCharm environments."""
+    pn.extension('bokeh')
+    app = ElectrochemicalApp()
+    return app.servable()
 
 if __name__ == "__main__":
     main()
