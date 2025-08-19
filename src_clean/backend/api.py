@@ -520,30 +520,17 @@ class BackendAPI:
     # =============================================================================
     
     def validate_dual_files(self, metadata_path: Path, data_path: Path) -> Dict[str, Any]:
-        """Validate dual file pair."""
+        """Validate dual file pair using the same path as processing."""
         try:
-            # Use parser factory for validation
-            parser = self.parser_factory.auto_detect_parser(metadata_path)
+            # Use the SAME function that process_dual_files uses - unified path
+            data_file = auto_parse_dual_files(metadata_path, data_path)
             
-            if hasattr(parser, 'validate_dual_files'):
-                valid = parser.validate_dual_files(metadata_path, data_path)
-                
-                if valid:
-                    return {
-                        'success': True,
-                        'message': 'Files validated successfully',
-                        'instrument': parser.get_instrument_name()
-                    }
-                else:
-                    return {
-                        'success': False,
-                        'error': 'File validation failed'
-                    }
-            else:
-                return {
-                    'success': False,
-                    'error': 'Single file parser detected, expected dual files'
-                }
+            # If parsing succeeds, files are valid
+            return {
+                'success': True,
+                'message': 'Files validated successfully',
+                'instrument': data_file.metadata.instrument_model
+            }
                 
         except Exception as e:
             error_info = format_error_for_user(e)
