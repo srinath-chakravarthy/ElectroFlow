@@ -9,6 +9,15 @@ import param
 import numpy as np
 import pandas as pd
 import hvplot.pandas
+import holoviews as hv
+
+# Try to import decimate, fallback to manual sampling
+try:
+    from holoviews.operation.datashader import decimate
+    HAS_DATASHADER = True
+except ImportError:
+    HAS_DATASHADER = False
+    decimate = None
 
 class DataViewer(param.Parameterized):
     """
@@ -312,7 +321,7 @@ class DataViewer(param.Parameterized):
             self.show_data_btn.name = "Show Data Preview"
     
     def _create_hvplot(self, x_col, y_col, title, x_label, y_label):
-        """Create hvplot with decimate for time series data."""
+        """Create hvplot with decimate for time series data using hv.Curve."""
         df = self.current_data.to_pandas()
         
         # Check required columns
@@ -322,32 +331,78 @@ class DataViewer(param.Parameterized):
             self.plot_pane.visible = False
             return
         
-        # Create hvplot with decimate and segment coloring
-        color_by = 'segment_number' if 'segment_number' in df.columns else None
-        
-        plot = df.hvplot.scatter(
-            x=x_col, 
-            y=y_col,
-            c=color_by,
-            title=f"{title} - {self.current_file_id}",
-            xlabel=x_label,
-            ylabel=y_label,
-            width=800,
-            height=400,
-            size=3,
-            alpha=0.7
-        ).opts(
-            tools=['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save']
-        ).decimate(max_samples=5000)
-        
-        # Update plot pane
-        self.plot_pane.object = plot
-        self.plot_pane.visible = True
-        self.plot_message.visible = False
-        self.status_message = f"Plotted {title} - {len(df):,} points (decimated to 5000)"
+        try:
+            # Create base curve using hvplot
+            color_by = 'segment_number' if 'segment_number' in df.columns else None
+            
+            if color_by and color_by in df.columns:
+                # Group by segment for coloring
+                plot = df.hvplot.line(
+                    x=x_col, 
+                    y=y_col,
+                    by=color_by,
+                    title=f"{title} - {self.current_file_id}",
+                    xlabel=x_label,
+                    ylabel=y_label,
+                    width=800,
+                    height=400,
+                    line_width=2,
+                    alpha=0.8
+                )
+            else:
+                # Single color line
+                plot = df.hvplot.line(
+                    x=x_col, 
+                    y=y_col,
+                    title=f"{title} - {self.current_file_id}",
+                    xlabel=x_label,
+                    ylabel=y_label,
+                    width=800,
+                    height=400,
+                    line_width=2,
+                    alpha=0.8,
+                    color='blue'
+                )
+            
+            # Apply decimate operation or manual sampling
+            if HAS_DATASHADER:
+                decimated_plot = decimate(plot, max_samples=5000)
+            else:
+                # Fallback: manual sampling for large datasets
+                if len(df) > 5000:
+                    step = len(df) // 5000
+                    sampled_df = df.iloc[::step]
+                    
+                    if color_by and color_by in sampled_df.columns:
+                        decimated_plot = sampled_df.hvplot.line(
+                            x=x_col, y=y_col, by=color_by,
+                            title=f"{title} - {self.current_file_id}",
+                            xlabel=x_label, ylabel=y_label,
+                            width=800, height=400, line_width=2, alpha=0.8
+                        )
+                    else:
+                        decimated_plot = sampled_df.hvplot.line(
+                            x=x_col, y=y_col,
+                            title=f"{title} - {self.current_file_id}",
+                            xlabel=x_label, ylabel=y_label,
+                            width=800, height=400, line_width=2, alpha=0.8, color='blue'
+                        )
+                else:
+                    decimated_plot = plot
+            
+            # Update plot pane
+            self.plot_pane.object = decimated_plot
+            self.plot_pane.visible = True
+            self.plot_message.visible = False
+            self.status_message = f"Plotted {title} - {len(df):,} points (decimated to 5000)"
+            
+        except Exception as e:
+            self.plot_message.object = f"<p style='color: red;'>❌ Error creating {title}: {str(e)}</p>"
+            self.plot_message.visible = True
+            self.plot_pane.visible = False
     
     def _create_nyquist_plot(self):
-        """Create Nyquist plot with hvplot."""
+        """Create Nyquist plot using hv.Points with decimate."""
         df = self.current_data.to_pandas()
         
         # Check for impedance columns
@@ -369,26 +424,71 @@ class DataViewer(param.Parameterized):
             self.plot_pane.visible = False
             return
         
-        color_by = 'segment_number' if 'segment_number' in impedance_data.columns else None
-        
-        plot = impedance_data.hvplot.scatter(
-            x=real_col,
-            y=imag_col, 
-            c=color_by,
-            title=f"Nyquist Plot - {self.current_file_id}",
-            xlabel="Real Impedance (Ω)",
-            ylabel="Imaginary Impedance (Ω)",
-            width=600,
-            height=600,
-            size=4,
-            alpha=0.8
-        ).opts(
-            tools=['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
-            aspect='equal'
-        ).decimate(max_samples=5000)
-        
-        # Update plot pane
-        self.plot_pane.object = plot
-        self.plot_pane.visible = True
-        self.plot_message.visible = False
-        self.status_message = f"Plotted Nyquist - {len(impedance_data):,} points (decimated to 5000)"
+        try:
+            color_by = 'segment_number' if 'segment_number' in impedance_data.columns else None
+            
+            if color_by and color_by in impedance_data.columns:
+                # Group by segment for coloring 
+                plot = impedance_data.hvplot.scatter(
+                    x=real_col,
+                    y=imag_col,
+                    by=color_by,
+                    title=f"Nyquist Plot - {self.current_file_id}",
+                    xlabel="Real Impedance (Ω)",
+                    ylabel="Imaginary Impedance (Ω)",
+                    width=600,
+                    height=600,
+                    size=50,
+                    alpha=0.8
+                )
+            else:
+                # Single color points
+                plot = impedance_data.hvplot.scatter(
+                    x=real_col,
+                    y=imag_col,
+                    title=f"Nyquist Plot - {self.current_file_id}",
+                    xlabel="Real Impedance (Ω)",
+                    ylabel="Imaginary Impedance (Ω)",
+                    width=600,
+                    height=600,
+                    size=50,
+                    alpha=0.8,
+                    color='blue'
+                )
+            
+            # Apply decimate operation or manual sampling for points
+            if HAS_DATASHADER:
+                decimated_plot = decimate(plot, max_samples=5000)
+            else:
+                # Fallback: manual sampling for large datasets
+                if len(impedance_data) > 5000:
+                    step = len(impedance_data) // 5000
+                    sampled_data = impedance_data.iloc[::step]
+                    
+                    if color_by and color_by in sampled_data.columns:
+                        decimated_plot = sampled_data.hvplot.scatter(
+                            x=real_col, y=imag_col, by=color_by,
+                            title=f"Nyquist Plot - {self.current_file_id}",
+                            xlabel="Real Impedance (Ω)", ylabel="Imaginary Impedance (Ω)",
+                            width=600, height=600, size=50, alpha=0.8
+                        )
+                    else:
+                        decimated_plot = sampled_data.hvplot.scatter(
+                            x=real_col, y=imag_col,
+                            title=f"Nyquist Plot - {self.current_file_id}",
+                            xlabel="Real Impedance (Ω)", ylabel="Imaginary Impedance (Ω)",
+                            width=600, height=600, size=50, alpha=0.8, color='blue'
+                        )
+                else:
+                    decimated_plot = plot
+            
+            # Update plot pane
+            self.plot_pane.object = decimated_plot
+            self.plot_pane.visible = True
+            self.plot_message.visible = False
+            self.status_message = f"Plotted Nyquist - {len(impedance_data):,} points (decimated to 5000)"
+            
+        except Exception as e:
+            self.plot_message.object = f"<p style='color: red;'>❌ Error creating Nyquist plot: {str(e)}</p>"
+            self.plot_message.visible = True
+            self.plot_pane.visible = False
