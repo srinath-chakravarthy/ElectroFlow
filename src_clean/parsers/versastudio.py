@@ -229,12 +229,10 @@ class VersaStudioParser(DualFileParser):
     def _parse_csv_data(self, csv_path: Path, metadata: FileMetadata) -> DataFile:
         """Parse CSV data with schema validation and universal conversion."""
         try:
-            # Read CSV with VersaStudio schema
+            # Read CSV without forcing full schema to avoid data corruption
             df = pl.read_csv(
                 csv_path,
-                schema=VERSASTUDIO_CSV_SCHEMA,
-                null_values=["", "NULL", "null"],
-                ignore_errors=True
+                null_values=["", "NULL", "null"]
             )
             
             if df.is_empty():
