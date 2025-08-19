@@ -40,16 +40,58 @@ class CellManager(param.Parameterized):
         </h3>
         """)
         
-        # Cell creation
+        # Cell creation - basic info
         self.new_cell_name = pn.widgets.TextInput(
             placeholder="Enter cell name (e.g., CELL_001)",
             width=250
         )
         
         self.cell_chemistry = pn.widgets.Select(
-            value="Li_ion",
-            options=["Li_ion", "Li_metal", "Na_ion", "Other"],
+            value="Li_metal",
+            options=["Li_metal", "Li_ion", "Na_ion", "LFP", "NMC", "Other"],
             width=120
+        )
+        
+        # Battery specifications
+        self.capacity_ah = pn.widgets.NumberInput(
+            name="Capacity (Ah)",
+            value=None,
+            step=0.1,
+            start=0,
+            width=120
+        )
+        
+        # Electrode materials
+        self.cathode_material = pn.widgets.TextInput(
+            placeholder="Cathode material",
+            width=120
+        )
+        
+        self.cathode_mass_mg = pn.widgets.NumberInput(
+            name="Cathode Mass (mg)",
+            value=None,
+            step=0.1,
+            start=0,
+            width=120
+        )
+        
+        self.anode_material = pn.widgets.TextInput(
+            placeholder="Anode material", 
+            width=120
+        )
+        
+        self.anode_mass_mg = pn.widgets.NumberInput(
+            name="Anode Mass (mg)",
+            value=None,
+            step=0.1,
+            start=0,
+            width=120
+        )
+        
+        # Description and notes
+        self.cell_description = pn.widgets.TextInput(
+            placeholder="Brief description",
+            width=250
         )
         
         self.cell_notes = pn.widgets.TextAreaInput(
@@ -90,11 +132,18 @@ class CellManager(param.Parameterized):
         )
         self.delete_btn.on_click(self._on_delete_cell)
         
+        # Selected cell display  
+        self.selected_display = pn.pane.HTML(
+            "<p><b>Selected Cell:</b> <span style='color: #1976d2;'>None</span></p>",
+            width=250,
+            height=30
+        )
+        
         # Status display
         self.status_pane = pn.pane.HTML(
             "<p style='color: #666; font-size: 0.9em;'>Ready</p>",
             width=250,
-            height=30
+            height=25
         )
     
     @property
@@ -106,9 +155,18 @@ class CellManager(param.Parameterized):
             # Cell creation section
             pn.pane.HTML("<b>Create New Cell:</b>"),
             self.new_cell_name,
+            self.cell_description,
             pn.Row(
-                pn.pane.HTML("Chemistry:", width=70),
-                self.cell_chemistry
+                pn.Column("Chemistry:", self.cell_chemistry, width=120),
+                pn.Column("Capacity:", self.capacity_ah, width=120)
+            ),
+            pn.Row(
+                pn.Column("Cathode:", self.cathode_material, width=120),
+                pn.Column("Mass (mg):", self.cathode_mass_mg, width=120)
+            ),
+            pn.Row(
+                pn.Column("Anode:", self.anode_material, width=120), 
+                pn.Column("Mass (mg):", self.anode_mass_mg, width=120)
             ),
             self.cell_notes,
             self.create_btn,
@@ -121,6 +179,7 @@ class CellManager(param.Parameterized):
             pn.Row(self.refresh_btn, self.delete_btn),
             
             pn.Spacer(height=10),
+            self.selected_display,
             self.status_pane,
             
             width=280,
@@ -138,7 +197,13 @@ class CellManager(param.Parameterized):
             result = self.api.create_cell(
                 name=name,
                 chemistry=self.cell_chemistry.value,
-                notes=self.cell_notes.value.strip() or None
+                description=self.cell_description.value.strip() or "",
+                capacity_ah=self.capacity_ah.value,
+                cathode_material=self.cathode_material.value.strip() or "",
+                cathode_mass_mg=self.cathode_mass_mg.value,
+                anode_material=self.anode_material.value.strip() or "",
+                anode_mass_mg=self.anode_mass_mg.value,
+                notes=self.cell_notes.value.strip() or ""
             )
             
             if result.success:
@@ -147,6 +212,12 @@ class CellManager(param.Parameterized):
                 
                 # Clear form
                 self.new_cell_name.value = ""
+                self.cell_description.value = ""
+                self.capacity_ah.value = None
+                self.cathode_material.value = ""
+                self.cathode_mass_mg.value = None
+                self.anode_material.value = ""
+                self.anode_mass_mg.value = None
                 self.cell_notes.value = ""
                 
                 # Refresh list and select new cell
@@ -173,9 +244,13 @@ class CellManager(param.Parameterized):
                 
             self.selected_cell = cell_name
             self.delete_btn.disabled = False
+            
+            # Update selected cell display
+            self.selected_display.object = f"<p><b>Selected Cell:</b> <span style='color: #1976d2;'>{cell_name}</span></p>"
             self._update_status(f"Selected: {cell_name}")
         else:
             self.delete_btn.disabled = True
+            self.selected_display.object = "<p><b>Selected Cell:</b> <span style='color: #666;'>None</span></p>"
     
     def _on_refresh(self, event):
         """Handle refresh button."""

@@ -8,6 +8,7 @@ import panel as pn
 import param
 import numpy as np
 import pandas as pd
+import hvplot.pandas
 
 class DataViewer(param.Parameterized):
     """
@@ -38,33 +39,19 @@ class DataViewer(param.Parameterized):
         </h3>
         """)
         
-        # Plot controls
-        self.plot_potential_btn = pn.widgets.Button(
-            name="Plot Potential vs Time",
-            button_type="primary",
+        # Plot type dropdown
+        self.plot_type_select = pn.widgets.Select(
+            name="Plot Type",
+            options=[
+                "Select plot type...",
+                "Voltage vs Time",
+                "Current vs Time", 
+                "Nyquist Plot"
+            ],
+            value="Select plot type...",
             width=200
         )
-        self.plot_potential_btn.on_click(
-            lambda event: self._plot_column('potential_v', 'Potential (V)')
-        )
-        
-        self.plot_current_btn = pn.widgets.Button(
-            name="Plot Current vs Time", 
-            button_type="primary",
-            width=200
-        )
-        self.plot_current_btn.on_click(
-            lambda event: self._plot_column('current_a', 'Current (A)')
-        )
-        
-        self.plot_power_btn = pn.widgets.Button(
-            name="Plot Power vs Time",
-            button_type="primary", 
-            width=200
-        )
-        self.plot_power_btn.on_click(
-            lambda event: self._plot_power()
-        )
+        self.plot_type_select.param.watch(self._on_plot_type_selected, 'value')
         
         # Data preview toggle
         self.show_data_btn = pn.widgets.Button(
@@ -111,13 +98,7 @@ class DataViewer(param.Parameterized):
             
             # Plot controls
             pn.Row(
-                self.plot_potential_btn,
-                self.plot_current_btn,
-                self.plot_power_btn
-            ),
-            
-            # Data preview control
-            pn.Row(
+                self.plot_type_select,
                 self.show_data_btn
             ),
             
@@ -160,12 +141,13 @@ class DataViewer(param.Parameterized):
                 self.plot_pane.visible = False
                 return
             
-            self.current_data = data.head(10000)  # Limit for performance
+            self.current_data = data  # Keep full dataset for hvplot
+            self.preview_data = data.head(1000)  # Only 1000 for preview table
             
             # Show data info
             info_lines = [
                 f"📄 <b>File:</b> {file_id}",
-                f"📊 <b>Data Points:</b> {data.height:,} (showing first {min(10000, data.height):,})",
+                f"📊 <b>Data Points:</b> {data.height:,} (preview: {min(1000, data.height):,})",
                 f"📈 <b>Columns:</b> {data.width}",
                 f"⏱️ <b>Time Range:</b> {data['time_s'].min():.1f} - {data['time_s'].max():.1f} seconds"
             ]
@@ -181,6 +163,27 @@ class DataViewer(param.Parameterized):
         except Exception as e:
             self.data_info.object = f"<p style='color: red;'>❌ Error loading data: {str(e)}</p>"
             self.status_message = f"Error loading data: {str(e)}"
+    
+    def _on_plot_type_selected(self, event):
+        """Handle plot type selection from dropdown."""
+        plot_type = event.new
+        
+        if plot_type == "Select plot type..." or not self.current_data:
+            return
+            
+        try:
+            if plot_type == "Voltage vs Time":
+                self._create_hvplot('time_s', 'potential_v', 'Voltage vs Time', 'Time (s)', 'Voltage (V)')
+            elif plot_type == "Current vs Time":
+                self._create_hvplot('time_s', 'current_a', 'Current vs Time', 'Time (s)', 'Current (A)')
+            elif plot_type == "Nyquist Plot":
+                self._create_nyquist_plot()
+                
+        except Exception as e:
+            self.plot_message.object = f"<p style='color: red;'>❌ Error creating {plot_type}: {str(e)}</p>"
+            self.plot_message.visible = True
+            self.plot_pane.visible = False
+            self.status_message = f"Plot error: {str(e)}"
     
     def _plot_column(self, column: str, label: str):
         """Create Bokeh plot for specified column."""
@@ -303,7 +306,89 @@ class DataViewer(param.Parameterized):
         
         if self.data_preview_visible:
             self.show_data_btn.name = "Hide Data Preview"
-            if self.current_data is not None:
-                self.data_preview.object = self.current_data.to_pandas()
+            if self.preview_data is not None:
+                self.data_preview.object = self.preview_data.to_pandas()
         else:
             self.show_data_btn.name = "Show Data Preview"
+    
+    def _create_hvplot(self, x_col, y_col, title, x_label, y_label):
+        """Create hvplot with decimate for time series data."""
+        df = self.current_data.to_pandas()
+        
+        # Check required columns
+        if x_col not in df.columns or y_col not in df.columns:
+            self.plot_message.object = f"<p style='color: red;'>Missing columns: {x_col} or {y_col}</p>"
+            self.plot_message.visible = True
+            self.plot_pane.visible = False
+            return
+        
+        # Create hvplot with decimate and segment coloring
+        color_by = 'segment_number' if 'segment_number' in df.columns else None
+        
+        plot = df.hvplot.scatter(
+            x=x_col, 
+            y=y_col,
+            c=color_by,
+            title=f"{title} - {self.current_file_id}",
+            xlabel=x_label,
+            ylabel=y_label,
+            width=800,
+            height=400,
+            size=3,
+            alpha=0.7
+        ).opts(
+            tools=['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save']
+        ).decimate(max_samples=5000)
+        
+        # Update plot pane
+        self.plot_pane.object = plot
+        self.plot_pane.visible = True
+        self.plot_message.visible = False
+        self.status_message = f"Plotted {title} - {len(df):,} points (decimated to 5000)"
+    
+    def _create_nyquist_plot(self):
+        """Create Nyquist plot with hvplot."""
+        df = self.current_data.to_pandas()
+        
+        # Check for impedance columns
+        real_col = 'impedance_real_ohm'
+        imag_col = 'impedance_imag_ohm'
+        
+        if real_col not in df.columns or imag_col not in df.columns:
+            self.plot_message.object = "<p style='color: red;'>Missing impedance data for Nyquist plot</p>"
+            self.plot_message.visible = True
+            self.plot_pane.visible = False
+            return
+        
+        # Filter out NaN values for impedance data
+        impedance_data = df.dropna(subset=[real_col, imag_col])
+        
+        if len(impedance_data) == 0:
+            self.plot_message.object = "<p style='color: red;'>No valid impedance data found</p>"
+            self.plot_message.visible = True
+            self.plot_pane.visible = False
+            return
+        
+        color_by = 'segment_number' if 'segment_number' in impedance_data.columns else None
+        
+        plot = impedance_data.hvplot.scatter(
+            x=real_col,
+            y=imag_col, 
+            c=color_by,
+            title=f"Nyquist Plot - {self.current_file_id}",
+            xlabel="Real Impedance (Ω)",
+            ylabel="Imaginary Impedance (Ω)",
+            width=600,
+            height=600,
+            size=4,
+            alpha=0.8
+        ).opts(
+            tools=['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
+            aspect='equal'
+        ).decimate(max_samples=5000)
+        
+        # Update plot pane
+        self.plot_pane.object = plot
+        self.plot_pane.visible = True
+        self.plot_message.visible = False
+        self.status_message = f"Plotted Nyquist - {len(impedance_data):,} points (decimated to 5000)"
