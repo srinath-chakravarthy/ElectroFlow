@@ -150,6 +150,14 @@ class FileUploader(param.Parameterized):
         """Handle file selection."""
         file_id = event.new
         if file_id:
+            # Handle case where file_id might be a tuple (display_name, value)
+            if isinstance(file_id, tuple):
+                file_id = file_id[1]  # Get the value part
+            elif isinstance(file_id, str):
+                pass  # Already a string
+            else:
+                file_id = str(file_id)  # Convert to string
+                
             self.selected_file = file_id
             self.delete_file_btn.disabled = False
         else:

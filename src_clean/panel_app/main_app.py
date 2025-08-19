@@ -65,16 +65,36 @@ class ElectrochemicalApp(param.Parameterized):
     def _on_cell_selected(self, event):
         """Handle cell selection."""
         cell_name = event.new
+        
+        # Handle tuple case from Select widget
+        if isinstance(cell_name, tuple):
+            cell_name = cell_name[1] if len(cell_name) > 1 else cell_name[0]
+        elif not isinstance(cell_name, str):
+            cell_name = str(cell_name) if cell_name is not None else ""
+            
         self.current_cell = cell_name
         self.file_uploader.set_current_cell(cell_name)
-        self.status_bar.update_status(f"Selected cell: {cell_name}")
+        if cell_name:
+            self.status_bar.update_status(f"Selected cell: {cell_name}")
+        else:
+            self.status_bar.update_status("No cell selected")
     
     def _on_file_selected(self, event):
         """Handle file selection."""
         file_id = event.new
+        
+        # Handle tuple case from Select widget
+        if isinstance(file_id, tuple):
+            file_id = file_id[1] if len(file_id) > 1 else file_id[0]
+        elif not isinstance(file_id, str):
+            file_id = str(file_id) if file_id is not None else ""
+            
         self.current_file = file_id
         self.data_viewer.load_file_data(file_id)
-        self.status_bar.update_status(f"Loaded file: {file_id}")
+        if file_id:
+            self.status_bar.update_status(f"Loaded file: {file_id}")
+        else:
+            self.status_bar.update_status("No file selected")
     
     def _on_status_update(self, event):
         """Handle status updates from components."""

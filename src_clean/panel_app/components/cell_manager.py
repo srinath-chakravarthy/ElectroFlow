@@ -163,6 +163,14 @@ class CellManager(param.Parameterized):
         """Handle cell selection."""
         cell_name = event.new
         if cell_name:
+            # Handle case where cell_name might be a tuple (display_name, value)
+            if isinstance(cell_name, tuple):
+                cell_name = cell_name[1]  # Get the value part
+            elif isinstance(cell_name, str):
+                pass  # Already a string
+            else:
+                cell_name = str(cell_name)  # Convert to string
+                
             self.selected_cell = cell_name
             self.delete_btn.disabled = False
             self._update_status(f"Selected: {cell_name}")
