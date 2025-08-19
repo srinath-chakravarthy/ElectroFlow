@@ -868,6 +868,13 @@ class DataPreviewWidget(QWidget):
             time_data = time_data[mask.to_numpy()]
             y_data = y_data[mask.to_numpy()]
             
+            # Debug: Check data ranges
+            print(f"Plot Debug - {column}:")
+            print(f"  Data points: {len(time_data)}")
+            print(f"  Time range: {time_data.min():.3f} to {time_data.max():.3f}")
+            print(f"  Y range: {y_data.min():.6f} to {y_data.max():.6f}")
+            print(f"  Y data type: {y_data.dtype}")
+            
             # Check if technique information is available for color coding
             if 'technique_id' in self.current_data.columns:
                 technique_data = self.current_data.get_column('technique_id').to_numpy()[mask.to_numpy()]

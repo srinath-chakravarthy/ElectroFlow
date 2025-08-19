@@ -94,7 +94,9 @@ VERSASTUDIO_CSV_MAPPING = {
     'Elapsed Time (s)': 'time_s',
     'ActionId': 'technique_id',
     'Segment #': 'segment_number',
+    'Segment': 'segment_number',  # Alternative column name in some CSV files
     'Point #': 'point_number',
+    'Point': 'point_number',      # Alternative column name in some CSV files
     'Z Real': 'impedance_real_ohm',
     'Z Imag': 'impedance_imag_ohm',
     'Frequency(Hz)': 'frequency_hz',
