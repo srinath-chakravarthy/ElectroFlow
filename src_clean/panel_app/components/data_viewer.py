@@ -168,7 +168,7 @@ class DataViewer(param.Parameterized):
         """Handle plot type selection from dropdown."""
         plot_type = event.new
         
-        if plot_type == "Select plot type..." or not self.current_data:
+        if plot_type == "Select plot type..." or self.current_data is None:
             return
             
         try:
