@@ -375,28 +375,24 @@ class FileUploader(param.Parameterized):
 
     def _check_upload_ready(self, event):
         """Check if upload is ready with visual feedback."""
-        has_metadata = self.metadata_upload.value is not None
-        has_data = self.data_upload.value is not None
+        # Check if files are uploaded by looking at filename instead of value
+        has_metadata = self.metadata_upload.filename is not None
+        has_data = self.data_upload.filename is not None  
         has_cell = self.current_cell is not None
 
-        # Debug logging to understand the current state
-        print(f"DEBUG: Upload readiness check:")
-        print(f"  - has_metadata: {has_metadata} (value: {type(self.metadata_upload.value).__name__})")
-        print(f"  - has_data: {has_data} (value: {type(self.data_upload.value).__name__})")
-        print(f"  - has_cell: {has_cell} (current_cell: {self.current_cell})")
+        print(f"DEBUG: has_metadata={has_metadata}, has_data={has_data}, has_cell={has_cell}")
+        print(f"  metadata filename: {self.metadata_upload.filename}")
+        print(f"  data filename: {self.data_upload.filename}")
 
         self.upload_btn.disabled = not (has_metadata and has_data and has_cell)
 
         # Update button text based on readiness
         if not has_cell:
-            button_text = "🚀 Select Cell First"
+            self.upload_btn.name = "🚀 Select Cell First"
         elif not has_metadata or not has_data:
-            button_text = "🚀 Select Both Files"
+            self.upload_btn.name = "🚀 Select Both Files"
         else:
-            button_text = "🚀 Process Files"
-        
-        print(f"  - Setting button text to: {button_text}")
-        self.upload_btn.name = button_text
+            self.upload_btn.name = "🚀 Process Files"
 
     def _on_file_uploaded(self, event):
         """Handle file upload completion - alternative trigger."""
