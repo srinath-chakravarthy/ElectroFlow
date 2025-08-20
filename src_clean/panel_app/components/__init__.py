@@ -12,5 +12,6 @@ from .cell_manager import CellManager
 from .file_uploader import FileUploader  
 from .data_viewer import DataViewer
 from .status_bar import StatusBar
+from .group_management_tab import GroupManagementTab
 
-__all__ = ['CellManager', 'FileUploader', 'DataViewer', 'StatusBar']
+__all__ = ['CellManager', 'FileUploader', 'DataViewer', 'StatusBar', 'GroupManagementTab']

@@ -107,12 +107,24 @@ class DatabaseManager:
                 start_time_s REAL NOT NULL,
                 end_time_s REAL NOT NULL,
                 point_count INTEGER NOT NULL,
+                duration_s REAL NOT NULL,
+                start_potential_v REAL,
+                end_potential_v REAL,
+                start_current_a REAL,
+                end_current_a REAL,
+                capacity_ah REAL,
+                energy_wh REAL,
+                analysis_status TEXT DEFAULT 'pending',
+                analysis_results TEXT DEFAULT '{}',
                 segment_metadata TEXT DEFAULT '{}',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE,
                 UNIQUE(file_id, segment_index)
             )
         """)
+        
+        # Check if we need to migrate existing segments table
+        self._migrate_segments_table(conn)
         
         # ActionID mappings - technique identification
         conn.execute("""
@@ -138,6 +150,56 @@ class DatabaseManager:
         
         for index_sql in indices:
             conn.execute(index_sql)
+    
+    def _migrate_segments_table(self, conn: sqlite3.Connection):
+        """Migrate existing segments table to include analytics columns."""
+        try:
+            # Check if analytics columns exist
+            cursor = conn.execute("PRAGMA table_info(segments)")
+            columns = {row[1] for row in cursor.fetchall()}
+            
+            required_columns = {
+                'duration_s', 'start_potential_v', 'end_potential_v',
+                'start_current_a', 'end_current_a', 'capacity_ah', 
+                'energy_wh', 'analysis_status', 'analysis_results'
+            }
+            
+            missing_columns = required_columns - columns
+            
+            if missing_columns:
+                logger.info(f"Migrating segments table - adding columns: {missing_columns}")
+                
+                # Add missing columns with appropriate defaults
+                column_definitions = {
+                    'duration_s': 'REAL NOT NULL DEFAULT 0.0',
+                    'start_potential_v': 'REAL',
+                    'end_potential_v': 'REAL',
+                    'start_current_a': 'REAL',
+                    'end_current_a': 'REAL',
+                    'capacity_ah': 'REAL',
+                    'energy_wh': 'REAL',
+                    'analysis_status': 'TEXT DEFAULT "pending"',
+                    'analysis_results': 'TEXT DEFAULT "{}"'
+                }
+                
+                for column in missing_columns:
+                    if column in column_definitions:
+                        sql = f"ALTER TABLE segments ADD COLUMN {column} {column_definitions[column]}"
+                        conn.execute(sql)
+                        logger.debug(f"Added column: {column}")
+                
+                # Update duration for existing segments
+                conn.execute("""
+                    UPDATE segments 
+                    SET duration_s = end_time_s - start_time_s 
+                    WHERE duration_s = 0.0
+                """)
+                
+                logger.info("Segments table migration completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error migrating segments table: {e}")
+            # Don't raise - let the application continue with existing schema
     
     def _insert_default_data(self, conn: sqlite3.Connection):
         """Insert default ActionID mappings."""
@@ -375,18 +437,26 @@ class DatabaseManager:
             try:
                 for segment in segments:
                     metadata_json = json.dumps(segment.get('segment_metadata', {}))
+                    analysis_results_json = json.dumps(segment.get('analysis_results', {})) if isinstance(segment.get('analysis_results'), dict) else segment.get('analysis_results', '{}')
                     
                     conn.execute("""
                         INSERT INTO segments 
                         (file_id, segment_index, technique_id, technique_name, 
                          fundamental_technique, start_row, end_row, start_time_s, 
-                         end_time_s, point_count, segment_metadata)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         end_time_s, point_count, duration_s, start_potential_v, 
+                         end_potential_v, start_current_a, end_current_a, capacity_ah, 
+                         energy_wh, analysis_status, analysis_results, segment_metadata)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         file_id, segment['segment_index'], segment.get('technique_id'),
                         segment['technique_name'], segment['fundamental_technique'],
                         segment['start_row'], segment['end_row'], segment['start_time_s'],
-                        segment['end_time_s'], segment['point_count'], metadata_json
+                        segment['end_time_s'], segment['point_count'], 
+                        segment.get('duration_s'), segment.get('start_potential_v'),
+                        segment.get('end_potential_v'), segment.get('start_current_a'),
+                        segment.get('end_current_a'), segment.get('capacity_ah'),
+                        segment.get('energy_wh'), segment.get('analysis_status', 'pending'),
+                        analysis_results_json, metadata_json
                     ))
                 
                 conn.commit()
@@ -413,6 +483,62 @@ class DatabaseManager:
                 segments.append(segment_data)
             
             return segments
+    
+    def update_segment_analysis(self, file_id: str, segment_index: int, analysis_data: Dict[str, Any]) -> bool:
+        """Update segment analysis results."""
+        with self.get_connection() as conn:
+            try:
+                # Prepare analysis_results JSON
+                analysis_results_json = analysis_data.get('analysis_results', '{}')
+                if isinstance(analysis_results_json, dict):
+                    analysis_results_json = json.dumps(analysis_results_json)
+                
+                cursor = conn.execute("""
+                    UPDATE segments SET 
+                        duration_s = ?, start_potential_v = ?, end_potential_v = ?,
+                        start_current_a = ?, end_current_a = ?, capacity_ah = ?,
+                        energy_wh = ?, analysis_status = ?, analysis_results = ?
+                    WHERE file_id = ? AND segment_index = ?
+                """, (
+                    analysis_data.get('duration_s'),
+                    analysis_data.get('start_potential_v'),
+                    analysis_data.get('end_potential_v'),
+                    analysis_data.get('start_current_a'),
+                    analysis_data.get('end_current_a'),
+                    analysis_data.get('capacity_ah'),
+                    analysis_data.get('energy_wh'),
+                    analysis_data.get('analysis_status', 'pending'),
+                    analysis_results_json,
+                    file_id, segment_index
+                ))
+                
+                updated = cursor.rowcount > 0
+                if updated:
+                    logger.debug(f"Updated analysis for segment {file_id}:{segment_index}")
+                return updated
+                
+            except Exception as e:
+                logger.error(f"Failed to update segment analysis: {e}")
+                raise TransactionError("update_segment_analysis", str(e))
+    
+    def get_segments_pending_analysis(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get segments that need analysis (status = 'pending' or 'failed')."""
+        with self.get_connection() as conn:
+            sql = """
+                SELECT s.*, f.file_id, f.parquet_file_path
+                FROM segments s
+                JOIN files f ON s.file_id = f.file_id
+                WHERE s.analysis_status IN ('pending', 'failed')
+                ORDER BY f.acquisition_start, s.segment_index
+            """
+            
+            params = []
+            if limit:
+                sql += " LIMIT ?"
+                params.append(limit)
+            
+            cursor = conn.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
     
     def get_segments_by_technique(self, fundamental_technique: str) -> List[Dict[str, Any]]:
         """Get all segments for a specific technique across all files."""

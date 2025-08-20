@@ -12,7 +12,7 @@ from pathlib import Path
 # Import your backend and components (update paths as needed)
 from src_clean.backend import get_backend_api
 from .components import CellManager, FileUploader, DataViewer, StatusBar
-
+from .components import GroupManagementTab
 class ElectrochemicalApp(param.Parameterized):
     """
     Professional Panel application for electrochemical data analysis.
@@ -42,6 +42,7 @@ class ElectrochemicalApp(param.Parameterized):
         self.file_uploader = FileUploader(api=self.api)
         self.data_viewer = DataViewer(api=self.api)
         self.status_bar = self._create_status_bar()
+        self.group_management_tab = GroupManagementTab(api=self.api)
 
         # Setup component connections
         self._setup_connections()
@@ -332,7 +333,7 @@ class ElectrochemicalApp(param.Parameterized):
         """
 
     def _create_layout(self):
-        """Create professional scientific interface layout."""
+        """Create professional scientific interface layout with 3 tabs."""
 
         # Professional header with branding
         header = pn.pane.HTML("""
@@ -355,46 +356,123 @@ class ElectrochemicalApp(param.Parameterized):
         </div>
         """, sizing_mode='stretch_width', margin=(0, 0))
 
-        # Main content area - professional 3-column layout
-        main_content = pn.Row(
-            # Left column - Cell Management (fixed width)
+        # Tab 1: Cell & File Management (existing 3-column layout)
+        tab1_content = pn.Row(
             pn.Column(
                 self.cell_manager.panel,
-                width=350,
-                min_width=350,
-                max_width=350
+                width=350, min_width=350, max_width=350
             ),
-
-            # Middle column - File Operations (fixed width)
             pn.Column(
                 self.file_uploader.panel,
-                width=350,
-                min_width=350,
-                max_width=350
+                width=350, min_width=350, max_width=350
             ),
-
-            # Right column - Data Visualization (expandable)
             pn.Column(
                 self.data_viewer.panel,
                 min_width=400
             ),
-
             sizing_mode='stretch_width',
             margin=(0, 0)
         )
 
-        # Professional footer with status
-        footer = self.status_bar
+        # Tab 2: Group Management (new)
+        tab2_content = self.group_management_tab.panel
+
+        # Tab 3: Data Analysis (placeholder for now)
+        tab3_content = pn.pane.HTML("""
+        <div style='text-align: center; padding: 100px; color: #666;'>
+            <h2 style='color: #2E4057;'>📊 Advanced Data Analysis</h2>
+            <p>Enhanced analytics and group-based analysis coming soon...</p>
+        </div>
+        """)
+
+        # Create tabs
+        tabs = pn.Tabs(
+            ("🔋 Cell & File Management", tab1_content),
+            ("🔗 Group Management", tab2_content),
+            ("📊 Data Analysis", tab3_content),
+            dynamic=True,
+            sizing_mode='stretch_width'
+        )
 
         # Complete professional layout
         self.layout = pn.Column(
             header,
-            main_content,
-            footer,
+            tabs,
+            self.status_bar,  # Keep status bar at bottom for all tabs
             sizing_mode='stretch_both',
             min_height=800,
             styles={'background': '#F8F9FA'}
         )
+
+    # def _create_layout(self):
+    #     """Create professional scientific interface layout."""
+    #
+    #     # Professional header with branding
+    #     header = pn.pane.HTML("""
+    #     <div style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%);
+    #                 color: white; padding: 20px 30px; margin: 0;'>
+    #         <div style='display: flex; align-items: center; justify-content: space-between;'>
+    #             <div>
+    #                 <h1 style='margin: 0; font-size: 24px; font-weight: 600;'>
+    #                     🔬 Electrochemical Analysis Suite
+    #                 </h1>
+    #                 <p style='margin: 5px 0 0 0; opacity: 0.9; font-size: 14px;'>
+    #                     Professional Battery Data Analysis Platform
+    #                 </p>
+    #             </div>
+    #             <div style='text-align: right; opacity: 0.8; font-size: 12px;'>
+    #                 <div>Version 3.0.0</div>
+    #                 <div>Panel Web Interface</div>
+    #             </div>
+    #         </div>
+    #     </div>
+    #     """, sizing_mode='stretch_width', margin=(0, 0))
+    #
+    #     # Main content area - professional 3-column layout
+    #     tab1_content = pn.Row(
+    #         # Left column - Cell Management (fixed width)
+    #         pn.Column(
+    #             self.cell_manager.panel,
+    #             width=350,
+    #             min_width=350,
+    #             max_width=350
+    #         ),
+    #
+    #         # Middle column - File Operations (fixed width)
+    #         pn.Column(
+    #             self.file_uploader.panel,
+    #             width=350,
+    #             min_width=350,
+    #             max_width=350
+    #         ),
+    #
+    #         # Right column - Data Visualization (expandable)
+    #         pn.Column(
+    #             self.data_viewer.panel,
+    #             min_width=400
+    #         ),
+    #
+    #         sizing_mode='stretch_width',
+    #         margin=(0, 0)
+    #     )
+    #     # Tab 2: Group Management (new)
+    #     tab2_content = self.group_management_tab.panel
+    #
+    #     # Tab 3: Data Analysis (placeholder for now)
+    #     tab3_content = pn.pane.HTML("<h2>Data Analysis Coming Soon</h2>")
+    #
+    #     # Professional footer with status
+    #     footer = self.status_bar
+    #
+    #     # Complete professional layout
+    #     self.layout = pn.Column(
+    #         header,
+    #         main_content,
+    #         footer,
+    #         sizing_mode='stretch_both',
+    #         min_height=800,
+    #         styles={'background': '#F8F9FA'}
+    #     )
 
     def __panel__(self):
         """Return the professional Panel layout."""

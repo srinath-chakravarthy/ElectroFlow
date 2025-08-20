@@ -148,6 +148,14 @@ jupyter notebook examples/jupyter_example.ipynb
 - **Segment Coloring**: Different colors for multiple EIS measurements
 - **Interactive Tools**: Pan, zoom, box selection, data export
 
+### Fundamental Analytics Engine
+- **Universal Core Metrics**: Automatic capacity (Ah), energy (Wh), and duration for all techniques
+- **Context-Aware Analysis**: Intelligent rest phase analysis based on previous segment context
+- **Advanced Curve Fitting**: Exponential decay fitting with R² quality metrics
+- **Current Pulse Analysis**: Multi-point resistance calculations (immediate, 10s, 30s)
+- **Technique Classification**: Automatic detection and appropriate analysis methods
+- **Reanalysis System**: Update existing data with improved analytics algorithms
+
 ### Data Management
 - **Atomic Processing**: Database transactions ensure data consistency
 - **File Migration**: Automatic organization into standardized structure
@@ -311,6 +319,7 @@ python echem_web.py --dev
 | **README.md** | User guide and quick start (this file) |
 | **CLAUDE.md** | Technical architecture and development guide |
 | **docs/panel_ui_components.md** | Web interface component documentation |
+| **docs/fundamental_analytics.md** | Analytics engine technical documentation |
 | **cleanup_summary.md** | Legacy code removal and modernization |
 
 ## 🛠️ Development

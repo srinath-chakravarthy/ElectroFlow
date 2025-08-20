@@ -25,6 +25,7 @@ from src_clean.core.exceptions import (
     RecordNotFoundError
 )
 from src_clean.parsers import get_parser_factory, auto_parse_dual_files
+from src_clean.analysis import FundamentalAnalytics
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ class BackendAPI:
         self.db = DatabaseManager(self.db_path)
         self.parser_factory = get_parser_factory()
         self.migration_manager = DataMigrationManager()
+        self.analytics_engine = FundamentalAnalytics()
         
         logger.info(f"Backend API initialized - Data: {self.data_dir}, DB: {self.db_path}")
         if logger.isEnabledFor(logging.DEBUG):
@@ -285,10 +287,12 @@ class BackendAPI:
                 raise ProcessingError(f"Failed to store data file: {str(e)}")
     
     def _generate_segments(self, data_file: DataFile, file_id: str) -> List[Dict[str, Any]]:
-        """Generate segment information from DataFile."""
+        """Generate segment information from DataFile with analytics."""
         segments = []
         segment_boundaries = data_file.get_segment_boundaries()
         
+        # Prepare segment info for analytics
+        segments_info = []
         for i, boundary in enumerate(segment_boundaries):
             # Get technique mapping from database
             technique_id = boundary.get('technique_id')
@@ -304,7 +308,7 @@ class BackendAPI:
                 technique_name = "Unknown"
                 fundamental_technique = "unknown"
             
-            segments.append({
+            segment_info = {
                 'segment_index': i,
                 'technique_id': technique_id,
                 'technique_name': technique_name,
@@ -315,7 +319,34 @@ class BackendAPI:
                 'end_time_s': boundary['end_time_s'],
                 'point_count': boundary['point_count'],
                 'segment_metadata': {}
-            })
+            }
+            segments_info.append(segment_info)
+        
+        # Perform analytics on all segments
+        logger.info(f"Computing analytics for {len(segments_info)} segments")
+        try:
+            analytics_results = self.analytics_engine.analyze_all_segments(
+                data_file.universal_data, segments_info
+            )
+            
+            # Combine segment info with analytics results
+            for segment_info, analytics in zip(segments_info, analytics_results):
+                # Merge analytics results into segment info
+                segment_info.update(analytics)
+                segments.append(segment_info)
+                
+            logger.info(f"Analytics computation completed for {len(segments)} segments")
+            
+        except Exception as e:
+            logger.error(f"Analytics computation failed: {e}")
+            # Fallback: use segments without analytics
+            for segment_info in segments_info:
+                segment_info.update({
+                    'analysis_status': 'failed',
+                    'analysis_results': '{"error": "Analytics computation failed"}',
+                    'duration_s': segment_info['end_time_s'] - segment_info['start_time_s']
+                })
+                segments.append(segment_info)
         
         return segments
     
@@ -829,6 +860,180 @@ class BackendAPI:
         except Exception as e:
             logger.error(f"Failed to create directory structure for {cell_name}: {e}")
             return False
+    
+    # =============================================================================
+    # ANALYTICS OPERATIONS
+    # =============================================================================
+    
+    def reanalyze_segments(self, file_id: str, force_recompute: bool = False) -> ProcessingResult:
+        """
+        Reanalyze segments for a file using stored parquet data.
+        
+        Args:
+            file_id: ID of the file to reanalyze
+            force_recompute: If True, recompute even completed segments
+            
+        Returns:
+            ProcessingResult with reanalysis status
+        """
+        try:
+            # Get file information
+            file_info = self.db.get_file_by_id(file_id)
+            if not file_info:
+                return ProcessingResult(
+                    success=False,
+                    error=f"File {file_id} not found in database"
+                )
+            
+            # Load parquet data
+            parquet_path = Path(file_info['parquet_file_path'])
+            if not parquet_path.exists():
+                return ProcessingResult(
+                    success=False,
+                    error=f"Parquet file not found: {parquet_path}"
+                )
+            
+            data = pl.read_parquet(parquet_path)
+            
+            # Get current segments
+            segments = self.db.get_file_segments(file_id)
+            if not segments:
+                return ProcessingResult(
+                    success=False,
+                    error=f"No segments found for file {file_id}"
+                )
+            
+            logger.info(f"Reanalyzing {len(segments)} segments for file: {file_id}")
+            
+            updated_count = 0
+            failed_count = 0
+            
+            # Reanalyze each segment
+            for segment in segments:
+                try:
+                    # Skip if completed and not forcing recompute
+                    if (segment.get('analysis_status') == 'completed' and 
+                        not force_recompute):
+                        continue
+                    
+                    # Perform analysis
+                    analysis_result = self.analytics_engine.analyze_segment(
+                        data, segment
+                    )
+                    
+                    # Update database
+                    success = self.db.update_segment_analysis(
+                        file_id, segment['segment_index'], analysis_result
+                    )
+                    
+                    if success:
+                        updated_count += 1
+                        logger.debug(f"Updated segment {segment['segment_index']}")
+                    else:
+                        failed_count += 1
+                        logger.warning(f"Failed to update segment {segment['segment_index']}")
+                        
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"Error reanalyzing segment {segment['segment_index']}: {e}")
+            
+            # Generate summary message
+            total_processed = updated_count + failed_count
+            summary = f"Reanalyzed {file_id}: {updated_count} updated, {failed_count} failed"
+            
+            if failed_count == 0:
+                return ProcessingResult(
+                    success=True,
+                    file_id=file_id,
+                    message=summary
+                )
+            else:
+                return ProcessingResult(
+                    success=False,
+                    file_id=file_id,
+                    error=f"{summary} (partial failure)"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error reanalyzing segments for {file_id}: {e}")
+            return ProcessingResult(
+                success=False,
+                error=f"Reanalysis error: {str(e)}"
+            )
+    
+    def get_analytics_summary(self, cell_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get analytics summary for all segments or for a specific cell.
+        
+        Args:
+            cell_name: Optional cell name to filter results
+            
+        Returns:
+            Summary of analytics status and metrics
+        """
+        try:
+            with self.db.get_connection() as conn:
+                # Base query
+                if cell_name:
+                    cursor = conn.execute("""
+                        SELECT s.analysis_status, s.capacity_ah, s.energy_wh, s.duration_s,
+                               s.analysis_results, s.fundamental_technique
+                        FROM segments s
+                        JOIN files f ON s.file_id = f.file_id
+                        JOIN cells c ON f.cell_id = c.id
+                        WHERE c.name = ?
+                    """, (cell_name,))
+                else:
+                    cursor = conn.execute("""
+                        SELECT s.analysis_status, s.capacity_ah, s.energy_wh, s.duration_s,
+                               s.analysis_results, s.fundamental_technique
+                        FROM segments s
+                    """)
+                
+                segments_data = [dict(row) for row in cursor.fetchall()]
+            
+            if not segments_data:
+                return {'total_segments': 0, 'message': 'No segments found'}
+            
+            # Use analytics engine to generate summary
+            summary = self.analytics_engine.get_analysis_summary(segments_data)
+            
+            # Add database-specific information
+            summary['cell_filter'] = cell_name
+            summary['generated_at'] = datetime.now().isoformat()
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error getting analytics summary: {e}")
+            return {'error': str(e)}
+    
+    def get_segments_by_analysis_status(self, status: str = 'failed') -> List[Dict[str, Any]]:
+        """
+        Get segments filtered by analysis status.
+        
+        Args:
+            status: Analysis status to filter by ('pending', 'completed', 'failed', 'partial')
+            
+        Returns:
+            List of segments with the specified status
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT s.*, f.file_id, f.parquet_file_path, c.name as cell_name
+                    FROM segments s
+                    JOIN files f ON s.file_id = f.file_id  
+                    JOIN cells c ON f.cell_id = c.id
+                    WHERE s.analysis_status = ?
+                    ORDER BY c.name, f.acquisition_start, s.segment_index
+                """, (status,))
+                
+                return [dict(row) for row in cursor.fetchall()]
+                
+        except Exception as e:
+            logger.error(f"Error getting segments by status '{status}': {e}")
+            return []
 
 
 # =============================================================================
