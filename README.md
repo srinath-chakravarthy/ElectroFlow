@@ -1,339 +1,362 @@
-# Battery Data Analyzer - Qt Desktop Application
+# Electrochemical Analysis Suite
 
-A comprehensive Qt desktop application for electrochemical battery data analysis and management. Designed for small-scale battery research (30-60 cells) with professional-grade data processing and visualization.
+A comprehensive web-based application for electrochemical battery data analysis and management. Designed for small-scale battery research (30-60 cells) with professional-grade data processing, visualization, and universal instrument support.
 
 ## 🚀 Features
 
-- **🔋 Cell Management**: Complete material metadata tracking (cathode/anode masses, chemistry)
-- **📊 Interactive Visualization**: pyqtgraph plots with zoom, pan, crosshair, and real-time data loading
-- **🔍 Segment Analysis**: Row-mapped database for efficient technique-specific analysis
-- **📁 File Processing**: Dual-file support (.par + .par.csv) with timestamp computation
-- **👥 Group Management**: Multi-selection segment grouping for comparative studies
-- **💾 Database Storage**: Clean SQLite architecture with segment-based row mapping
-- **🖥️ Desktop Native**: Qt application with resizable panels and modal workflows
+- **🌐 Modern Web Interface**: Professional Panel web application with responsive design
+- **🔋 Complete Cell Management**: Rich metadata tracking (chemistry, capacity, electrode details)
+- **📊 Interactive Visualization**: HoloViews plots with dynamic decimation and segment coloring
+- **🔍 Intelligent Analysis**: Automatic technique detection and Nyquist plot generation
+- **📁 Universal File Processing**: VersaStudio (.par + .par.csv) with BioLogic support planned
+- **💾 Clean Data Organization**: Standardized cell-based directory structure
+- **🖥️ Multi-Interface Support**: Web UI, CLI, Python API, and Jupyter integration
 
 ## ✅ Current Implementation Status
 
-### Fully Functional Qt Application
-- **3-Panel Resizable Interface**: Cell/experiment tree, data viewer, actions/segments management
-- **Modal Upload/Review Dialog**: 4-panel plotting interface for comprehensive file validation
-- **Complete Cell CRUD**: Create, read, update cells with material metadata
-- **Real-time Data Loading**: Direct parquet data access with interactive plotting
-- **Segment-Level Analysis**: Color-coded analysis status with database storage
+### Professional Web Application
+- **Modern Panel Interface**: 3-column responsive layout with card-based design
+- **Professional Styling**: Scientific color scheme with gradients and hover effects
+- **Interactive Components**: Cell management, file upload, data visualization, status feedback
+- **Real-time Updates**: Dynamic status messages with timestamps
+- **Responsive Design**: Works on desktop and tablet devices
 
-### Clean Database Architecture
-```sql
--- Cell-level material metadata
-cells: id, cell_name, chemistry, cathode_material, cathode_mass_mg, anode_material, anode_mass_mg
+### Universal Data Processing
+- **29-Column Universal Schema**: Instrument-agnostic data structure
+- **VersaStudio Support**: Complete .par + .par.csv processing with impedance data
+- **Automatic Timestamping**: Absolute timestamps computed from acquisition metadata
+- **Segment Detection**: Automatic experimental technique boundaries
+- **Data Migration**: Standardized cell-based raw file organization
 
--- File-level (files ARE experiments)  
-files: id, cell_id, file_id, original_filename, acquisition_start, parquet_file_path
-
--- Segment-level with efficient row mapping
-segments: id, file_id, segment_index, start_row, end_row, analysis_status, analysis_results_json
-
--- User-defined groups
-user_groups: id, cell_id, group_name, segment_ids (JSON array)
+### Clean Architecture
+```
+data_clean/cells/{cell_name}/
+├── raw/                    # Original source files
+├── processed/              # Parsed parquet files
+├── analytics/              # Analysis results
+├── groups/                 # User-defined groupings
+└── images/                 # Generated plots
 ```
 
-## 🚀 Quick Start
+## 🌐 Quick Start - Web Interface
 
-### Prerequisites
-
+### Launch the Web Application
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Required packages:
-pip install PySide6 polars pyqtgraph pandas numpy scipy
+# Start web server (default port 5007)
+python echem_web.py
+
+# Custom port
+python echem_web.py --port 5008
+
+# Development mode with auto-reload
+python echem_web.py --dev
 ```
 
-### Running the Application
+**Access Interface**: Open browser to `http://localhost:5007`
 
+### Web Interface Workflow
+1. **Create Cell**: Enter cell details (chemistry, capacity, electrode materials)
+2. **Upload Files**: Select paired .par + .par.csv files with temperature setting
+3. **View Data**: Automatic plot type detection (Voltage/Current vs Time, Nyquist plots)
+4. **Analyze Results**: Interactive visualization with data preview tables
+
+## 🔧 Alternative Interfaces
+
+### Command Line Interface
 ```bash
-# Start the Qt application
-python -m src.qt_app.main
+# Create a cell
+python -m src_clean.cli.main create-cell CELL_001 --chemistry Li_ion
 
-# Optional: Specify data directory
-python -m src.qt_app.main --data-dir /path/to/your/data
+# Process files
+python -m src_clean.cli.main process-files metadata.par data.par.csv CELL_001
 
-# Debug mode
-python -m src.qt_app.main --debug
+# List cells and files
+python -m src_clean.cli.main list-cells
+python -m src_clean.cli.main list-files CELL_001
+
+# Get database statistics
+python -m src_clean.cli.main stats
 ```
 
-## 📚 Usage Guide
-
-### 1. Creating Cells
-
-1. **New Cell**: Click "New Cell" button or File → New Cell
-2. **Enter Details**:
-   - **Cell Name**: Unique identifier (e.g., `CELL_001`)
-   - **Chemistry**: Battery type (Li_metal, Li-ion, LFP, NMC, etc.)
-   - **Capacity**: Nominal capacity in Ah
-   - **Cathode**: Material type and active mass in mg
-   - **Anode**: Material type and active mass in mg
-   - **Notes**: Assembly conditions, references
-
-### 2. File Upload Workflow
-
-1. **Select Cell**: Click on cell in left panel
-2. **Upload Files**: Click "Upload Files" or Ctrl+U
-3. **Modal Review Dialog**:
-   - Select .par file (technique structure)
-   - Select matching .par.csv file (calibrated data)
-   - Review 4-panel plots:
-     - Applied Potential vs Time
-     - Current vs Time
-     - Nyquist Plot (colored by segment)
-     - Applied Potential vs Current
-   - Confirm processing
-
-### 3. Data Analysis Workflow
-
-**Step 1: Select Experiment**
-- Click experiment in cell tree
-- Data loads in main viewer
-
-**Step 2: Review Data**
-- **File Overview**: Metadata and experiment statistics
-- **Data Table**: Raw data preview with sorting
-- **Plots**: Interactive visualization with axis selection
-- **Analysis**: Segment-level results summary
-
-**Step 3: Segment Management**
-- Use bottom-left panel for segment selection
-- Ctrl+click for multi-selection
-- Create groups for comparative analysis
-- Color-coded status: 🟢 Completed, 🔴 Failed, 🟡 Pending
-
-### 4. Interactive Plotting
-
-**Controls:**
-- **Zoom**: Mouse wheel or box selection
-- **Pan**: Click and drag
-- **Crosshair**: Hover for exact values
-- **Axis Selection**: X/Y dropdowns
-- **Reset**: Clear button
-
-**Optimization:**
-- Automatic downsampling for >10k points
-- Real-time data loading from parquet files
-- Memory-efficient for large datasets
-
-## 🏗️ Application Architecture
-
-### 3-Panel Main Window
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ File | View | Analysis | Help                                   │
-├─────────────────────────────────────────────────────────────────┤
-│ ┌─────────────────┐ ┌───────────────────────────────────────────┐│
-│ │ Cells &         │ │ Data Viewer (Tabbed)                      ││
-│ │ Experiments     │ │ • File Overview                           ││
-│ │ ├─ CELL_001     │ │ • Data Table                              ││
-│ │ │  ├─ exp1.par  │ │ • Interactive Plots                      ││
-│ │ │  └─ exp2.par  │ │ • Analysis Results                       ││
-│ │ └─ CELL_002     │ │                                          ││
-│ └─────────────────┘ └───────────────────────────────────────────┘│
-├─────────────────────────────────────────────────────────────────┤
-│ ┌─────────────────┐ ┌─────────────────┐ ┌───────────────────────┐│
-│ │ Actions &       │ │ Group           │ │ Analysis Tabs         ││
-│ │ Segments        │ │ Management      │ │ • Data View           ││
-│ │ ✓ OCV Segment 1 │ │ ├─ OCV_Group    │ │ • Analysis            ││
-│ │ ✓ OCV Segment 2 │ │ ├─ CC_Group     │ │ • Plotting            ││
-│ │   CC Segment 1  │ │ └─ EIS_Group    │ │                      ││
-│ └─────────────────┘ └─────────────────┘ └───────────────────────┘│
-│ Status: Active: CELL_001 | Ready                               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Data Processing Pipeline
-
-1. **Upload**: Validate .par/.par.csv file pairs
-2. **Parse**: Extract metadata, technique sequences, ActionIDs
-3. **Convert**: Transform to universal 29-column schema  
-4. **Timestamp**: Compute absolute timestamps from acquisition_start
-5. **Store**: Save as parquet with segment row mapping in database
-6. **Analyze**: Run fundamental analysis per segment
-
-### Timestamp Computation
+### Python API
 ```python
-# From .par file metadata
-acquisition_start = datetime.strptime(DateAcquired + TimeAcquired, format)
+from src_clean.backend import get_backend_api
+from pathlib import Path
 
-# For each data point
-absolute_timestamp = acquisition_start + timedelta(seconds=elapsed_time_s)
+# Initialize API
+api = get_backend_api()
+
+# Create cell with metadata
+result = api.create_cell(
+    name="CELL_001",
+    chemistry="Li_ion",
+    capacity_ah=2.5,
+    cathode_material="NMC811",
+    cathode_mass_mg=15.2
+)
+
+# Process dual files
+result = api.process_dual_files(
+    metadata_path=Path("experiment.par"),
+    data_path=Path("experiment.par.csv"), 
+    cell_name="CELL_001",
+    temperature_c=25.0
+)
+
+# Access processed data
+data = api.get_file_data(result.file_id)  # Returns Polars DataFrame
 ```
 
-## 🔧 Advanced Features
-
-### Segment-Based Analysis
-```python
-# Efficient parquet access via row ranges
-segment_data = parquet_file.slice(start_row, end_row - start_row)
+### Jupyter Notebook Integration
+```bash
+# Launch Jupyter with example notebook
+jupyter notebook examples/jupyter_example.ipynb
 ```
 
-**Benefits:**
-- Fast re-analysis of specific techniques
-- Memory efficient for large files  
-- Enables technique-specific operations
-- Direct database queries by row ranges
+## 📊 Universal Data Schema
 
-### Dynamic ActionID Discovery
+### 29-Column Universal Schema
+**Core Time & Indexing (6 columns)**:
+- `time_s`: Relative time from experiment start (seconds)
+- `timestamp`: Absolute timestamp (ISO format) for traceability
+- `segment_number`, `point_number`, `loop_number`, `battery_cycle`
 
-**Workflow:**
-1. Parser encounters unknown ActionID
-2. User prompted with technique classification dialog
-3. Mapping stored in database for future use
-4. No code changes needed for new techniques
+**Electrochemical Core (6 columns)**:
+- `potential_v`, `current_a`: Working electrode measurements
+- `potential_applied_v`, `current_applied_a`: Applied control values
+- `potential_avg_v`, `current_avg_a`: Averaged measurements
 
-**Database Integration:**
+**Battery Analytics (4 columns)**:
+- `charge_capacity_ah`, `energy_wh`, `power_w`, `temperature_c`
+
+**EIS Support (5 columns)**:
+- `frequency_hz`, `impedance_real_ohm`, `impedance_imag_ohm`
+- `impedance_mag_ohm`, `impedance_phase_deg`
+
+**Advanced Metadata (8 columns)**:
+- `current_range`, `potential_range`, `mode`, `technique_id`
+- `status_flags`, `ce_potential_v`, `cell_potential_v`, `ac_amplitude_v`, `aux_voltage_v`
+
+## 🎯 Advanced Features
+
+### Intelligent Visualization
+- **Automatic Plot Detection**: Voltage/Current time series, Nyquist plots for AC data
+- **Dynamic Decimation**: Handles large datasets (>10k points) efficiently
+- **Segment Coloring**: Different colors for multiple EIS measurements
+- **Interactive Tools**: Pan, zoom, box selection, data export
+
+### Data Management
+- **Atomic Processing**: Database transactions ensure data consistency
+- **File Migration**: Automatic organization into standardized structure
+- **Reprocessing**: Update files with schema improvements
+- **Cell-Based Organization**: Portable directory structure for backup/sharing
+
+### Professional Interface Components
+
+#### Cell Manager
+- Rich metadata collection (chemistry, electrodes, capacity)
+- Visual cell list with file counts and chemistry types
+- Professional form validation and error handling
+
+#### File Uploader  
+- Step-by-step workflow with visual guidance
+- Paired file validation (.par + .par.csv)
+- Temperature metadata and processing status
+- File management with delete/refresh operations
+
+#### Data Viewer
+- Automatic AC data detection for impedance plots
+- Professional plot styling with scientific color schemes
+- Data preview tables (first 1000 rows)
+- Export capabilities for further analysis
+
+#### Status System
+- Real-time updates with professional styling
+- Color-coded status types (success, warning, error, processing)
+- Integrated system information display
+
+## 🔧 Configuration
+
+### Environment Variables (.env)
+```env
+# Data storage
+ELECTROCHEMICAL_DATA_DIR=data_clean
+ELECTROCHEMICAL_DB_NAME=electrochemical.db
+
+# Web interface
+WEB_PORT=5007
+WEB_HOST=localhost
+WEB_DEBUG=False
+
+# Processing
+DEFAULT_TEMPERATURE_C=25.0
+MAX_FILE_SIZE_MB=1000
+DECIMATION_THRESHOLD=10000
+
+# Logging
+LOG_LEVEL=INFO
+LOG_DIR=logs
+```
+
+## 🏗️ Architecture
+
+### Clean Modular Design
+```
+src_clean/
+├── core/
+│   ├── config.py           # Environment configuration
+│   ├── data_models.py      # Universal schema and validation
+│   ├── database.py         # SQLite operations
+│   └── exceptions.py       # Error handling
+├── backend/
+│   ├── api.py             # Backend orchestration
+│   └── data_migration.py  # Directory structure management
+├── parsers/
+│   ├── factory.py         # Auto-detection system
+│   ├── base.py           # Abstract interfaces
+│   └── versastudio.py    # VersaStudio implementation
+├── panel_app/
+│   ├── main_app.py       # Web application
+│   └── components/       # UI components
+└── cli/
+    └── main.py           # Command-line interface
+```
+
+### Database Schema
 ```sql
-actionid_mappings: action_id, technique_name, fundamental_technique, user_defined
+-- Cell-level metadata with rich material information
+cells: id, name, chemistry, description, capacity_ah, 
+       cathode_material, cathode_mass_mg, anode_material, anode_mass_mg
+
+-- File-level processing results
+files: id, cell_id, file_id, original_filename, paired_filename,
+       parquet_file_path, acquisition_start, processing_status
+
+-- Segment-level technique boundaries  
+segments: id, file_id, segment_index, technique_id, technique_name,
+          start_row, end_row, start_time_s, end_time_s, point_count
+
+-- ActionID technique mappings
+actionid_mappings: action_id, technique_name, fundamental_technique
 ```
 
-### File Mobility
-```python
-# Atomic operation: move file with all segments
-db.move_file_to_cell(file_id, new_cell_id, new_cell_name)
-# Automatically updates segments.cell_name for easy reference
-```
+## 🧪 Testing and Validation
 
-## 📁 Data Organization
-
-### Directory Structure
-```
-data/
-├── battery_data.db              # SQLite database
-└── processed_parquet/           # Processed data files
-    ├── CELL_001_exp1.parquet
-    ├── CELL_001_exp2.parquet
-    └── CELL_002_exp1.parquet
-```
-
-### Supported File Types
-
-**VersaStudio (Current):**
-- **.par files**: Technique structure, ActionID mapping, metadata
-- **.par.csv files**: Calibrated measurement data (required for EIS)
-
-**Future Support (Planned):**
-- **BioLogic**: .mpr/.mpt files with galvani integration
-- **Gamry**: .DTA file support
-
-## 🔍 Quality Control
-
-### File Validation
-- Ensures .par/.par.csv pairs are from same experiment
-- Validates file timestamps and compatibility
-- Checks for required metadata fields
-
-### Error Handling
-- Graceful parsing failure recovery
-- Real-time processing status updates
-- Comprehensive error logging and user feedback
-
-### Data Integrity
-- Foreign key constraints in database
-- Atomic operations for file movement
-- Analysis result versioning and validation
-
-## 🚨 Troubleshooting
-
-### Application Startup Issues
+### Run Test Suite
 ```bash
-# Check dependencies
-pip install PySide6 polars pyqtgraph pandas
+# Complete system test
+python test_clean_implementation.py
 
-# Run with debug output
-python -m src.qt_app.main --debug
-
-# Reset database (WARNING: deletes all data)
-rm data/battery_data.db
+# Web interface test
+python -c "from src_clean.panel_app.main_app import ElectrochemicalApp; app = ElectrochemicalApp(); print('✅ Web interface ready')"
 ```
-
-### File Upload Problems
-- **Pairing Issues**: Ensure .par and .par.csv are from same experiment
-- **Permissions**: Check file read permissions and disk space
-- **Export Settings**: Verify VersaStudio CSV export is calibrated
-
-### Plotting Issues
-- Try different X/Y axis combinations
-- Check if selected columns exist in data
-- Use "Clear" button to reset plot
-- Enable downsampling for large datasets
-
-### Performance Optimization
-- Use reasonable preview limits (1000-10k rows)
-- Close unused experiments to free memory
-- For files >1GB, consider data filtering
-- Monitor memory usage during large file processing
-
-## 🛠️ Development
-
-### Architecture Benefits
-
-**Research Workflow:**
-- Single application for complete workflow
-- Native performance without browser limitations
-- Offline operation with local processing
-- Professional metadata collection
-
-**Data Management:**
-- Segment-based querying and analysis
-- Row-mapped direct parquet access
-- Easy error correction (file movement)
-- Analysis persistence with reproducibility
-
-**Extensibility:**
-- Database-driven technique mapping
-- Universal schema for multi-instrument support
-- Plugin-ready backend API
-- Cross-platform Qt deployment
-
-### Contributing
-
-1. **Fork** the repository
-2. **Create** feature branch: `git checkout -b feature/new-analysis`
-3. **Implement** following existing patterns
-4. **Test** with real data files
-5. **Document** in CLAUDE.md and commit messages
-6. **Submit** pull request with detailed description
-
-### Development Setup
-```bash
-# Clone repository
-git clone [repository-url]
-cd Potentiostat_Data_analyser
-
-# Install development dependencies
-pip install -r requirements.txt
-pip install pytest pytest-qt  # For testing
-
-# Run tests
-pytest tests/
-
-# Start application in debug mode
-python -m src.qt_app.main --debug
-```
-
-## 📊 Performance Metrics
 
 ### Validated Capabilities
-- **✅ Large Files**: >1GB .par files with 948k+ data points
-- **✅ Processing Speed**: <10 seconds for typical experiments
-- **✅ Memory Efficiency**: Streaming processing for large datasets
-- **✅ Analysis Accuracy**: Curve fitting R² >0.9 for quality segments
-- **✅ Real-time UI**: Responsive interface during processing
+- **✅ Large Files**: >1GB .par files with 948k+ data points processed
+- **✅ Multi-Interface**: Web, CLI, Python API, Jupyter all functional
+- **✅ Data Migration**: Raw files organized in standardized structure
+- **✅ Impedance Processing**: Complex EIS data with proper Nyquist visualization
+- **✅ Professional UI**: Responsive web interface with modern styling
 
-## 📄 Documentation
+## 📈 Performance Metrics
+
+- **Processing Speed**: <10 seconds for typical experiments (948k points)
+- **Memory Efficiency**: Streaming processing for large datasets
+- **Visualization**: Dynamic decimation handles >10k points smoothly
+- **Database**: SQLite WAL mode for concurrent operations
+- **Response Time**: <2 seconds for data loading and plot generation
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+**Installation Problems**:
+```bash
+# Ensure all dependencies installed
+pip install -r requirements.txt
+
+# Check Python version (3.9+ required)
+python --version
+```
+
+**Web Interface Issues**:
+```bash
+# Check port availability
+netstat -an | grep 5007
+
+# Try different port
+python echem_web.py --port 5008
+
+# Enable debug mode
+python echem_web.py --dev
+```
+
+**File Processing Problems**:
+- Ensure .par and .par.csv files are from the same experiment
+- Check file permissions and disk space
+- Verify VersaStudio CSV export settings (calibrated data required)
+
+**Performance Issues**:
+- Files >1GB may take longer to process
+- Use data decimation for visualization (automatic above 10k points)
+- Monitor system memory during large file processing
+
+## 📚 Documentation
 
 | Document | Purpose |
 |----------|---------|
 | **README.md** | User guide and quick start (this file) |
 | **CLAUDE.md** | Technical architecture and development guide |
-| **project_status.md** | Implementation status and validation results |
-| **src/core/README.md** | Core processing pipeline documentation |
+| **docs/panel_ui_components.md** | Web interface component documentation |
+| **cleanup_summary.md** | Legacy code removal and modernization |
+
+## 🛠️ Development
+
+### Contributing
+1. **Fork** the repository
+2. **Create** feature branch: `git checkout -b feature/new-analysis`
+3. **Follow** existing code patterns in `src_clean/`
+4. **Test** with real data files using web interface
+5. **Document** changes in relevant markdown files
+6. **Submit** pull request with detailed description
+
+### Development Setup
+```bash
+# Clone and setup
+git clone [repository-url]
+cd Potentiostat_Data_analyser
+
+# Install development dependencies  
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env  # Edit as needed
+
+# Start development server
+python echem_web.py --dev
+
+# Run tests
+python test_clean_implementation.py
+```
+
+## 🚀 Future Roadmap
+
+### Planned Features
+- **BioLogic Support**: .mpr/.mpt file parsing with galvani integration
+- **Advanced Analytics**: Machine learning for pattern recognition
+- **Group Analysis**: Cross-cell comparative studies
+- **Export Tools**: Publication-ready plots and data export
+- **API Integration**: REST API for laboratory information systems
+
+### Technology Stack
+- **Backend**: Python 3.9+, Polars, SQLite, Panel
+- **Frontend**: Panel web framework with Bokeh plotting
+- **Visualization**: HoloViews with professional styling
+- **Data**: Universal 29-column schema with instrument mappings
+- **Architecture**: Clean modular design with configuration management
 
 ## 📜 License
 
@@ -341,6 +364,11 @@ MIT License - See LICENSE file for details.
 
 ---
 
-**Status**: ✅ Fully functional Qt desktop application  
-**Latest Version**: Complete 3-panel interface with database integration  
-**Last Updated**: August 18, 2025
+**Status**: ✅ Production-ready web application with professional interface  
+**Version**: 3.0 - Modern Panel web interface with universal data processing  
+**Last Updated**: August 20, 2025
+
+**Quick Access**:
+- **Web Interface**: `python echem_web.py` → `http://localhost:5007`
+- **Documentation**: `docs/panel_ui_components.md`
+- **API Reference**: `src_clean/backend/api.py`

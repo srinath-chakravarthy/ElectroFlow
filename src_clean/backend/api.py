@@ -16,13 +16,15 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import polars as pl
 
-from ..core import DatabaseManager, format_error_for_user, is_user_error
-from ..core.data_models import DataFile
-from ..core.exceptions import (
+from src_clean.core import DatabaseManager, format_error_for_user, is_user_error
+from src_clean.core.data_models import DataFile
+from src_clean.core.config import get_config
+from .data_migration import DataMigrationManager
+from src_clean.core.exceptions import (
     ElectrochemicalAnalysisError, DatabaseError, ProcessingError,
     RecordNotFoundError
 )
-from ..parsers import get_parser_factory, auto_parse_dual_files
+from src_clean.parsers import get_parser_factory, auto_parse_dual_files
 
 logger = logging.getLogger(__name__)
 
@@ -58,19 +60,27 @@ class BackendAPI:
     """
     
     def __init__(self, data_dir: Path = None, db_path: Path = None):
-        """Initialize backend API."""
-        self.data_dir = Path(data_dir) if data_dir else Path("data_clean")
-        self.db_path = Path(db_path) if db_path else (self.data_dir / "electrochemical.db")
+        """Initialize backend API with configuration support."""
+        # Use configuration system if no explicit paths provided
+        config = get_config()
         
-        # Create directories
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir = Path(data_dir) if data_dir else config.data_dir
+        self.db_path = Path(db_path) if db_path else config.db_path
+        
+        # Ensure all required directories exist using config
+        config.ensure_directories()
+        
+        # Create legacy processed directory for backward compatibility
         (self.data_dir / "processed").mkdir(parents=True, exist_ok=True)
         
         # Initialize components
         self.db = DatabaseManager(self.db_path)
         self.parser_factory = get_parser_factory()
+        self.migration_manager = DataMigrationManager()
         
         logger.info(f"Backend API initialized - Data: {self.data_dir}, DB: {self.db_path}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Configuration: {config}")
     
     # =============================================================================
     # CELL MANAGEMENT
@@ -169,8 +179,14 @@ class BackendAPI:
                     return create_result
                 cell = self.get_cell_by_name(cell_name)
             
-            # Parse files using auto-detection
-            data_file = auto_parse_dual_files(metadata_path, data_path)
+            # Ensure files are in the correct cell directory structure
+            logger.info(f"Ensuring proper file storage for cell: {cell_name}")
+            standardized_metadata_path, standardized_data_path = self.migration_manager.copy_raw_files_to_cell(
+                cell_name, metadata_path, data_path
+            )
+            
+            # Parse files using auto-detection with standardized paths
+            data_file = auto_parse_dual_files(standardized_metadata_path, standardized_data_path)
             
             # Generate unique file ID
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -587,6 +603,232 @@ class BackendAPI:
         except Exception as e:
             logger.error(f"Failed to cleanup failed processing: {e}")
             return 0
+    
+    def reprocess_file(self, file_id: str) -> ProcessingResult:
+        """
+        Reprocess a file using its stored raw data files.
+        
+        Args:
+            file_id: ID of the file to reprocess
+            
+        Returns:
+            ProcessingResult with success/error information
+        """
+        try:
+            # Get file info to access raw file paths
+            file_info = self.db.get_file_by_id(file_id)
+            if not file_info:
+                return ProcessingResult(
+                    success=False,
+                    error=f"File {file_id} not found in database"
+                )
+            
+            # Reconstruct raw file paths using config system
+            cell = self.db.get_cell_by_id(file_info['cell_id'])
+            cell_name = cell['name']
+            
+            # Use config to get standardized cell raw directory
+            config = get_config()
+            raw_dir = config.get_cell_raw_directory(cell_name)
+            
+            metadata_filename = file_info['original_filename']
+            data_filename = file_info['paired_filename']
+            
+            metadata_path = raw_dir / metadata_filename
+            data_path = raw_dir / data_filename
+            
+            if not metadata_path.exists():
+                return ProcessingResult(
+                    success=False,
+                    error=f"Raw metadata file not found: {metadata_path}"
+                )
+            
+            if not data_path.exists():
+                return ProcessingResult(
+                    success=False,
+                    error=f"Raw data file not found: {data_path}"
+                )
+            
+            # Cell info already retrieved above
+            
+            # Get original processing options
+            options = {
+                'temperature_c': file_info.get('temperature_c', 25.0)
+            }
+            
+            # Delete existing processed data
+            delete_success = self.delete_file(file_id)
+            if not delete_success:
+                logger.warning(f"Failed to delete existing data for {file_id}, continuing anyway")
+            
+            # Reprocess using the same raw files
+            logger.info(f"Reprocessing file {file_id} from raw files")
+            result = self.process_dual_files(
+                metadata_path=metadata_path,
+                data_path=data_path,
+                cell_name=cell['name'],
+                **options
+            )
+            
+            if result.success:
+                logger.info(f"Successfully reprocessed file: {file_id}")
+                return ProcessingResult(
+                    success=True,
+                    file_id=result.file_id,
+                    message=f"Successfully reprocessed {file_id}. New file ID: {result.file_id}"
+                )
+            else:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Failed to reprocess {file_id}: {result.error}"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error reprocessing file {file_id}: {e}")
+            return ProcessingResult(
+                success=False,
+                error=f"Reprocessing error: {str(e)}"
+            )
+    
+    def reprocess_cell(self, cell_name: str) -> ProcessingResult:
+        """
+        Reprocess all files for a cell using stored raw data.
+        
+        Args:
+            cell_name: Name of the cell to reprocess
+            
+        Returns:
+            ProcessingResult with summary of reprocessing
+        """
+        try:
+            # Get cell info
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Cell '{cell_name}' not found"
+                )
+            
+            # Get all files for the cell
+            files = self.db.get_cell_files(cell['id'])
+            if not files:
+                return ProcessingResult(
+                    success=True,
+                    message=f"No files to reprocess for cell '{cell_name}'"
+                )
+            
+            logger.info(f"Reprocessing {len(files)} files for cell '{cell_name}'")
+            
+            successful_count = 0
+            failed_count = 0
+            error_messages = []
+            new_file_ids = []
+            
+            for file_info in files:
+                file_id = file_info['file_id']
+                logger.info(f"Reprocessing file: {file_id}")
+                
+                result = self.reprocess_file(file_id)
+                
+                if result.success:
+                    successful_count += 1
+                    new_file_ids.append(result.file_id)
+                    logger.info(f"✅ Reprocessed: {file_id} → {result.file_id}")
+                else:
+                    failed_count += 1
+                    error_messages.append(f"{file_id}: {result.error}")
+                    logger.error(f"❌ Failed to reprocess: {file_id} - {result.error}")
+            
+            # Generate summary message
+            summary_parts = [
+                f"Cell '{cell_name}' reprocessing complete:",
+                f"✅ Successful: {successful_count}",
+                f"❌ Failed: {failed_count}"
+            ]
+            
+            if failed_count > 0:
+                summary_parts.append("Errors:")
+                summary_parts.extend([f"  - {msg}" for msg in error_messages[:5]])  # Limit to first 5 errors
+                if len(error_messages) > 5:
+                    summary_parts.append(f"  - ... and {len(error_messages) - 5} more errors")
+            
+            summary = "\n".join(summary_parts)
+            
+            return ProcessingResult(
+                success=failed_count == 0,
+                message=summary,
+                data={'successful_count': successful_count, 'failed_count': failed_count, 'new_file_ids': new_file_ids}
+            )
+            
+        except Exception as e:
+            logger.error(f"Error reprocessing cell {cell_name}: {e}")
+            return ProcessingResult(
+                success=False,
+                error=f"Cell reprocessing error: {str(e)}"
+            )
+    
+    def migrate_data_structure(self, dry_run: bool = True) -> ProcessingResult:
+        """
+        Migrate all raw files to standardized directory structure.
+        
+        Args:
+            dry_run: If True, only report what would be done without making changes
+            
+        Returns:
+            ProcessingResult with migration summary
+        """
+        try:
+            logger.info(f"Starting data structure migration {'(dry run)' if dry_run else ''}")
+            
+            migration_summary = self.migration_manager.migrate_raw_files(dry_run=dry_run)
+            
+            if migration_summary['errors']:
+                error_msg = f"Migration completed with errors: {len(migration_summary['errors'])} errors"
+                logger.warning(error_msg)
+                for error in migration_summary['errors'][:5]:  # Show first 5 errors
+                    logger.warning(f"  - {error}")
+                
+                return ProcessingResult(
+                    success=False,
+                    message=error_msg,
+                    data=migration_summary
+                )
+            else:
+                success_msg = f"Migration {'planned' if dry_run else 'completed'} successfully"
+                if not dry_run:
+                    success_msg += f": {migration_summary['migration_items_executed']} items processed"
+                
+                logger.info(success_msg)
+                return ProcessingResult(
+                    success=True,
+                    message=success_msg,
+                    data=migration_summary
+                )
+                
+        except Exception as e:
+            logger.error(f"Data migration failed: {e}")
+            return ProcessingResult(
+                success=False,
+                error=f"Migration error: {str(e)}"
+            )
+    
+    def ensure_cell_directory_structure(self, cell_name: str) -> bool:
+        """
+        Ensure complete directory structure exists for a cell.
+        
+        Args:
+            cell_name: Name of the cell
+            
+        Returns:
+            True if successful
+        """
+        try:
+            self.migration_manager.ensure_cell_directory_structure(cell_name)
+            logger.info(f"Ensured directory structure for cell: {cell_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create directory structure for {cell_name}: {e}")
+            return False
 
 
 # =============================================================================

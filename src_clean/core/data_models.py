@@ -74,11 +74,19 @@ VERSASTUDIO_CSV_SCHEMA = {
     'Potential (V)': pl.Float64,
     'Current (A)': pl.Float64,
     'Elapsed Time (s)': pl.Float64,
+    'Charge (C)': pl.Float64,
+    'Applied Potential (V)': pl.Float64,
+    'Frequency (Hz)': pl.Float64,
+    '|Z| (ohms)': pl.Float64,
+    'Zre (ohms)': pl.Float64,
+    'Zim (ohms)': pl.Float64,
+    'Phase of Z (deg)': pl.Float64,
+    'Segment': pl.Int64,
+    'Point': pl.Int64,
     'ActionId': pl.Int64,
+    # Alternative column names that might exist
     'Segment #': pl.Int64,
     'Point #': pl.Int64,
-    'Z Real': pl.Float64,
-    'Z Imag': pl.Float64,
     'Frequency(Hz)': pl.Float64,
     'Current Range': pl.Utf8,
     'Status': pl.Utf8,
@@ -92,14 +100,19 @@ VERSASTUDIO_CSV_MAPPING = {
     'Potential (V)': 'potential_v',
     'Current (A)': 'current_a',
     'Elapsed Time (s)': 'time_s',
+    'Charge (C)': 'charge_capacity_ah',  # Will convert from C to Ah
+    'Applied Potential (V)': 'potential_applied_v',
     'ActionId': 'technique_id',
-    'Segment #': 'segment_number',
-    'Segment': 'segment_number',  # Alternative column name in some CSV files
-    'Point #': 'point_number',
-    'Point': 'point_number',      # Alternative column name in some CSV files
-    'Z Real': 'impedance_real_ohm',
-    'Z Imag': 'impedance_imag_ohm',
-    'Frequency(Hz)': 'frequency_hz',
+    'Segment': 'segment_number',
+    'Segment #': 'segment_number',  # Alternative column name
+    'Point': 'point_number',
+    'Point #': 'point_number',      # Alternative column name
+    'Frequency (Hz)': 'frequency_hz',
+    'Frequency(Hz)': 'frequency_hz',  # Alternative column name
+    'Zre (ohms)': 'impedance_real_ohm',
+    'Zim (ohms)': 'impedance_imag_ohm',
+    '|Z| (ohms)': 'impedance_mag_ohm',
+    'Phase of Z (deg)': 'impedance_phase_deg',
     'Current Range': 'current_range',
     'Status': 'status_flags',
     'AC Amplitude': 'ac_amplitude_v',
@@ -109,8 +122,9 @@ VERSASTUDIO_CSV_MAPPING = {
 # Computed columns for VersaStudio
 VERSASTUDIO_COMPUTED_COLUMNS = {
     'power_w': lambda df: df['potential_v'] * df['current_a'],
-    'impedance_mag_ohm': lambda df: (df['impedance_real_ohm']**2 + df['impedance_imag_ohm']**2)**0.5,
-    'impedance_phase_deg': lambda df: pl.arctan2(df['impedance_imag_ohm'], df['impedance_real_ohm']) * 180 / 3.14159
+    # Convert charge from Coulombs to Ah (1 Ah = 3600 C)
+    'charge_capacity_ah': lambda df: df['charge_capacity_ah'] / 3600.0 if 'charge_capacity_ah' in df.columns else None
+    # Note: impedance_mag_ohm and impedance_phase_deg now come directly from VersaStudio CSV
 }
 
 
