@@ -887,6 +887,359 @@ class DatabaseManager:
             return cursor.fetchone() is not None
 
     # =============================================================================
+    # ANALYTICS OPERATIONS
+    # =============================================================================
+
+    def get_group_base_statistics(self, group_ids: List[int]) -> Dict[str, Dict[str, float]]:
+        """
+        Get aggregated statistics for multiple groups using existing segment columns.
+        
+        Returns statistics for 9 key metrics from the segments table.
+        """
+        if not group_ids:
+            return {}
+        
+        placeholders = ','.join('?' * len(group_ids))
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute(f"""
+                SELECT 
+                    -- Basic statistics for each numeric column
+                    AVG(start_time_s) as avg_start_time,
+                    SQRT(MAX(0, AVG(start_time_s * start_time_s) - AVG(start_time_s) * AVG(start_time_s))) as std_start_time,
+                    MIN(start_time_s) as min_start_time,
+                    MAX(start_time_s) as max_start_time,
+                    
+                    AVG(duration_s) as avg_duration,
+                    SQRT(MAX(0, AVG(duration_s * duration_s) - AVG(duration_s) * AVG(duration_s))) as std_duration,
+                    MIN(duration_s) as min_duration,
+                    MAX(duration_s) as max_duration,
+                    
+                    AVG(start_potential_v) as avg_start_potential,
+                    SQRT(MAX(0, AVG(start_potential_v * start_potential_v) - AVG(start_potential_v) * AVG(start_potential_v))) as std_start_potential,
+                    MIN(start_potential_v) as min_start_potential,
+                    MAX(start_potential_v) as max_start_potential,
+                    
+                    AVG(end_potential_v) as avg_end_potential,
+                    SQRT(MAX(0, AVG(end_potential_v * end_potential_v) - AVG(end_potential_v) * AVG(end_potential_v))) as std_end_potential,
+                    MIN(end_potential_v) as min_end_potential,
+                    MAX(end_potential_v) as max_end_potential,
+                    
+                    AVG(start_current_a) as avg_start_current,
+                    SQRT(MAX(0, AVG(start_current_a * start_current_a) - AVG(start_current_a) * AVG(start_current_a))) as std_start_current,
+                    MIN(start_current_a) as min_start_current,
+                    MAX(start_current_a) as max_start_current,
+                    
+                    AVG(end_current_a) as avg_end_current,
+                    SQRT(MAX(0, AVG(end_current_a * end_current_a) - AVG(end_current_a) * AVG(end_current_a))) as std_end_current,
+                    MIN(end_current_a) as min_end_current,
+                    MAX(end_current_a) as max_end_current,
+                    
+                    AVG(capacity_ah) as avg_capacity,
+                    SQRT(MAX(0, AVG(capacity_ah * capacity_ah) - AVG(capacity_ah) * AVG(capacity_ah))) as std_capacity,
+                    MIN(capacity_ah) as min_capacity,
+                    MAX(capacity_ah) as max_capacity,
+                    
+                    AVG(energy_wh) as avg_energy,
+                    SQRT(MAX(0, AVG(energy_wh * energy_wh) - AVG(energy_wh) * AVG(energy_wh))) as std_energy,
+                    MIN(energy_wh) as min_energy,
+                    MAX(energy_wh) as max_energy,
+                    
+                    AVG(point_count) as avg_points,
+                    SQRT(MAX(0, AVG(point_count * point_count) - AVG(point_count) * AVG(point_count))) as std_points,
+                    MIN(point_count) as min_points,
+                    MAX(point_count) as max_points,
+                    
+                    COUNT(*) as total_count
+                FROM segments s
+                JOIN user_group_segments ugs ON s.id = ugs.segment_id
+                WHERE ugs.group_id IN ({placeholders})
+                AND s.start_time_s IS NOT NULL
+            """, group_ids)
+            
+            row = cursor.fetchone()
+            
+            if not row or row[-1] == 0:  # total_count is 0
+                return {}
+            
+            # Build the statistics dictionary
+            stats = {
+                "start_time_s": {
+                    "mean": row[0] or 0.0,
+                    "std": row[1] or 0.0,
+                    "min": row[2] or 0.0,
+                    "max": row[3] or 0.0,
+                    "count": int(row[-1])
+                },
+                "duration_s": {
+                    "mean": row[4] or 0.0,
+                    "std": row[5] or 0.0,
+                    "min": row[6] or 0.0,
+                    "max": row[7] or 0.0,
+                    "count": int(row[-1])
+                },
+                "start_potential_v": {
+                    "mean": row[8] or 0.0,
+                    "std": row[9] or 0.0,
+                    "min": row[10] or 0.0,
+                    "max": row[11] or 0.0,
+                    "count": int(row[-1])
+                },
+                "end_potential_v": {
+                    "mean": row[12] or 0.0,
+                    "std": row[13] or 0.0,
+                    "min": row[14] or 0.0,
+                    "max": row[15] or 0.0,
+                    "count": int(row[-1])
+                },
+                "start_current_a": {
+                    "mean": row[16] or 0.0,
+                    "std": row[17] or 0.0,
+                    "min": row[18] or 0.0,
+                    "max": row[19] or 0.0,
+                    "count": int(row[-1])
+                },
+                "end_current_a": {
+                    "mean": row[20] or 0.0,
+                    "std": row[21] or 0.0,
+                    "min": row[22] or 0.0,
+                    "max": row[23] or 0.0,
+                    "count": int(row[-1])
+                },
+                "capacity_ah": {
+                    "mean": row[24] or 0.0,
+                    "std": row[25] or 0.0,
+                    "min": row[26] or 0.0,
+                    "max": row[27] or 0.0,
+                    "count": int(row[-1])
+                },
+                "energy_wh": {
+                    "mean": row[28] or 0.0,
+                    "std": row[29] or 0.0,
+                    "min": row[30] or 0.0,
+                    "max": row[31] or 0.0,
+                    "count": int(row[-1])
+                },
+                "point_count": {
+                    "mean": row[32] or 0.0,
+                    "std": row[33] or 0.0,
+                    "min": row[34] or 0.0,
+                    "max": row[35] or 0.0,
+                    "count": int(row[-1])
+                }
+            }
+            
+            return stats
+
+    def get_segment_subset_statistics(self, segment_ids: List[int]) -> Dict[str, Dict[str, float]]:
+        """
+        Get aggregated statistics for a specific subset of segments.
+        """
+        if not segment_ids:
+            return {}
+        
+        placeholders = ','.join('?' * len(segment_ids))
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute(f"""
+                SELECT 
+                    -- Basic statistics for each numeric column
+                    AVG(start_time_s) as avg_start_time,
+                    SQRT(MAX(0, AVG(start_time_s * start_time_s) - AVG(start_time_s) * AVG(start_time_s))) as std_start_time,
+                    MIN(start_time_s) as min_start_time,
+                    MAX(start_time_s) as max_start_time,
+                    
+                    AVG(duration_s) as avg_duration,
+                    SQRT(MAX(0, AVG(duration_s * duration_s) - AVG(duration_s) * AVG(duration_s))) as std_duration,
+                    MIN(duration_s) as min_duration,
+                    MAX(duration_s) as max_duration,
+                    
+                    AVG(start_potential_v) as avg_start_potential,
+                    SQRT(MAX(0, AVG(start_potential_v * start_potential_v) - AVG(start_potential_v) * AVG(start_potential_v))) as std_start_potential,
+                    MIN(start_potential_v) as min_start_potential,
+                    MAX(start_potential_v) as max_start_potential,
+                    
+                    AVG(end_potential_v) as avg_end_potential,
+                    SQRT(MAX(0, AVG(end_potential_v * end_potential_v) - AVG(end_potential_v) * AVG(end_potential_v))) as std_end_potential,
+                    MIN(end_potential_v) as min_end_potential,
+                    MAX(end_potential_v) as max_end_potential,
+                    
+                    AVG(start_current_a) as avg_start_current,
+                    SQRT(MAX(0, AVG(start_current_a * start_current_a) - AVG(start_current_a) * AVG(start_current_a))) as std_start_current,
+                    MIN(start_current_a) as min_start_current,
+                    MAX(start_current_a) as max_start_current,
+                    
+                    AVG(end_current_a) as avg_end_current,
+                    SQRT(MAX(0, AVG(end_current_a * end_current_a) - AVG(end_current_a) * AVG(end_current_a))) as std_end_current,
+                    MIN(end_current_a) as min_end_current,
+                    MAX(end_current_a) as max_end_current,
+                    
+                    AVG(capacity_ah) as avg_capacity,
+                    SQRT(MAX(0, AVG(capacity_ah * capacity_ah) - AVG(capacity_ah) * AVG(capacity_ah))) as std_capacity,
+                    MIN(capacity_ah) as min_capacity,
+                    MAX(capacity_ah) as max_capacity,
+                    
+                    AVG(energy_wh) as avg_energy,
+                    SQRT(MAX(0, AVG(energy_wh * energy_wh) - AVG(energy_wh) * AVG(energy_wh))) as std_energy,
+                    MIN(energy_wh) as min_energy,
+                    MAX(energy_wh) as max_energy,
+                    
+                    AVG(point_count) as avg_points,
+                    SQRT(MAX(0, AVG(point_count * point_count) - AVG(point_count) * AVG(point_count))) as std_points,
+                    MIN(point_count) as min_points,
+                    MAX(point_count) as max_points,
+                    
+                    COUNT(*) as total_count
+                FROM segments s
+                WHERE s.id IN ({placeholders})
+                AND s.start_time_s IS NOT NULL
+            """, segment_ids)
+            
+            row = cursor.fetchone()
+            
+            if not row or row[-1] == 0:  # total_count is 0
+                return {}
+            
+            # Build the statistics dictionary (same format as get_group_base_statistics)
+            stats = {
+                "start_time_s": {
+                    "mean": row[0] or 0.0,
+                    "std": row[1] or 0.0,
+                    "min": row[2] or 0.0,
+                    "max": row[3] or 0.0,
+                    "count": int(row[-1])
+                },
+                "duration_s": {
+                    "mean": row[4] or 0.0,
+                    "std": row[5] or 0.0,
+                    "min": row[6] or 0.0,
+                    "max": row[7] or 0.0,
+                    "count": int(row[-1])
+                },
+                "start_potential_v": {
+                    "mean": row[8] or 0.0,
+                    "std": row[9] or 0.0,
+                    "min": row[10] or 0.0,
+                    "max": row[11] or 0.0,
+                    "count": int(row[-1])
+                },
+                "end_potential_v": {
+                    "mean": row[12] or 0.0,
+                    "std": row[13] or 0.0,
+                    "min": row[14] or 0.0,
+                    "max": row[15] or 0.0,
+                    "count": int(row[-1])
+                },
+                "start_current_a": {
+                    "mean": row[16] or 0.0,
+                    "std": row[17] or 0.0,
+                    "min": row[18] or 0.0,
+                    "max": row[19] or 0.0,
+                    "count": int(row[-1])
+                },
+                "end_current_a": {
+                    "mean": row[20] or 0.0,
+                    "std": row[21] or 0.0,
+                    "min": row[22] or 0.0,
+                    "max": row[23] or 0.0,
+                    "count": int(row[-1])
+                },
+                "capacity_ah": {
+                    "mean": row[24] or 0.0,
+                    "std": row[25] or 0.0,
+                    "min": row[26] or 0.0,
+                    "max": row[27] or 0.0,
+                    "count": int(row[-1])
+                },
+                "energy_wh": {
+                    "mean": row[28] or 0.0,
+                    "std": row[29] or 0.0,
+                    "min": row[30] or 0.0,
+                    "max": row[31] or 0.0,
+                    "count": int(row[-1])
+                },
+                "point_count": {
+                    "mean": row[32] or 0.0,
+                    "std": row[33] or 0.0,
+                    "min": row[34] or 0.0,
+                    "max": row[35] or 0.0,
+                    "count": int(row[-1])
+                }
+            }
+            
+            return stats
+
+    def get_multi_group_segments(self, group_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Get all segments from multiple groups with full segment data.
+        """
+        if not group_ids:
+            return []
+        
+        placeholders = ','.join('?' * len(group_ids))
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute(f"""
+                SELECT DISTINCT s.id, s.file_id, s.segment_index, s.technique_id,
+                       s.start_row, s.end_row, s.start_time_s, s.end_time_s, s.duration_s,
+                       s.start_potential_v, s.end_potential_v, s.start_current_a, s.end_current_a,
+                       s.capacity_ah, s.energy_wh, s.point_count,
+                       s.analysis_status, s.analysis_results,
+                       f.original_filename, f.acquisition_start,
+                       s.fundamental_technique,
+                       c.name as cell_name,
+                       GROUP_CONCAT(ug.group_name, ', ') as group_names
+                FROM segments s
+                JOIN user_group_segments ugs ON s.id = ugs.segment_id
+                JOIN user_groups ug ON ugs.group_id = ug.group_id
+                LEFT JOIN files f ON s.file_id = f.file_id
+                LEFT JOIN cells c ON f.cell_id = c.id
+                WHERE ugs.group_id IN ({placeholders})
+                GROUP BY s.id
+                ORDER BY s.start_time_s
+            """, group_ids)
+            
+            segments = []
+            for row in cursor.fetchall():
+                segment_data = {
+                    'id': row[0],
+                    'file_id': row[1],
+                    'segment_index': row[2],
+                    'technique_id': row[3],
+                    'start_row': row[4],
+                    'end_row': row[5],
+                    'start_time_s': row[6],
+                    'end_time_s': row[7],
+                    'duration_s': row[8],
+                    'start_potential_v': row[9],
+                    'end_potential_v': row[10],
+                    'start_current_a': row[11],
+                    'end_current_a': row[12],
+                    'capacity_ah': row[13],
+                    'energy_wh': row[14],
+                    'point_count': row[15],
+                    'analysis_status': row[16],
+                    'analysis_results': row[17],
+                    'original_filename': row[18],
+                    'acquisition_start': row[19],
+                    'fundamental_technique': row[20],
+                    'cell_name': row[21],
+                    'group_names': row[22] or ''
+                }
+                
+                # Parse group names into list
+                if segment_data['group_names']:
+                    segment_data['groups'] = list(filter(None, 
+                        segment_data['group_names'].split(', ')
+                    ))
+                else:
+                    segment_data['groups'] = []
+                
+                segments.append(segment_data)
+            
+            return segments
+
+    # =============================================================================
     # UTILITY OPERATIONS
     # =============================================================================
     

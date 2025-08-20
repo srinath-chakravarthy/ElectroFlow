@@ -1365,6 +1365,66 @@ class BackendAPI:
             logger.error(f"Failed to check segment {segment_id} in group {group_id}: {e}")
             return False
 
+    # =============================================================================
+    # ANALYTICS METHODS - for Tab 3 Data Analysis
+    # =============================================================================
+
+    def get_group_base_statistics(self, group_ids: List[str]) -> Dict[str, Dict[str, float]]:
+        """
+        Get aggregated statistics for multiple groups using existing segment columns.
+        
+        Args:
+            group_ids: List of group IDs to include in statistics
+            
+        Returns:
+            Dictionary with metrics as keys and statistics as values:
+            {
+                "start_potential_v": {"mean": 3.75, "std": 0.02, "min": 3.70, "max": 3.80, "count": 45},
+                "duration_s": {"mean": 120.5, "std": 15.2, "min": 90.0, "max": 180.0, "count": 45},
+                ...
+            }
+        """
+        try:
+            int_group_ids = [int(gid) for gid in group_ids]
+            return self.db.get_group_base_statistics(int_group_ids)
+        except Exception as e:
+            logger.error(f"Failed to get group statistics for groups {group_ids}: {e}")
+            return {}
+
+    def get_segment_subset_statistics(self, segment_ids: List[str]) -> Dict[str, Dict[str, float]]:
+        """
+        Get aggregated statistics for a specific subset of segments.
+        
+        Args:
+            segment_ids: List of segment IDs to include in statistics
+            
+        Returns:
+            Dictionary with metrics as keys and statistics as values (same format as get_group_base_statistics)
+        """
+        try:
+            int_segment_ids = [int(sid) for sid in segment_ids]
+            return self.db.get_segment_subset_statistics(int_segment_ids)
+        except Exception as e:
+            logger.error(f"Failed to get segment statistics for segments {segment_ids}: {e}")
+            return {}
+
+    def get_multi_group_segments(self, group_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Get all segments from multiple groups with full segment data.
+        
+        Args:
+            group_ids: List of group IDs to retrieve segments from
+            
+        Returns:
+            List of segment dictionaries with full data for visualization and analysis
+        """
+        try:
+            int_group_ids = [int(gid) for gid in group_ids]
+            return self.db.get_multi_group_segments(int_group_ids)
+        except Exception as e:
+            logger.error(f"Failed to get segments for groups {group_ids}: {e}")
+            return []
+
 
 # =============================================================================
 # GLOBAL INSTANCE
