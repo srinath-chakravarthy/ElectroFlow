@@ -396,7 +396,12 @@ class CellManager(param.Parameterized):
         if not self.cell_select.value:
             return
 
-        cell_name = self.cell_select.value
+        # Extract cell_name from tuple if needed (UI returns (display_name, cell_name))
+        cell_selection = self.cell_select.value
+        if isinstance(cell_selection, tuple):
+            cell_name = cell_selection[1]  # Get the cell_name part
+        else:
+            cell_name = cell_selection
 
         # Simple confirmation (in production, use a modal)
         self._update_status(f"⚠️ Delete {cell_name}? Click Delete again to confirm", "warning")
