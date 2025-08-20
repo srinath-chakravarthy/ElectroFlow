@@ -84,3 +84,19 @@ CREATE TABLE user_group_segments (
 CREATE INDEX idx_user_groups_cell_id ON user_groups(cell_id);
 CREATE INDEX idx_user_group_segments_group_id ON user_group_segments(group_id);
 CREATE INDEX idx_user_group_segments_segment_id ON user_group_segments(segment_id);
+CREATE TABLE fundamental_techniques (
+                technique_id INTEGER PRIMARY KEY,
+                technique_name TEXT UNIQUE NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+CREATE INDEX idx_fundamental_techniques_name ON fundamental_techniques(technique_name);
+CREATE TABLE instrument_actionid_mappings (
+                action_id INTEGER PRIMARY KEY,
+                action_name TEXT NOT NULL,
+                technique_id INTEGER NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (technique_id) REFERENCES fundamental_techniques(technique_id)
+            );
+CREATE INDEX idx_instrument_mappings_technique ON instrument_actionid_mappings(technique_id);

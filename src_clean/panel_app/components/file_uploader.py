@@ -72,6 +72,15 @@ class FileUploader(param.Parameterized):
             margin=(10, 5)
         )
         self.upload_btn.on_click(self._on_upload_files)
+        
+        # Debug button for testing
+        self.debug_btn = pn.widgets.Button(
+            name="🔍 Check Status",
+            button_type="light",
+            width=120,
+            margin=(5, 5)
+        )
+        self.debug_btn.on_click(self._debug_status)
 
         # Processing status
         self.processing_status = pn.pane.HTML(
@@ -122,6 +131,10 @@ class FileUploader(param.Parameterized):
         # Watch for file selections to enable upload
         self.metadata_upload.param.watch(self._check_upload_ready, 'value')
         self.data_upload.param.watch(self._check_upload_ready, 'value')
+        
+        # Also watch for filename changes (alternative trigger)
+        self.metadata_upload.param.watch(self._on_file_uploaded, 'filename')
+        self.data_upload.param.watch(self._on_file_uploaded, 'filename')
 
     @property
     def panel(self):
@@ -191,11 +204,11 @@ class FileUploader(param.Parameterized):
                     self.temperature_input,
                     width=120
                 ),
-                pn.Spacer(width=20),
+                pn.Spacer(width=10),
                 pn.Column(
                     pn.Spacer(height=20),
-                    self.upload_btn,
-                    width=170
+                    pn.Row(self.upload_btn, self.debug_btn, margin=(0, 0)),
+                    width=280
                 ),
                 margin=(10, 5)
             ),
@@ -366,15 +379,40 @@ class FileUploader(param.Parameterized):
         has_data = self.data_upload.value is not None
         has_cell = self.current_cell is not None
 
+        # Debug logging to understand the current state
+        print(f"DEBUG: Upload readiness check:")
+        print(f"  - has_metadata: {has_metadata} (value: {type(self.metadata_upload.value).__name__})")
+        print(f"  - has_data: {has_data} (value: {type(self.data_upload.value).__name__})")
+        print(f"  - has_cell: {has_cell} (current_cell: {self.current_cell})")
+
         self.upload_btn.disabled = not (has_metadata and has_data and has_cell)
 
         # Update button text based on readiness
         if not has_cell:
-            self.upload_btn.name = "🚀 Select Cell First"
+            button_text = "🚀 Select Cell First"
         elif not has_metadata or not has_data:
-            self.upload_btn.name = "🚀 Select Both Files"
+            button_text = "🚀 Select Both Files"
         else:
-            self.upload_btn.name = "🚀 Process Files"
+            button_text = "🚀 Process Files"
+        
+        print(f"  - Setting button text to: {button_text}")
+        self.upload_btn.name = button_text
+
+    def _on_file_uploaded(self, event):
+        """Handle file upload completion - alternative trigger."""
+        print(f"DEBUG: File uploaded - filename: {event.new}")
+        # Small delay to ensure value is set
+        import time
+        time.sleep(0.1)
+        self._check_upload_ready(None)
+
+    def _debug_status(self, event):
+        """Manual debug trigger to check current state."""
+        print(f"\n=== MANUAL DEBUG STATUS ===")
+        self._check_upload_ready(None)
+        print(f"Current button text: {self.upload_btn.name}")
+        print(f"Button disabled: {self.upload_btn.disabled}")
+        print(f"=========================\n")
 
     def _on_upload_files(self, event):
         """Handle file upload with progress feedback."""
