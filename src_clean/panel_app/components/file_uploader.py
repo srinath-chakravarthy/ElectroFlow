@@ -436,9 +436,15 @@ class FileUploader(param.Parameterized):
 
     def _on_delete_file(self, event):
         """Handle file deletion with confirmation."""
-        file_id = self.file_select.value
-        if not file_id:
+        file_selection = self.file_select.value
+        if not file_selection:
             return
+
+        # Extract file_id from tuple if needed (UI returns (display_name, file_id))
+        if isinstance(file_selection, tuple):
+            file_id = file_selection[1]  # Get the file_id part
+        else:
+            file_id = file_selection
 
         try:
             result = self.api.delete_file(file_id)
