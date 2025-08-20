@@ -415,8 +415,8 @@ class ElectrochemicalCLI:
     
     def cleanup(self) -> Dict[str, Any]:
         """Clean up failed processing attempts."""
-        cleaned = self.api.cleanup_failed_processing()
-        return {'cleaned_files': cleaned}
+        result = self.api.cleanup_failed_processing()
+        return result.to_dict()
     
     def export_data(self) -> Dict[str, Any]:
         """Export file data."""

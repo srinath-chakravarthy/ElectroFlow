@@ -404,13 +404,13 @@ class CellManager(param.Parameterized):
         try:
             cell = self.api.get_cell_by_name(cell_name)
             if cell:
-                success = self.api.delete_cell(cell['id'])
-                if success:
-                    self._update_status(f"✅ Deleted cell: {cell_name}", "success")
-                    self.status_message = f"Deleted cell: {cell_name}"
+                result = self.api.delete_cell(cell['id'])
+                if result.success:
+                    self._update_status(f"✅ {result.message}", "success")
+                    self.status_message = result.message
                     self._refresh_cell_list()
                 else:
-                    self._update_status(f"❌ Failed to delete {cell_name}", "error")
+                    self._update_status(f"❌ Failed to delete {cell_name}: {result.error}", "error")
 
         except Exception as e:
             self._update_status(f"❌ Error: {str(e)}", "error")

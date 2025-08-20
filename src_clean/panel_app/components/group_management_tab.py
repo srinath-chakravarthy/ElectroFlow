@@ -48,7 +48,7 @@ class GroupManagementTab(param.Parameterized):
 
         # Segments tabulator (all segments from current cell)
         self.segments_tabulator = pn.widgets.Tabulator(
-            value=[],  # Will be populated when cell is selected
+            value=None,  # Will be populated when cell is selected
             pagination='remote',
             page_size=25,
             sizing_mode='stretch_width',
@@ -139,7 +139,7 @@ class GroupManagementTab(param.Parameterized):
 
         # Group contents tabulator
         self.group_contents_tabulator = pn.widgets.Tabulator(
-            value=[],
+            value=None,
             pagination='remote',
             page_size=15,
             sizing_mode='stretch_width',
@@ -184,11 +184,10 @@ class GroupManagementTab(param.Parameterized):
     def _populate_initial_data(self):
         """Populate dropdowns after components are created."""
         try:
-            # REPLACE WITH REAL API CALL
-            cells = self._mock_get_cells()  # Replace with: self.api.get_cells()
+            cells = self.api.get_cells()
 
             if cells:
-                options = [(cell['name'], cell['id']) for cell in cells]
+                options = [(cell['name'], cell['name']) for cell in cells]
                 self.cell_selector.options = options
                 self._update_status(f"Found {len(cells)} cells", "success")
             else:
@@ -371,21 +370,20 @@ class GroupManagementTab(param.Parameterized):
             return
 
         try:
-            # REPLACE WITH REAL API CALL
-            segments = self._mock_get_cell_segments(self.current_cell)  # Replace with: self.api.get_cell_segments(self.current_cell)
+            segments = self.api.get_cell_segments(self.current_cell)
 
             # Format for tabulator
             formatted_segments = []
             for segment in segments:
                 formatted_segments.append({
-                    'segment_id': segment['segment_id'],
-                    'technique': segment['technique'],
-                    'start_time': f"{segment['start_time']:.0f}s",
-                    'duration': f"{segment['duration']:.1f}s",
-                    'start_voltage': f"{segment['start_voltage']:.3f}V",
-                    'end_voltage': f"{segment['end_voltage']:.3f}V",
-                    'file_name': segment['file_name'],
-                    'quality': f"{segment.get('quality', 0):.2f}"
+                    'segment_id': str(segment['id']),
+                    'technique': segment['fundamental_technique'],
+                    'start_time': f"{segment.get('start_time_s', 0):.0f}s",
+                    'duration': f"{segment.get('duration_s', 0):.1f}s",
+                    'start_voltage': f"{segment.get('start_potential_v', 0):.3f}V" if segment.get('start_potential_v') else "N/A",
+                    'end_voltage': f"{segment.get('end_potential_v', 0):.3f}V" if segment.get('end_potential_v') else "N/A",
+                    'file_name': segment.get('original_filename', 'Unknown'),
+                    'quality': f"{segment.get('quality', 0):.2f}" if segment.get('quality') else "N/A"
                 })
 
             self.segments_tabulator.value = formatted_segments
@@ -400,11 +398,10 @@ class GroupManagementTab(param.Parameterized):
             return
 
         try:
-            # REPLACE WITH REAL API CALL
-            groups = self._mock_get_groups(self.current_cell)  # Replace with: self.api.get_groups(self.current_cell)
+            groups = self.api.get_groups(self.current_cell)
 
             if groups:
-                options = [(f"📁 {group['name']} ({group['segment_count']} segments)",
+                options = [(f"📁 {group['group_name']} ({group['segment_count']} segments)",
                            group['group_id']) for group in groups]
                 self.group_selector.options = options
                 self._update_status(f"Found {len(groups)} groups", "success")
@@ -438,20 +435,19 @@ class GroupManagementTab(param.Parameterized):
             return
 
         try:
-            # REPLACE WITH REAL API CALL
-            segments = self._mock_get_group_segments(self.selected_group)  # Replace with: self.api.get_group_segments(self.selected_group)
+            segments = self.api.get_group_segments(int(self.selected_group))
 
             # Format for tabulator (same format as Panel 1)
             formatted_segments = []
             for segment in segments:
                 formatted_segments.append({
-                    'segment_id': segment['segment_id'],
-                    'technique': segment['technique'],
-                    'start_time': f"{segment['start_time']:.0f}s",
-                    'duration': f"{segment['duration']:.1f}s",
-                    'start_voltage': f"{segment['start_voltage']:.3f}V",
-                    'end_voltage': f"{segment['end_voltage']:.3f}V",
-                    'file_name': segment['file_name']
+                    'segment_id': str(segment['id']),
+                    'technique': segment['fundamental_technique'],
+                    'start_time': f"{segment.get('start_time_s', 0):.0f}s",
+                    'duration': f"{segment.get('duration_s', 0):.1f}s",
+                    'start_voltage': f"{segment.get('start_potential_v', 0):.3f}V" if segment.get('start_potential_v') else "N/A",
+                    'end_voltage': f"{segment.get('end_potential_v', 0):.3f}V" if segment.get('end_potential_v') else "N/A",
+                    'file_name': segment.get('original_filename', 'Unknown')
                 })
 
             self.group_contents_tabulator.value = formatted_segments
@@ -466,22 +462,29 @@ class GroupManagementTab(param.Parameterized):
             return
 
         try:
-            # REPLACE WITH REAL API CALL
-            group_info = self._mock_get_group_info(self.selected_group)  # Replace with: self.api.get_group_info(self.selected_group)
-
-            self.group_info_display.object = f"""
-            <div style='background: #E8F5E8; padding: 12px; border-radius: 4px; 
-                        border-left: 4px solid #2E7D32;'>
-                <div style='font-weight: 600; color: #2E7D32; margin-bottom: 5px;'>
-                    📁 {group_info['name']}
+            group_info = self.api.get_group_info(int(self.selected_group))
+            
+            if group_info:
+                self.group_info_display.object = f"""
+                <div style='background: #E8F5E8; padding: 12px; border-radius: 4px; 
+                            border-left: 4px solid #2E7D32;'>
+                    <div style='font-weight: 600; color: #2E7D32; margin-bottom: 5px;'>
+                        📁 {group_info['group_name']}
+                    </div>
+                    <div style='font-size: 12px; color: #1B5E20;'>
+                        <strong>Segments:</strong> {group_info['segment_count']}<br>
+                        <strong>Created:</strong> {group_info.get('created_at', 'Unknown')}<br>
+                        <strong>Description:</strong> {group_info.get('description', 'No description')}
+                    </div>
                 </div>
-                <div style='font-size: 12px; color: #1B5E20;'>
-                    <strong>Segments:</strong> {group_info['segment_count']}<br>
-                    <strong>Created:</strong> {group_info['created_at']}<br>
-                    <strong>Description:</strong> {group_info.get('description', 'No description')}
+                """
+            else:
+                self.group_info_display.object = f"""
+                <div style='background: #FFEBEE; padding: 12px; border-radius: 4px; 
+                            border-left: 4px solid #D32F2F; text-align: center;'>
+                    <strong style='color: #D32F2F;'>Group not found</strong>
                 </div>
-            </div>
-            """
+                """
 
         except Exception as e:
             self.group_info_display.object = f"""
@@ -497,9 +500,8 @@ class GroupManagementTab(param.Parameterized):
             return
 
         try:
-            # REPLACE WITH REAL API CALL
-            segments = self._mock_get_group_segments(self.selected_group)  # Replace with: self.api.get_group_segments(self.selected_group)
-            self.current_group_segments = {seg['segment_id'] for seg in segments}
+            segments = self.api.get_group_segments(int(self.selected_group))
+            self.current_group_segments = {str(seg['id']) for seg in segments}
 
             # Apply highlighting to segments tabulator
             self._apply_highlighting()
@@ -529,12 +531,11 @@ class GroupManagementTab(param.Parameterized):
         try:
             segment_ids = [seg['segment_id'] for seg in selected_segments]
 
-            # REPLACE WITH REAL API CALL
-            result = self._mock_add_segments_to_group(self.selected_group, segment_ids)  # Replace with: self.api.add_segments_to_group(self.selected_group, segment_ids)
+            result = self.api.add_segments_to_group(int(self.selected_group), segment_ids)
 
-            if result['success']:
-                self._update_status(f"Added {len(segment_ids)} segments to group", "success")
-                self.status_message = f"Added {len(segment_ids)} segments to group"
+            if result.success:
+                self._update_status(result.message, "success")
+                self.status_message = result.message
 
                 # Refresh group contents
                 self._refresh_group_contents()
@@ -543,7 +544,7 @@ class GroupManagementTab(param.Parameterized):
                 # Clear selection in segments table
                 self.segments_tabulator.selection = []
             else:
-                self._update_status(f"Error adding segments: {result['error']}", "error")
+                self._update_status(f"Error adding segments: {result.error}", "error")
 
         except Exception as e:
             self._update_status(f"Error adding segments: {str(e)}", "error")
@@ -561,18 +562,17 @@ class GroupManagementTab(param.Parameterized):
         try:
             segment_ids = [seg['segment_id'] for seg in selected_segments]
 
-            # REPLACE WITH REAL API CALL
-            result = self._mock_remove_segments_from_group(self.selected_group, segment_ids)  # Replace with: self.api.remove_segments_from_group(self.selected_group, segment_ids)
+            result = self.api.remove_segments_from_group(int(self.selected_group), segment_ids)
 
-            if result['success']:
-                self._update_status(f"Removed {len(segment_ids)} segments from group", "success")
-                self.status_message = f"Removed {len(segment_ids)} segments from group"
+            if result.success:
+                self._update_status(result.message, "success")
+                self.status_message = result.message
 
                 # Refresh group contents
                 self._refresh_group_contents()
                 self._update_group_info()
             else:
-                self._update_status(f"Error removing segments: {result['error']}", "error")
+                self._update_status(f"Error removing segments: {result.error}", "error")
 
         except Exception as e:
             self._update_status(f"Error removing segments: {str(e)}", "error")
@@ -591,12 +591,11 @@ class GroupManagementTab(param.Parameterized):
         try:
             description = self.new_group_desc.value.strip()
 
-            # REPLACE WITH REAL API CALL
-            result = self._mock_create_group(self.current_cell, name, description)  # Replace with: self.api.create_group(self.current_cell, name, description)
+            result = self.api.create_group(self.current_cell, name, description)
 
-            if result['success']:
-                self._update_status(f"Created group: {name}", "success")
-                self.status_message = f"Created group: {name}"
+            if result.success:
+                self._update_status(result.message, "success")
+                self.status_message = result.message
 
                 # Clear form
                 self.new_group_name.value = ""
@@ -604,9 +603,9 @@ class GroupManagementTab(param.Parameterized):
 
                 # Refresh groups and select new one
                 self._refresh_groups()
-                self.group_selector.value = result['group_id']
+                self.group_selector.value = int(result.file_id)  # Using file_id field for group_id
             else:
-                self._update_status(f"Error creating group: {result['error']}", "error")
+                self._update_status(f"Error creating group: {result.error}", "error")
 
         except Exception as e:
             self._update_status(f"Error creating group: {str(e)}", "error")
@@ -617,19 +616,17 @@ class GroupManagementTab(param.Parameterized):
             return
 
         try:
-            # REPLACE WITH REAL API CALL
-            result = self._mock_delete_group(self.selected_group)  # Replace with: self.api.delete_group(self.selected_group)
+            result = self.api.delete_group(int(self.selected_group))
 
-            if result['success']:
-                group_name = result.get('group_name', 'Unknown')
-                self._update_status(f"Deleted group: {group_name}", "success")
-                self.status_message = f"Deleted group: {group_name}"
+            if result.success:
+                self._update_status(result.message, "success")
+                self.status_message = result.message
 
                 # Clear selection and refresh
                 self.group_selector.value = None
                 self._refresh_groups()
             else:
-                self._update_status(f"Error deleting group: {result['error']}", "error")
+                self._update_status(f"Error deleting group: {result.error}", "error")
 
         except Exception as e:
             self._update_status(f"Error deleting group: {str(e)}", "error")
@@ -662,157 +659,6 @@ class GroupManagementTab(param.Parameterized):
         </div>
         """
 
-    # === MOCK API METHODS (REPLACE WITH REAL BACKEND) ===
-
-    def _mock_get_cells(self):
-        """Mock cells data - replace with real API call."""
-        return [
-            {'id': 'cell_001', 'name': 'CELL_001'},
-            {'id': 'cell_002', 'name': 'CELL_002'},
-            {'id': 'cell_003', 'name': 'CELL_003'}
-        ]
-
-    def _mock_get_cell_segments(self, cell_id):
-        """Mock segments data - replace with real API call."""
-        return [
-            {
-                'segment_id': 'seg_001',
-                'technique': 'REST',
-                'start_time': 0.0,
-                'duration': 300.0,
-                'start_voltage': 3.75,
-                'end_voltage': 3.82,
-                'file_name': 'gitt_part1.par',
-                'quality': 0.95
-            },
-            {
-                'segment_id': 'seg_002',
-                'technique': 'CC',
-                'start_time': 300.0,
-                'duration': 10.0,
-                'start_voltage': 3.82,
-                'end_voltage': 3.75,
-                'file_name': 'gitt_part1.par',
-                'quality': 0.88
-            },
-            {
-                'segment_id': 'seg_003',
-                'technique': 'REST',
-                'start_time': 310.0,
-                'duration': 300.0,
-                'start_voltage': 3.75,
-                'end_voltage': 3.83,
-                'file_name': 'gitt_part1.par',
-                'quality': 0.92
-            },
-            {
-                'segment_id': 'seg_004',
-                'technique': 'EIS',
-                'start_time': 610.0,
-                'duration': 120.0,
-                'start_voltage': 3.83,
-                'end_voltage': 3.83,
-                'file_name': 'eis_test.par',
-                'quality': 0.97
-            }
-        ]
-
-    def _mock_get_groups(self, cell_id):
-        """Mock groups data - replace with real API call."""
-        return [
-            {
-                'group_id': 'group_001',
-                'name': 'GITT Rest Phases',
-                'segment_count': 2,
-                'created_at': '2025-08-20',
-                'description': 'All rest phases from GITT experiments'
-            },
-            {
-                'group_id': 'group_002',
-                'name': 'EIS Measurements',
-                'segment_count': 1,
-                'created_at': '2025-08-20',
-                'description': 'Impedance spectroscopy data'
-            }
-        ]
-
-    def _mock_get_group_segments(self, group_id):
-        """Mock group segments - replace with real API call."""
-        if group_id == 'group_001':  # GITT Rest Phases
-            return [
-                {
-                    'segment_id': 'seg_001',
-                    'technique': 'REST',
-                    'start_time': 0.0,
-                    'duration': 300.0,
-                    'start_voltage': 3.75,
-                    'end_voltage': 3.82,
-                    'file_name': 'gitt_part1.par'
-                },
-                {
-                    'segment_id': 'seg_003',
-                    'technique': 'REST',
-                    'start_time': 310.0,
-                    'duration': 300.0,
-                    'start_voltage': 3.75,
-                    'end_voltage': 3.83,
-                    'file_name': 'gitt_part1.par'
-                }
-            ]
-        elif group_id == 'group_002':  # EIS Measurements
-            return [
-                {
-                    'segment_id': 'seg_004',
-                    'technique': 'EIS',
-                    'start_time': 610.0,
-                    'duration': 120.0,
-                    'start_voltage': 3.83,
-                    'end_voltage': 3.83,
-                    'file_name': 'eis_test.par'
-                }
-            ]
-        return []
-
-    def _mock_get_group_info(self, group_id):
-        """Mock group info - replace with real API call."""
-        groups = {
-            'group_001': {
-                'name': 'GITT Rest Phases',
-                'segment_count': 2,
-                'created_at': '2025-08-20 10:30',
-                'description': 'All rest phases from GITT experiments'
-            },
-            'group_002': {
-                'name': 'EIS Measurements',
-                'segment_count': 1,
-                'created_at': '2025-08-20 11:45',
-                'description': 'Impedance spectroscopy data'
-            }
-        }
-        return groups.get(group_id, {})
-
-    def _mock_create_group(self, cell_id, name, description):
-        """Mock group creation - replace with real API call."""
-        # Simulate success
-        return {
-            'success': True,
-            'group_id': f'group_{len(self._mock_get_groups(cell_id)) + 1:03d}'
-        }
-
-    def _mock_delete_group(self, group_id):
-        """Mock group deletion - replace with real API call."""
-        return {
-            'success': True,
-            'group_name': 'Test Group'
-        }
-
-    def _mock_add_segments_to_group(self, group_id, segment_ids):
-        """Mock adding segments to group - replace with real API call."""
-        return {'success': True}
-
-    def _mock_remove_segments_from_group(self, group_id, segment_ids):
-        """Mock removing segments from group - replace with real API call."""
-        return {'success': True}
 
 
 # Usage example for integration with main app

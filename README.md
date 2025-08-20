@@ -5,28 +5,34 @@ A comprehensive web-based application for electrochemical battery data analysis 
 ## 🚀 Features
 
 - **🌐 Modern Web Interface**: Professional Panel web application with responsive design
-- **🔋 Complete Cell Management**: Rich metadata tracking (chemistry, capacity, electrode details)
-- **📊 Interactive Visualization**: HoloViews plots with dynamic decimation and segment coloring
-- **🔍 Intelligent Analysis**: Automatic technique detection and Nyquist plot generation
-- **📁 Universal File Processing**: VersaStudio (.par + .par.csv) with BioLogic support planned
-- **💾 Clean Data Organization**: Standardized cell-based directory structure
+- **🔋 Complete Cell Management**: Rich metadata tracking with automatic directory creation
+- **📊 Interactive Visualization**: HoloViews plots with dynamic decimation and technique-specific coloring
+- **🧠 Universal Technique Mapping**: 5 fundamental techniques with instrument-specific ActionID translation
+- **⚡ Automatic Analytics**: Real-time computation of core metrics and technique-specific analysis
+- **📁 Perfect Data Organization**: Per-cell structure (raw/, processed/, analysis_results/, user_groups/)
+- **🔧 CASCADE Operations**: Complete file system and database cleanup with atomic transactions
 - **🖥️ Multi-Interface Support**: Web UI, CLI, Python API, and Jupyter integration
 
 ## ✅ Current Implementation Status
 
-### Professional Web Application
-- **Modern Panel Interface**: 3-column responsive layout with card-based design
-- **Professional Styling**: Scientific color scheme with gradients and hover effects
-- **Interactive Components**: Cell management, file upload, data visualization, status feedback
-- **Real-time Updates**: Dynamic status messages with timestamps
-- **Responsive Design**: Works on desktop and tablet devices
+### Universal Technique System (NEW)
+- **5 Fundamental Techniques**: Rest, Galvanostatic, Potentiostatic, EIS, Cyclic Voltammetry
+- **VersaStudio ActionID Mapping**: 23→Rest, 20→EIS, 8→Galvanostatic (instrument-specific translation)
+- **Database-Driven**: Universal technique table with foreign key constraints
+- **Automatic Detection**: Real-time technique classification during file processing
 
-### Universal Data Processing
-- **29-Column Universal Schema**: Instrument-agnostic data structure
-- **VersaStudio Support**: Complete .par + .par.csv processing with impedance data
-- **Automatic Timestamping**: Absolute timestamps computed from acquisition metadata
-- **Segment Detection**: Automatic experimental technique boundaries
-- **Data Migration**: Standardized cell-based raw file organization
+### Automatic Analytics Engine (NEW)
+- **Core Metrics**: Capacity (Ah), Energy (Wh), Duration (s) for all techniques
+- **Technique-Specific Analysis**: Context-aware rest phase and pulse analysis
+- **Advanced Curve Fitting**: Exponential decay with R² quality metrics
+- **Database Storage**: All analytics stored in segments table with JSON details
+- **Reanalysis System**: Update existing data with improved algorithms
+
+### Perfect Data Organization (ENHANCED)
+- **Automatic Directory Creation**: Complete per-cell structure on cell creation
+- **CASCADE Deletion**: Proper file system and database cleanup
+- **ProcessingResult API**: Standardized return types across all operations
+- **Atomic Transactions**: Database integrity with foreign key constraints
 
 ### Clean Architecture
 ```
@@ -235,20 +241,23 @@ src_clean/
 
 ### Database Schema
 ```sql
+-- Universal technique system (NEW)
+fundamental_techniques: technique_id, technique_name, description
+instrument_actionid_mappings: action_id, action_name, technique_id, description
+
 -- Cell-level metadata with rich material information
-cells: id, name, chemistry, description, capacity_ah, 
-       cathode_material, cathode_mass_mg, anode_material, anode_mass_mg
+cells: id, name, chemistry, capacity_ah, cathode_material, cathode_mass_mg,
+       anode_material, anode_mass_mg, notes, created_at
 
 -- File-level processing results
-files: id, cell_id, file_id, original_filename, paired_filename,
-       parquet_file_path, acquisition_start, processing_status
+files: file_id, cell_id, original_filename, paired_filename,
+       parquet_file_path, acquisition_start, processing_status, metadata
 
--- Segment-level technique boundaries  
-segments: id, file_id, segment_index, technique_id, technique_name,
-          start_row, end_row, start_time_s, end_time_s, point_count
-
--- ActionID technique mappings
-actionid_mappings: action_id, technique_name, fundamental_technique
+-- Segment-level with automatic analytics (ENHANCED)
+segments: id, file_id, segment_number, technique_id, start_row, end_row,
+          start_time_s, end_time_s, duration_s, capacity_ah, energy_wh,
+          start_potential_v, end_potential_v, start_current_a, end_current_a,
+          point_count, analysis_status, analysis_results
 ```
 
 ## 🧪 Testing and Validation
@@ -373,8 +382,8 @@ MIT License - See LICENSE file for details.
 
 ---
 
-**Status**: ✅ Production-ready web application with professional interface  
-**Version**: 3.0 - Modern Panel web interface with universal data processing  
+**Status**: ✅ Production-ready with advanced analytics and universal technique mapping  
+**Version**: 4.0 - Universal technique system with automatic analytics engine  
 **Last Updated**: August 20, 2025
 
 **Quick Access**:

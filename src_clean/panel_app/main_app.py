@@ -11,8 +11,7 @@ from pathlib import Path
 
 # Import your backend and components (update paths as needed)
 from src_clean.backend import get_backend_api
-from .components import CellManager, FileUploader, DataViewer, StatusBar
-from .components import GroupManagementTab
+from .components import CellManager, FileUploader, DataViewer, StatusBar, GroupManagementTab
 class ElectrochemicalApp(param.Parameterized):
     """
     Professional Panel application for electrochemical data analysis.

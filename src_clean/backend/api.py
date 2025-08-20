@@ -102,10 +102,20 @@ class BackendAPI:
         try:
             cell_id = self.db.create_cell(name=name, **kwargs)
             
+            # Automatically create directory structure for new cell
+            dir_result = self.ensure_cell_directory_structure(name)
+            if not dir_result.success:
+                logger.warning(f"Cell created but directory structure failed: {dir_result.error}")
+                return ProcessingResult(
+                    success=True,
+                    file_id=str(cell_id),
+                    message=f"Cell '{name}' created successfully (directory structure warning: {dir_result.error})"
+                )
+            
             return ProcessingResult(
                 success=True,
                 file_id=str(cell_id),
-                message=f"Cell '{name}' created successfully"
+                message=f"Cell '{name}' created successfully with directory structure"
             )
             
         except Exception as e:
@@ -132,26 +142,80 @@ class BackendAPI:
             return None
     
     def delete_cell(self, cell_id: int) -> ProcessingResult:
-        """Delete cell and all associated data."""
+        """Delete cell and all associated data (files + directories + database)."""
         try:
-            success = self.db.delete_cell(cell_id)
+            # Get cell info first
+            cell = self.db.get_cell_by_id(cell_id)
+            if not cell:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Cell {cell_id} not found"
+                )
             
-            if success:
+            cell_name = cell['name']
+            
+            # Get all files for the cell to delete them properly
+            files = self.db.get_cell_files(cell_id)
+            
+            deleted_file_count = 0
+            failed_file_deletions = []
+            
+            # Delete each file (this handles raw files + parquet + triggers segment CASCADE)
+            for file_info in files:
+                file_id = file_info['file_id']
+                result = self.delete_file(file_id)
+                
+                if result.success:
+                    deleted_file_count += 1
+                    logger.info(f"Successfully deleted file: {file_id}")
+                else:
+                    failed_file_deletions.append(f"{file_id}: {result.error}")
+                    logger.error(f"Failed to delete file {file_id}: {result.error}")
+            
+            # Delete empty cell directory structure
+            from src_clean.core.config import get_config
+            config = get_config()
+            cell_dir = config.get_cell_directory(cell_name)
+            
+            directory_deleted = False
+            if cell_dir.exists():
+                try:
+                    # Remove entire cell directory tree
+                    import shutil
+                    shutil.rmtree(cell_dir)
+                    directory_deleted = True
+                    logger.info(f"Deleted cell directory: {cell_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete cell directory {cell_dir}: {e}")
+            
+            # Delete cell from database (CASCADE will handle remaining user_groups and user_group_segments)
+            db_success = self.db.delete_cell(cell_id)
+            
+            if db_success:
+                message_parts = [f"Deleted cell '{cell_name}' (ID: {cell_id})"]
+                if deleted_file_count > 0:
+                    message_parts.append(f"Removed {deleted_file_count} files")
+                if directory_deleted:
+                    message_parts.append("Removed cell directory")
+                if failed_file_deletions:
+                    message_parts.append(f"Had {len(failed_file_deletions)} file deletion errors")
+                
                 return ProcessingResult(
                     success=True,
-                    message=f"Cell {cell_id} deleted successfully"
+                    file_id=str(cell_id),
+                    message="; ".join(message_parts)
                 )
             else:
                 return ProcessingResult(
                     success=False,
-                    error=f"Cell {cell_id} not found"
+                    error=f"Failed to delete cell {cell_id} from database"
                 )
                 
         except Exception as e:
             error_info = format_error_for_user(e)
             return ProcessingResult(
                 success=False,
-                error=error_info['message']
+                error=f"Failed to delete cell {cell_id}: {error_info['message']}"
             )
     
     # =============================================================================
@@ -218,11 +282,12 @@ class BackendAPI:
                                cell: Dict[str, Any], metadata_path: Path, 
                                data_path: Path, options: Dict[str, Any]):
         """Store DataFile atomically with database transaction."""
-        # Ensure processed directory exists
-        processed_dir = self.data_dir / "processed"
+        # Use per-cell processed directory structure
+        cell_name = cell['name']
+        processed_dir = self.data_dir / "cells" / cell_name / "processed"
         processed_dir.mkdir(parents=True, exist_ok=True)
         
-        # Prepare file information
+        # Prepare file information  
         parquet_path = processed_dir / f"{file_id}.parquet"
         
         # Convert metadata to JSON-serializable format
@@ -294,23 +359,28 @@ class BackendAPI:
         # Prepare segment info for analytics
         segments_info = []
         for i, boundary in enumerate(segment_boundaries):
-            # Get technique mapping from database
-            technique_id = boundary.get('technique_id')
-            if technique_id is not None:
-                mapping = self.db.get_actionid_mapping(technique_id)
-                if mapping:
-                    technique_name = mapping['technique_name']
-                    fundamental_technique = mapping['fundamental_technique']
+            # Get technique mapping from new universal system
+            raw_action_id = boundary.get('technique_id')
+            universal_technique_id = None
+            technique_name = "Unknown"
+            fundamental_technique = "unknown"
+            
+            if raw_action_id is not None:
+                # Look up in new technique mapping system
+                technique_mapping = self.db.get_technique_mapping(raw_action_id)
+                if technique_mapping:
+                    universal_technique_id = technique_mapping['technique_id']
+                    technique_name = technique_mapping['technique_name'] 
+                    fundamental_technique = technique_mapping['technique_name'].lower()  # Use technique name as category
                 else:
-                    technique_name = f"ActionID_{technique_id}"
+                    # Unknown ActionID - store as-is for later mapping
+                    technique_name = f"ActionID_{raw_action_id}"
                     fundamental_technique = "unknown"
-            else:
-                technique_name = "Unknown"
-                fundamental_technique = "unknown"
             
             segment_info = {
                 'segment_index': i,
-                'technique_id': technique_id,
+                'technique_id': universal_technique_id or raw_action_id,  # Store universal ID if available
+                'raw_action_id': raw_action_id,  # Keep raw ActionID for reference
                 'technique_name': technique_name,
                 'fundamental_technique': fundamental_technique,
                 'start_row': boundary['start_row'],
@@ -356,13 +426,14 @@ class BackendAPI:
         techniques = []
         
         for segment in segments:
-            technique_id = segment.get('technique_id')
-            if technique_id is not None:
-                mapping = self.db.get_actionid_mapping(technique_id)
-                if mapping:
-                    techniques.append(mapping['fundamental_technique'])
+            raw_action_id = segment.get('technique_id')
+            if raw_action_id is not None:
+                # Look up using new technique mapping system
+                technique_mapping = self.db.get_technique_mapping(raw_action_id)
+                if technique_mapping:
+                    techniques.append(technique_mapping['technique_name'].lower())
                 else:
-                    techniques.append(f"ActionID_{technique_id}")
+                    techniques.append(f"ActionID_{raw_action_id}")
         
         unique_techniques = list(set(techniques)) if techniques else ["Unknown"]
         
@@ -433,101 +504,147 @@ class BackendAPI:
             logger.error(f"Failed to get segments for technique '{technique}': {e}")
             return []
     
-    def delete_file(self, file_id: str) -> bool:
-        """Delete a file and all associated data."""
+    def delete_file(self, file_id: str) -> ProcessingResult:
+        """Delete a file and all associated data (parquet + raw files)."""
         try:
-            # Get file info first to access parquet file path
+            # Get file info first to access file paths
             file_info = self.db.get_file_by_id(file_id)
             if not file_info:
-                logger.warning(f"File {file_id} not found in database")
-                return False
+                return ProcessingResult(
+                    success=False,
+                    error=f"File {file_id} not found in database"
+                )
             
-            # Delete from database (this will cascade to segments)
-            success = self.db.delete_file(file_id)
+            # Get cell info to construct raw file paths
+            cell = self.db.get_cell_by_id(file_info['cell_id'])
+            if not cell:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Cell not found for file {file_id}"
+                )
             
-            if success:
-                # Delete parquet file if it exists
-                parquet_path = file_info.get('parquet_file_path')
-                if parquet_path and Path(parquet_path).exists():
+            cell_name = cell['name']
+            deleted_files = []
+            deletion_errors = []
+            
+            # Delete raw files from cell directory structure
+            from src_clean.core.config import get_config
+            config = get_config()
+            cell_raw_dir = config.get_cell_raw_directory(cell_name)
+            
+            # Delete original metadata file (.par)
+            if file_info.get('original_filename'):
+                original_path = cell_raw_dir / file_info['original_filename']
+                if original_path.exists():
                     try:
-                        Path(parquet_path).unlink()
-                        logger.info(f"Deleted parquet file: {parquet_path}")
+                        original_path.unlink()
+                        deleted_files.append(str(original_path))
+                        logger.info(f"Deleted raw metadata file: {original_path}")
                     except Exception as e:
-                        logger.warning(f"Failed to delete parquet file {parquet_path}: {e}")
+                        deletion_errors.append(f"metadata file {original_path}: {e}")
+            
+            # Delete paired data file (.par.csv)
+            if file_info.get('paired_filename'):
+                paired_path = cell_raw_dir / file_info['paired_filename']
+                if paired_path.exists():
+                    try:
+                        paired_path.unlink()
+                        deleted_files.append(str(paired_path))
+                        logger.info(f"Deleted raw data file: {paired_path}")
+                    except Exception as e:
+                        deletion_errors.append(f"data file {paired_path}: {e}")
+            
+            # Delete parquet file
+            parquet_path = file_info.get('parquet_file_path')
+            if parquet_path and Path(parquet_path).exists():
+                try:
+                    Path(parquet_path).unlink()
+                    deleted_files.append(str(parquet_path))
+                    logger.info(f"Deleted parquet file: {parquet_path}")
+                except Exception as e:
+                    deletion_errors.append(f"parquet file {parquet_path}: {e}")
+            
+            # Delete from database (this will cascade to segments and group associations)
+            db_success = self.db.delete_file(file_id)
+            
+            if db_success:
+                message_parts = [f"Deleted file {file_id}"]
+                if deleted_files:
+                    message_parts.append(f"Removed {len(deleted_files)} files from disk")
+                if deletion_errors:
+                    message_parts.append(f"Had {len(deletion_errors)} file deletion errors")
                 
-                logger.info(f"Successfully deleted file: {file_id}")
-                return True
+                return ProcessingResult(
+                    success=True,
+                    file_id=file_id,
+                    message="; ".join(message_parts)
+                )
             else:
-                logger.error(f"Failed to delete file {file_id} from database")
-                return False
+                return ProcessingResult(
+                    success=False,
+                    error=f"Failed to delete file {file_id} from database"
+                )
                 
         except Exception as e:
-            logger.error(f"Failed to delete file '{file_id}': {e}")
-            return False
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=f"Failed to delete file {file_id}: {error_info['message']}"
+            )
     
-    def delete_cell(self, cell_name: str) -> bool:
-        """Delete a cell and all associated data (cascade delete)."""
+    def delete_cell_by_name(self, cell_name: str) -> ProcessingResult:
+        """Delete a cell by name and all associated data."""
         try:
-            # Get cell info first
+            # Get cell by name first
             cell = self.db.get_cell_by_name(cell_name)
             if not cell:
-                logger.warning(f"Cell '{cell_name}' not found")
-                return False
+                return ProcessingResult(
+                    success=False,
+                    error=f"Cell '{cell_name}' not found"
+                )
             
-            cell_id = cell['id']
+            # Delegate to the main delete_cell method using cell_id
+            return self.delete_cell(cell['id'])
             
-            # Get all files for the cell to delete parquet files
-            files = self.db.get_cell_files(cell_id)
-            
-            # Delete all parquet files first
-            deleted_parquet_count = 0
-            for file_info in files:
-                parquet_path = file_info.get('parquet_file_path')
-                if parquet_path and Path(parquet_path).exists():
-                    try:
-                        Path(parquet_path).unlink()
-                        deleted_parquet_count += 1
-                    except Exception as e:
-                        logger.warning(f"Failed to delete parquet file {parquet_path}: {e}")
-            
-            # Delete cell from database (this will cascade to files and segments)
-            success = self.db.delete_cell(cell_id)
-            
-            if success:
-                logger.info(f"Successfully deleted cell '{cell_name}' with {deleted_parquet_count} parquet files")
-                return True
-            else:
-                logger.error(f"Failed to delete cell '{cell_name}' from database")
-                return False
-                
         except Exception as e:
-            logger.error(f"Failed to delete cell '{cell_name}': {e}")
-            return False
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=f"Failed to delete cell '{cell_name}': {error_info['message']}"
+            )
     
     # =============================================================================
     # ACTIONID MANAGEMENT
     # =============================================================================
     
-    def get_actionid_mappings(self) -> List[Dict[str, Any]]:
-        """Get all ActionID mappings."""
+    def get_technique_mappings(self) -> List[Dict[str, Any]]:
+        """Get all technique mappings."""
         try:
-            return self.db.get_all_actionid_mappings()
+            return self.db.get_all_technique_mappings()
         except Exception as e:
-            logger.error(f"Failed to get ActionID mappings: {e}")
+            logger.error(f"Failed to get technique mappings: {e}")
             return []
     
-    def add_actionid_mapping(self, action_id: int, technique_name: str, 
-                           fundamental_technique: str) -> ProcessingResult:
-        """Add new ActionID mapping."""
+    def get_fundamental_techniques(self) -> List[Dict[str, Any]]:
+        """Get all fundamental techniques."""
         try:
-            success = self.db.add_actionid_mapping(
-                action_id, technique_name, fundamental_technique
+            return self.db.get_all_fundamental_techniques()
+        except Exception as e:
+            logger.error(f"Failed to get fundamental techniques: {e}")
+            return []
+    
+    def add_technique_mapping(self, action_id: int, action_name: str, 
+                             technique_id: int, description: str = "") -> ProcessingResult:
+        """Add new VersaStudio ActionID mapping."""
+        try:
+            success = self.db.add_technique_mapping(
+                action_id, action_name, technique_id, description
             )
             
             if success:
                 return ProcessingResult(
                     success=True,
-                    message=f"ActionID {action_id} mapped to {fundamental_technique}"
+                    message=f"ActionID {action_id} mapped to technique {technique_id}"
                 )
             else:
                 return ProcessingResult(
@@ -551,8 +668,8 @@ class BackendAPI:
             # Get unique ActionIDs from data
             data_actionids = set(data.get_column('technique_id').unique().drop_nulls().to_list())
             
-            # Get known ActionIDs from database
-            known_mappings = self.get_actionid_mappings()
+            # Get known ActionIDs from new technique mapping system
+            known_mappings = self.get_technique_mappings()
             known_actionids = {mapping['action_id'] for mapping in known_mappings}
             
             # Return unknown ActionIDs
@@ -566,25 +683,33 @@ class BackendAPI:
     # VALIDATION
     # =============================================================================
     
-    def validate_dual_files(self, metadata_path: Path, data_path: Path) -> Dict[str, Any]:
-        """Validate dual file pair using the same path as processing."""
+    def validate_dual_files(self, metadata_path: Path, data_path: Path) -> ProcessingResult:
+        """Validate dual file pair using the same parsing logic as processing."""
         try:
             # Use the SAME function that process_dual_files uses - unified path
             data_file = auto_parse_dual_files(metadata_path, data_path)
             
             # If parsing succeeds, files are valid
-            return {
-                'success': True,
-                'message': 'Files validated successfully',
-                'instrument': data_file.metadata.instrument_model
-            }
+            segment_count = len(data_file.get_segment_boundaries())
+            message = f"Files validated successfully: {data_file.metadata.instrument_model}, {segment_count} segments"
+            
+            return ProcessingResult(
+                success=True,
+                message=message,
+                data={
+                    'instrument': data_file.metadata.instrument_model,
+                    'segment_count': segment_count,
+                    'total_points': data_file.metadata.total_points,
+                    'technique_count': data_file.metadata.technique_count
+                }
+            )
                 
         except Exception as e:
             error_info = format_error_for_user(e)
-            return {
-                'success': False,
-                'error': error_info['message']
-            }
+            return ProcessingResult(
+                success=False,
+                error=f"File validation failed: {error_info['message']}"
+            )
     
     # =============================================================================
     # STATISTICS AND UTILITIES
@@ -605,7 +730,7 @@ class BackendAPI:
             logger.error(f"Failed to get database stats: {e}")
             return {'error': str(e)}
     
-    def cleanup_failed_processing(self) -> int:
+    def cleanup_failed_processing(self) -> ProcessingResult:
         """Clean up failed processing attempts."""
         try:
             # Find files with 'pending' status older than 1 hour
@@ -618,22 +743,41 @@ class BackendAPI:
                 
                 failed_files = cursor.fetchall()
                 
-                cleaned = 0
-                for file_id, parquet_path in failed_files:
-                    # Delete database record
-                    if self.db.delete_file(file_id):
-                        cleaned += 1
-                        
-                    # Delete parquet file if exists
-                    if parquet_path and Path(parquet_path).exists():
-                        Path(parquet_path).unlink()
+                if not failed_files:
+                    return ProcessingResult(
+                        success=True,
+                        message="No failed processing attempts found to clean up"
+                    )
                 
-                logger.info(f"Cleaned up {cleaned} failed processing attempts")
-                return cleaned
+                cleaned = 0
+                cleanup_errors = []
+                
+                for file_id, parquet_path in failed_files:
+                    try:
+                        # Use the new delete_file method for complete cleanup
+                        result = self.delete_file(file_id)
+                        if result.success:
+                            cleaned += 1
+                        else:
+                            cleanup_errors.append(f"{file_id}: {result.error}")
+                    except Exception as e:
+                        cleanup_errors.append(f"{file_id}: {str(e)}")
+                
+                message_parts = [f"Cleaned up {cleaned} failed processing attempts"]
+                if cleanup_errors:
+                    message_parts.append(f"Had {len(cleanup_errors)} cleanup errors")
+                
+                return ProcessingResult(
+                    success=True,
+                    message="; ".join(message_parts)
+                )
                 
         except Exception as e:
-            logger.error(f"Failed to cleanup failed processing: {e}")
-            return 0
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=f"Failed to cleanup failed processing: {error_info['message']}"
+            )
     
     def reprocess_file(self, file_id: str) -> ProcessingResult:
         """
@@ -843,23 +987,64 @@ class BackendAPI:
                 error=f"Migration error: {str(e)}"
             )
     
-    def ensure_cell_directory_structure(self, cell_name: str) -> bool:
+    def ensure_cell_directory_structure(self, cell_name: str) -> ProcessingResult:
         """
         Ensure complete directory structure exists for a cell.
         
-        Args:
-            cell_name: Name of the cell
-            
-        Returns:
-            True if successful
+        This creates the full directory structure including:
+        - raw/ (for original files)  
+        - processed/ (for parquet files)
+        - analysis_results/ (for analytics JSON)
+        - user_groups/ (for group definitions)
         """
         try:
-            self.migration_manager.ensure_cell_directory_structure(cell_name)
-            logger.info(f"Ensured directory structure for cell: {cell_name}")
-            return True
+            # Use config system to create standardized structure
+            from src_clean.core.config import get_config
+            config = get_config()
+            
+            cell_dir = config.get_cell_directory(cell_name)
+            directories_created = []
+            
+            # Create all required subdirectories
+            subdirs = ['raw', 'processed', 'analysis_results', 'user_groups']
+            
+            for subdir in subdirs:
+                subdir_path = cell_dir / subdir
+                if not subdir_path.exists():
+                    subdir_path.mkdir(parents=True, exist_ok=True)
+                    directories_created.append(str(subdir_path))
+                    logger.debug(f"Created directory: {subdir_path}")
+            
+            # Create cell metadata file if it doesn't exist
+            metadata_file = cell_dir / 'metadata.json'
+            if not metadata_file.exists():
+                import json
+                metadata = {
+                    "cell_name": cell_name,
+                    "created_at": datetime.now().isoformat(),
+                    "structure_version": "1.0"
+                }
+                with open(metadata_file, 'w') as f:
+                    json.dump(metadata, f, indent=2)
+                directories_created.append(str(metadata_file))
+                logger.debug(f"Created metadata file: {metadata_file}")
+            
+            if directories_created:
+                message = f"Created directory structure for '{cell_name}': {len(directories_created)} items"
+            else:
+                message = f"Directory structure for '{cell_name}' already exists"
+            
+            return ProcessingResult(
+                success=True,
+                message=message
+            )
+            
         except Exception as e:
-            logger.error(f"Failed to create directory structure for {cell_name}: {e}")
-            return False
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=f"Failed to create directory structure for {cell_name}: {error_info['message']}"
+            )
     
     # =============================================================================
     # ANALYTICS OPERATIONS
@@ -1034,6 +1219,151 @@ class BackendAPI:
         except Exception as e:
             logger.error(f"Error getting segments by status '{status}': {e}")
             return []
+    
+    # =============================================================================
+    # GROUP MANAGEMENT OPERATIONS
+    # =============================================================================
+    
+    def create_group(self, cell_name: str, group_name: str, description: str = "") -> ProcessingResult:
+        """Create a new user group for organizing segments."""
+        try:
+            # Get cell ID
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Cell '{cell_name}' not found"
+                )
+            
+            group_id = self.db.create_group(cell['id'], group_name, description)
+            
+            return ProcessingResult(
+                success=True,
+                file_id=str(group_id),  # Using file_id field for group_id
+                message=f"Created group '{group_name}' successfully"
+            )
+            
+        except Exception as e:
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=error_info['message']
+            )
+    
+    def get_groups(self, cell_name: str) -> List[Dict[str, Any]]:
+        """Get all groups for a cell."""
+        try:
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                return []
+            
+            return self.db.get_cell_groups(cell['id'])
+            
+        except Exception as e:
+            logger.error(f"Failed to get groups for cell '{cell_name}': {e}")
+            return []
+    
+    def get_group_info(self, group_id: int) -> Optional[Dict[str, Any]]:
+        """Get detailed information about a group."""
+        try:
+            return self.db.get_group_info(group_id)
+        except Exception as e:
+            logger.error(f"Failed to get group info for ID {group_id}: {e}")
+            return None
+    
+    def delete_group(self, group_id: int) -> ProcessingResult:
+        """Delete a group and all its segment associations."""
+        try:
+            # Get group info for the response message
+            group_info = self.db.get_group_info(group_id)
+            
+            success = self.db.delete_group(group_id)
+            
+            if success:
+                group_name = group_info['group_name'] if group_info else f"Group {group_id}"
+                return ProcessingResult(
+                    success=True,
+                    message=f"Deleted group '{group_name}' successfully"
+                )
+            else:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Group {group_id} not found"
+                )
+                
+        except Exception as e:
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=error_info['message']
+            )
+    
+    def add_segments_to_group(self, group_id: int, segment_ids: List[str]) -> ProcessingResult:
+        """Add segments to a group."""
+        try:
+            # Convert string segment IDs to integers
+            int_segment_ids = [int(seg_id) for seg_id in segment_ids]
+            added_count = self.db.add_segments_to_group(group_id, int_segment_ids)
+            
+            return ProcessingResult(
+                success=True,
+                message=f"Added {added_count} segments to group"
+            )
+            
+        except Exception as e:
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=error_info['message']
+            )
+    
+    def remove_segments_from_group(self, group_id: int, segment_ids: List[str]) -> ProcessingResult:
+        """Remove segments from a group."""
+        try:
+            # Convert string segment IDs to integers
+            int_segment_ids = [int(seg_id) for seg_id in segment_ids]
+            removed_count = self.db.remove_segments_from_group(group_id, int_segment_ids)
+            
+            return ProcessingResult(
+                success=True,
+                message=f"Removed {removed_count} segments from group"
+            )
+            
+        except Exception as e:
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=error_info['message']
+            )
+    
+    def get_group_segments(self, group_id: int) -> List[Dict[str, Any]]:
+        """Get all segments in a group."""
+        try:
+            return self.db.get_group_segments(group_id)
+        except Exception as e:
+            logger.error(f"Failed to get segments for group {group_id}: {e}")
+            return []
+    
+    def get_cell_segments(self, cell_name: str) -> List[Dict[str, Any]]:
+        """Get all segments for a cell with their group memberships."""
+        try:
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                return []
+            
+            return self.db.get_cell_segments_with_groups(cell['id'])
+            
+        except Exception as e:
+            logger.error(f"Failed to get segments for cell '{cell_name}': {e}")
+            return []
+    
+    def is_segment_in_group(self, segment_id: int, group_id: int) -> bool:
+        """Check if a segment belongs to a group."""
+        try:
+            return self.db.is_segment_in_group(segment_id, group_id)
+        except Exception as e:
+            logger.error(f"Failed to check segment {segment_id} in group {group_id}: {e}")
+            return False
 
 
 # =============================================================================

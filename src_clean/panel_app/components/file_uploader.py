@@ -441,15 +441,15 @@ class FileUploader(param.Parameterized):
             return
 
         try:
-            success = self.api.delete_file(file_id)
-            if success:
-                self.status_message = f"Deleted file: {file_id}"
-                self._update_processing_status(f"🗑️ Deleted file: {file_id}", "success")
+            result = self.api.delete_file(file_id)
+            if result.success:
+                self.status_message = result.message
+                self._update_processing_status(f"🗑️ {result.message}", "success")
                 self._refresh_file_list()
                 self.selected_file = ""
             else:
-                self.status_message = f"Failed to delete file: {file_id}"
-                self._update_processing_status(f"❌ Failed to delete file", "error")
+                self.status_message = f"Failed to delete file: {result.error}"
+                self._update_processing_status(f"❌ Failed to delete file: {result.error}", "error")
 
         except Exception as e:
             error_msg = f"Delete error: {str(e)}"

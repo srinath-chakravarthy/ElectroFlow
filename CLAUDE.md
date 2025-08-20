@@ -1,25 +1,25 @@
 # Battery Data Analyzer - Universal Electrochemical Data Processing
 
-## Current Status: PRODUCTION-READY PANEL WEB INTERFACE ✅
+## Current Status: PRODUCTION-READY WITH ADVANCED ANALYTICS ✅
 
-**Version:** 3.0.0 Panel Web Application  
+**Version:** 4.0.0 Universal Technique System  
 **Last Updated:** August 20, 2025  
-**Status:** Complete web interface with legacy code cleaned up
+**Status:** Complete system with automatic analytics, universal technique mapping, and proper CASCADE deletion
 
 ## Project Overview
 
-A modular, instrument-agnostic **web application** for R&D electrochemical data analysis. Successfully processes VersaStudio files with universal 29-column schema, featuring a complete Panel web interface with professional styling, HoloViews plotting, and standardized data organization.
+A modular, instrument-agnostic **web application** for R&D electrochemical data analysis. Successfully processes VersaStudio files with universal technique mapping, featuring automatic analytics, clean directory organization, and production-ready interfaces.
 
-## ✅ COMPLETED FOUNDATION
+## ✅ COMPLETED PRODUCTION SYSTEM
 
-### Backend Infrastructure (100% Complete)
-1. ✅ **Universal Data Processing**: VersaStudio (.par + .par.csv) → Universal 29-column schema
-2. ✅ **Segment-Based Analysis**: Automatic ActionID mapping and technique identification  
-3. ✅ **Backend API**: Clean orchestration layer with comprehensive functionality
-4. ✅ **Database Management**: SQLite with atomic operations, cells/files/segments schema
-5. ✅ **Parser Framework**: Auto-detection with VersaStudio implementation
-6. ✅ **Error Handling**: User-friendly error messages and graceful failure handling
-7. ✅ **CLI Interface**: Complete command-line access to all functionality
+### Core Infrastructure (100% Complete)
+1. ✅ **Universal Technique Mapping**: 5 fundamental techniques (Rest, Galvanostatic, Potentiostatic, EIS, CV) with VersaStudio ActionID translation (23→Rest, 20→EIS, 8→Galvanostatic)
+2. ✅ **Automatic Analytics Engine**: Real-time computation of core metrics + technique-specific analysis for every segment
+3. ✅ **Perfect Directory Organization**: Automatic per-cell structure (raw/, processed/, analysis_results/, user_groups/) with metadata.json
+4. ✅ **CASCADE Deletion System**: Complete file system and database cleanup with atomic transactions and ProcessingResult consistency
+5. ✅ **Backend API**: Clean orchestration layer with standardized ProcessingResult returns and comprehensive error handling
+6. ✅ **Database Management**: SQLite with foreign key constraints, schema migration, and universal technique tables
+7. ✅ **CLI Interface**: Full-featured command-line access to all functionality with JSON/table output formats
 
 ### Panel Web Interface (100% Complete)
 8. ✅ **Panel Components**: Modular web components (CellManager, FileUploader, DataViewer, StatusBar)
@@ -168,22 +168,46 @@ src_clean/
 
 ### Database Schema (Production)
 ```sql
--- Successfully implemented and tested
-CREATE TABLE cells (id, name, chemistry, notes, created_at);
+-- Universal technique system with instrument-specific mapping
+CREATE TABLE fundamental_techniques (
+    technique_id INTEGER PRIMARY KEY,
+    technique_name TEXT UNIQUE NOT NULL,
+    description TEXT DEFAULT ''
+);
+
+CREATE TABLE instrument_actionid_mappings (
+    action_id INTEGER PRIMARY KEY,
+    action_name TEXT NOT NULL,
+    technique_id INTEGER NOT NULL,
+    description TEXT DEFAULT '',
+    FOREIGN KEY (technique_id) REFERENCES fundamental_techniques(technique_id)
+);
+
+-- Core data tables with analytics
+CREATE TABLE cells (id, name, chemistry, capacity_ah, notes, created_at);
 CREATE TABLE files (file_id, cell_id, original_filename, processing_status, metadata);  
-CREATE TABLE segments (id, file_id, segment_number, technique_id, start_row, end_row);
-CREATE TABLE actionid_mappings (action_id, technique_name, fundamental_technique);
+CREATE TABLE segments (
+    id, file_id, segment_number, technique_id, start_row, end_row,
+    -- Automatic analytics columns
+    start_time_s, end_time_s, duration_s, capacity_ah, energy_wh,
+    start_potential_v, end_potential_v, start_current_a, end_current_a,
+    point_count, analysis_status, analysis_results
+);
 ```
 
-### Data Processing Pipeline (Working)
+### Data Processing Pipeline (Production)
 ```
 VersaStudio Files (.par + .par.csv) 
-    ↓ VersaStudioParser
+    ↓ VersaStudioParser (Universal Schema Mapping)
 Universal 29-Column DataFrame (Polars)
-    ↓ BackendAPI  
-SQLite Database + Analysis Results
+    ↓ Technique Detection (ActionID → Universal Technique)
+Segment Generation (technique_id, boundaries, context)
+    ↓ Fundamental Analytics Engine
+Core Metrics + Technique-Specific Analysis
+    ↓ BackendAPI (Atomic Storage)
+SQLite Database + Parquet Files + JSON Analysis
     ↓ Panel Web App / CLI / Python API
-Interactive Analysis & Bokeh Visualization
+Interactive Analysis & Professional Visualization
 ```
 ## 🚀 Usage Examples
 

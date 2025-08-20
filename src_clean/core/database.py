@@ -126,15 +126,53 @@ class DatabaseManager:
         # Check if we need to migrate existing segments table
         self._migrate_segments_table(conn)
         
-        # ActionID mappings - technique identification
+        # User groups table - for group management functionality
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS actionid_mappings (
-                action_id INTEGER PRIMARY KEY,
-                technique_name TEXT NOT NULL,
-                fundamental_technique TEXT NOT NULL,
-                user_defined BOOLEAN DEFAULT FALSE,
+            CREATE TABLE IF NOT EXISTS user_groups (
+                group_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cell_id INTEGER NOT NULL,
+                group_name VARCHAR(255) NOT NULL,
+                description TEXT,
+                is_template BOOLEAN DEFAULT FALSE,
+                template_type VARCHAR(100) NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cell_id) REFERENCES cells(id) ON DELETE CASCADE,
+                UNIQUE(cell_id, group_name)
+            )
+        """)
+        
+        # User group segments junction table - many-to-many relationship
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_group_segments (
+                group_id INTEGER NOT NULL,
+                segment_id INTEGER NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (group_id, segment_id),
+                FOREIGN KEY (group_id) REFERENCES user_groups(group_id) ON DELETE CASCADE,
+                FOREIGN KEY (segment_id) REFERENCES segments(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Fundamental techniques - battery-focused universal techniques
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS fundamental_techniques (
+                technique_id INTEGER PRIMARY KEY,
+                technique_name TEXT UNIQUE NOT NULL,
                 description TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Instrument-specific ActionID mappings to fundamental techniques
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS instrument_actionid_mappings (
+                action_id INTEGER PRIMARY KEY,
+                action_name TEXT NOT NULL,
+                technique_id INTEGER NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (technique_id) REFERENCES fundamental_techniques(technique_id)
             )
         """)
     
@@ -145,7 +183,12 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_files_file_id ON files(file_id)",
             "CREATE INDEX IF NOT EXISTS idx_segments_file_id ON segments(file_id)",
             "CREATE INDEX IF NOT EXISTS idx_segments_technique ON segments(fundamental_technique)",
-            "CREATE INDEX IF NOT EXISTS idx_actionid_mappings_technique ON actionid_mappings(fundamental_technique)"
+            "CREATE INDEX IF NOT EXISTS idx_user_groups_cell_id ON user_groups(cell_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_group_segments_group_id ON user_group_segments(group_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_group_segments_segment_id ON user_group_segments(segment_id)",
+            # Fundamental techniques indices
+            "CREATE INDEX IF NOT EXISTS idx_fundamental_techniques_name ON fundamental_techniques(technique_name)",
+            "CREATE INDEX IF NOT EXISTS idx_instrument_mappings_technique ON instrument_actionid_mappings(technique_id)"
         ]
         
         for index_sql in indices:
@@ -202,24 +245,38 @@ class DatabaseManager:
             # Don't raise - let the application continue with existing schema
     
     def _insert_default_data(self, conn: sqlite3.Connection):
-        """Insert default ActionID mappings."""
-        default_mappings = [
-            (1, 'Rest', 'rest', False, 'Open circuit potential measurement'),
-            (2, 'Potentiostatic', 'cp', False, 'Constant potential technique'),
-            (3, 'Galvanostatic', 'cc', False, 'Constant current technique'),
-            (4, 'Linear Sweep', 'cv', False, 'Linear sweep voltammetry'),
-            (5, 'Cyclic Voltammetry', 'cv', False, 'Cyclic voltammetry'),
-            (10, 'EIS', 'eis', False, 'Electrochemical impedance spectroscopy'),
-            (15, 'Current Interrupt', 'pulse', False, 'Current interrupt technique'),
-            (20, 'GITT', 'pulse', False, 'Galvanostatic intermittent titration')
+        """Insert default fundamental techniques and VersaStudio mappings."""
+        
+        # Insert 5 fundamental techniques (battery-focused)
+        fundamental_techniques = [
+            (1, 'Rest', 'Open circuit potential measurement'),
+            (2, 'Galvanostatic', 'Constant current technique'),
+            (3, 'Potentiostatic', 'Constant potential technique'),
+            (4, 'EIS', 'Electrochemical impedance spectroscopy'),
+            (5, 'Cyclic Voltammetry', 'Voltage sweep technique')
         ]
         
-        for action_id, technique_name, fundamental_technique, user_defined, description in default_mappings:
+        for technique_id, name, description in fundamental_techniques:
             conn.execute("""
-                INSERT OR IGNORE INTO actionid_mappings 
-                (action_id, technique_name, fundamental_technique, user_defined, description)
-                VALUES (?, ?, ?, ?, ?)
-            """, (action_id, technique_name, fundamental_technique, user_defined, description))
+                INSERT OR IGNORE INTO fundamental_techniques 
+                (technique_id, technique_name, description)
+                VALUES (?, ?, ?)
+            """, (technique_id, name, description))
+        
+        # Insert VersaStudio ActionID mappings (only 3 known ones)
+        versastudio_mappings = [
+            # (action_id, action_name, technique_id, description)
+            (23, 'Energy Open Circuit', 1, 'VersaStudio rest technique'),
+            (20, 'Galvanostatic EIS', 4, 'VersaStudio EIS technique'),
+            (8, 'Constant Current', 2, 'VersaStudio galvanostatic technique')
+        ]
+        
+        for action_id, action_name, technique_id, description in versastudio_mappings:
+            conn.execute("""
+                INSERT OR IGNORE INTO instrument_actionid_mappings 
+                (action_id, action_name, technique_id, description)
+                VALUES (?, ?, ?, ?)
+            """, (action_id, action_name, technique_id, description))
     
     @contextmanager
     def get_connection(self):
@@ -555,47 +612,280 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
     
     # =============================================================================
-    # ACTIONID MAPPING OPERATIONS
+    # TECHNIQUE MAPPING OPERATIONS
     # =============================================================================
     
-    def get_actionid_mapping(self, action_id: int) -> Optional[Dict[str, Any]]:
-        """Get ActionID mapping."""
+    def get_technique_mapping(self, action_id: int) -> Optional[Dict[str, Any]]:
+        """Get technique mapping for VersaStudio ActionID."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
-                SELECT * FROM actionid_mappings WHERE action_id = ?
+                SELECT 
+                    iam.action_id,
+                    iam.action_name,
+                    ft.technique_id,
+                    ft.technique_name,
+                    ft.description as technique_description,
+                    iam.description as mapping_description
+                FROM instrument_actionid_mappings iam
+                JOIN fundamental_techniques ft ON iam.technique_id = ft.technique_id
+                WHERE iam.action_id = ?
             """, (action_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
     
-    def get_all_actionid_mappings(self) -> List[Dict[str, Any]]:
-        """Get all ActionID mappings."""
+    def get_all_fundamental_techniques(self) -> List[Dict[str, Any]]:
+        """Get all fundamental techniques."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
-                SELECT * FROM actionid_mappings ORDER BY action_id
+                SELECT * FROM fundamental_techniques ORDER BY technique_id
             """)
             return [dict(row) for row in cursor.fetchall()]
     
-    def add_actionid_mapping(self, action_id: int, technique_name: str, 
-                           fundamental_technique: str, user_defined: bool = True,
-                           description: str = "") -> bool:
-        """Add or update ActionID mapping."""
+    def get_all_technique_mappings(self) -> List[Dict[str, Any]]:
+        """Get all VersaStudio ActionID mappings with technique details."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    iam.action_id,
+                    iam.action_name,
+                    ft.technique_id,
+                    ft.technique_name,
+                    ft.description as technique_description,
+                    iam.description as mapping_description,
+                    iam.created_at
+                FROM instrument_actionid_mappings iam
+                JOIN fundamental_techniques ft ON iam.technique_id = ft.technique_id
+                ORDER BY iam.action_id
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def add_technique_mapping(self, action_id: int, action_name: str, 
+                             technique_id: int, description: str = "") -> bool:
+        """Add new VersaStudio ActionID mapping to fundamental technique."""
         with self.get_connection() as conn:
             conn.execute("BEGIN")
             try:
                 conn.execute("""
-                    INSERT OR REPLACE INTO actionid_mappings 
-                    (action_id, technique_name, fundamental_technique, user_defined, description)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (action_id, technique_name, fundamental_technique, user_defined, description))
+                    INSERT OR REPLACE INTO instrument_actionid_mappings 
+                    (action_id, action_name, technique_id, description)
+                    VALUES (?, ?, ?, ?)
+                """, (action_id, action_name, technique_id, description))
                 
                 conn.commit()
-                logger.info(f"Added ActionID mapping: {action_id} -> {fundamental_technique}")
+                logger.info(f"Added technique mapping: ActionID {action_id} -> {technique_id}")
                 return True
                 
             except Exception as e:
                 conn.rollback()
-                raise TransactionError("add_actionid_mapping", str(e))
+                raise TransactionError("add_technique_mapping", str(e))
     
+    # =============================================================================
+    # GROUP MANAGEMENT OPERATIONS
+    # =============================================================================
+    
+    def create_group(self, cell_id: int, group_name: str, description: str = "") -> int:
+        """Create a new user group."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                cursor = conn.execute("""
+                    INSERT INTO user_groups (cell_id, group_name, description)
+                    VALUES (?, ?, ?)
+                """, (cell_id, group_name, description))
+                
+                group_id = cursor.lastrowid
+                conn.commit()
+                logger.info(f"Created group: {group_name} (ID: {group_id})")
+                return group_id
+                
+            except sqlite3.IntegrityError as e:
+                conn.rollback()
+                if "UNIQUE constraint failed" in str(e):
+                    raise DatabaseIntegrityError(f"Group name '{group_name}' already exists for this cell", "create_group")
+                else:
+                    raise DatabaseIntegrityError(str(e), "create_group")
+            except Exception as e:
+                conn.rollback()
+                raise TransactionError("create_group", str(e))
+    
+    def get_cell_groups(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get all groups for a cell with segment counts."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT ug.group_id, ug.group_name, ug.description, ug.is_template, 
+                       ug.template_type, ug.created_at, ug.updated_at,
+                       COUNT(ugs.segment_id) as segment_count
+                FROM user_groups ug
+                LEFT JOIN user_group_segments ugs ON ug.group_id = ugs.group_id
+                WHERE ug.cell_id = ?
+                GROUP BY ug.group_id
+                ORDER BY ug.created_at DESC
+            """, (cell_id,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_group_info(self, group_id: int) -> Optional[Dict[str, Any]]:
+        """Get detailed group information."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT ug.group_id, ug.cell_id, ug.group_name, ug.description, 
+                       ug.is_template, ug.template_type, ug.created_at, ug.updated_at,
+                       COUNT(ugs.segment_id) as segment_count
+                FROM user_groups ug
+                LEFT JOIN user_group_segments ugs ON ug.group_id = ugs.group_id
+                WHERE ug.group_id = ?
+                GROUP BY ug.group_id
+            """, (group_id,))
+            
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    
+    def delete_group(self, group_id: int) -> bool:
+        """Delete a group and all its segment associations."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                # Get group info for logging
+                group_info = self.get_group_info(group_id)
+                
+                # Delete group (CASCADE will handle user_group_segments)
+                cursor = conn.execute("DELETE FROM user_groups WHERE group_id = ?", (group_id,))
+                deleted = cursor.rowcount > 0
+                
+                conn.commit()
+                
+                if deleted and group_info:
+                    logger.info(f"Deleted group: {group_info['group_name']} (ID: {group_id})")
+                
+                return deleted
+                
+            except Exception as e:
+                conn.rollback()
+                raise TransactionError("delete_group", str(e))
+    
+    def add_segments_to_group(self, group_id: int, segment_ids: List[int]) -> int:
+        """Add segments to a group. Returns count of successfully added segments."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                added_count = 0
+                
+                for segment_id in segment_ids:
+                    try:
+                        conn.execute("""
+                            INSERT OR IGNORE INTO user_group_segments (group_id, segment_id)
+                            VALUES (?, ?)
+                        """, (group_id, segment_id))
+                        
+                        if conn.total_changes > 0:
+                            added_count += 1
+                            
+                    except Exception as e:
+                        logger.debug(f"Skipped segment {segment_id}: {e}")
+                        continue
+                
+                conn.commit()
+                logger.info(f"Added {added_count} segments to group ID: {group_id}")
+                return added_count
+                
+            except Exception as e:
+                conn.rollback()
+                raise TransactionError("add_segments_to_group", str(e))
+    
+    def remove_segments_from_group(self, group_id: int, segment_ids: List[int]) -> int:
+        """Remove segments from a group. Returns count of successfully removed segments."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                removed_count = 0
+                
+                for segment_id in segment_ids:
+                    cursor = conn.execute("""
+                        DELETE FROM user_group_segments 
+                        WHERE group_id = ? AND segment_id = ?
+                    """, (group_id, segment_id))
+                    
+                    if cursor.rowcount > 0:
+                        removed_count += 1
+                
+                conn.commit()
+                logger.info(f"Removed {removed_count} segments from group ID: {group_id}")
+                return removed_count
+                
+            except Exception as e:
+                conn.rollback()
+                raise TransactionError("remove_segments_from_group", str(e))
+    
+    def get_group_segments(self, group_id: int) -> List[Dict[str, Any]]:
+        """Get all segments in a group with full segment information."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT s.*, f.original_filename, ugs.added_at
+                FROM user_group_segments ugs
+                JOIN segments s ON ugs.segment_id = s.id
+                JOIN files f ON s.file_id = f.file_id
+                WHERE ugs.group_id = ?
+                ORDER BY s.start_time_s
+            """, (group_id,))
+            
+            segments = []
+            for row in cursor.fetchall():
+                segment_data = dict(row)
+                if segment_data.get('segment_metadata'):
+                    segment_data['segment_metadata'] = json.loads(segment_data['segment_metadata'])
+                if segment_data.get('analysis_results'):
+                    segment_data['analysis_results'] = json.loads(segment_data['analysis_results'])
+                segments.append(segment_data)
+            
+            return segments
+    
+    def get_cell_segments_with_groups(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get all segments for a cell with their group memberships."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT s.*, f.original_filename,
+                       GROUP_CONCAT(ug.group_name, ', ') as group_names,
+                       GROUP_CONCAT(ug.group_id, ', ') as group_ids
+                FROM segments s
+                JOIN files f ON s.file_id = f.file_id
+                LEFT JOIN user_group_segments ugs ON s.id = ugs.segment_id
+                LEFT JOIN user_groups ug ON ugs.group_id = ug.group_id
+                WHERE f.cell_id = ?
+                GROUP BY s.id
+                ORDER BY s.start_time_s
+            """, (cell_id,))
+            
+            segments = []
+            for row in cursor.fetchall():
+                segment_data = dict(row)
+                if segment_data.get('segment_metadata'):
+                    segment_data['segment_metadata'] = json.loads(segment_data['segment_metadata'])
+                if segment_data.get('analysis_results'):
+                    segment_data['analysis_results'] = json.loads(segment_data['analysis_results'])
+                    
+                # Parse group information
+                if segment_data['group_names']:
+                    segment_data['groups'] = list(zip(
+                        segment_data['group_ids'].split(', '),
+                        segment_data['group_names'].split(', ')
+                    ))
+                else:
+                    segment_data['groups'] = []
+                
+                segments.append(segment_data)
+            
+            return segments
+    
+    def is_segment_in_group(self, segment_id: int, group_id: int) -> bool:
+        """Check if a segment belongs to a group."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 1 FROM user_group_segments 
+                WHERE group_id = ? AND segment_id = ?
+            """, (group_id, segment_id))
+            
+            return cursor.fetchone() is not None
+
     # =============================================================================
     # UTILITY OPERATIONS
     # =============================================================================
