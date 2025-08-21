@@ -42,14 +42,14 @@ class FileUploader(param.Parameterized):
 
         # Upload section components
         self.metadata_upload = pn.widgets.FileInput(
-            accept=".par",
+            # accept=".par",
             multiple=False,
             width=280,
             margin=(5, 5)
         )
 
         self.data_upload = pn.widgets.FileInput(
-            accept=".csv",
+            # accept=".csv",
             multiple=False,
             width=280,
             margin=(5, 5)
@@ -72,15 +72,6 @@ class FileUploader(param.Parameterized):
             margin=(10, 5)
         )
         self.upload_btn.on_click(self._on_upload_files)
-        
-        # Debug button for testing
-        self.debug_btn = pn.widgets.Button(
-            name="🔍 Check Status",
-            button_type="light",
-            width=120,
-            margin=(5, 5)
-        )
-        self.debug_btn.on_click(self._debug_status)
 
         # Processing status
         self.processing_status = pn.pane.HTML(
@@ -128,13 +119,9 @@ class FileUploader(param.Parameterized):
         )
         self.refresh_files_btn.on_click(self._on_refresh_files)
 
-        # Watch for file selections to enable upload
+        # Simple file upload watchers
         self.metadata_upload.param.watch(self._check_upload_ready, 'value')
         self.data_upload.param.watch(self._check_upload_ready, 'value')
-        
-        # Also watch for filename changes (alternative trigger)
-        self.metadata_upload.param.watch(self._on_file_uploaded, 'filename')
-        self.data_upload.param.watch(self._on_file_uploaded, 'filename')
 
     @property
     def panel(self):
@@ -204,11 +191,11 @@ class FileUploader(param.Parameterized):
                     self.temperature_input,
                     width=120
                 ),
-                pn.Spacer(width=10),
+                pn.Spacer(width=20),
                 pn.Column(
                     pn.Spacer(height=20),
-                    pn.Row(self.upload_btn, self.debug_btn, margin=(0, 0)),
-                    width=280
+                    self.upload_btn,
+                    width=170
                 ),
                 margin=(10, 5)
             ),
@@ -375,14 +362,9 @@ class FileUploader(param.Parameterized):
 
     def _check_upload_ready(self, event):
         """Check if upload is ready with visual feedback."""
-        # Check if files are uploaded by looking at filename instead of value
-        has_metadata = self.metadata_upload.filename is not None
-        has_data = self.data_upload.filename is not None  
+        has_metadata = self.metadata_upload.value is not None
+        has_data = self.data_upload.value is not None  
         has_cell = self.current_cell is not None
-
-        print(f"DEBUG: has_metadata={has_metadata}, has_data={has_data}, has_cell={has_cell}")
-        print(f"  metadata filename: {self.metadata_upload.filename}")
-        print(f"  data filename: {self.data_upload.filename}")
 
         self.upload_btn.disabled = not (has_metadata and has_data and has_cell)
 
@@ -394,21 +376,6 @@ class FileUploader(param.Parameterized):
         else:
             self.upload_btn.name = "🚀 Process Files"
 
-    def _on_file_uploaded(self, event):
-        """Handle file upload completion - alternative trigger."""
-        print(f"DEBUG: File uploaded - filename: {event.new}")
-        # Small delay to ensure value is set
-        import time
-        time.sleep(0.1)
-        self._check_upload_ready(None)
-
-    def _debug_status(self, event):
-        """Manual debug trigger to check current state."""
-        print(f"\n=== MANUAL DEBUG STATUS ===")
-        self._check_upload_ready(None)
-        print(f"Current button text: {self.upload_btn.name}")
-        print(f"Button disabled: {self.upload_btn.disabled}")
-        print(f"=========================\n")
 
     def _on_upload_files(self, event):
         """Handle file upload with progress feedback."""
