@@ -362,19 +362,27 @@ class FileUploader(param.Parameterized):
 
     def _check_upload_ready(self, event):
         """Check if upload is ready with visual feedback."""
+
         has_metadata = self.metadata_upload.value is not None
-        has_data = self.data_upload.value is not None  
-        has_cell = self.current_cell is not None
+        has_data = self.data_upload.value is not None
 
-        self.upload_btn.disabled = not (has_metadata and has_data and has_cell)
+        print(f"Check upload ready - Metadata: {has_metadata}, Data: {has_data}, Cell: {self.current_cell}")
 
-        # Update button text based on readiness
-        if not has_cell:
-            self.upload_btn.name = "🚀 Select Cell First"
-        elif not has_metadata or not has_data:
-            self.upload_btn.name = "🚀 Select Both Files"
-        else:
-            self.upload_btn.name = "🚀 Process Files"
+        self.upload_btn.disabled = not (has_metadata and has_data and self.current_cell)
+        print(f"Button disabled: {self.upload_btn.disabled}")
+        # has_metadata = self.metadata_upload.value is not None
+        # has_data = self.data_upload.value is not None
+        # has_cell = self.current_cell is not None
+        #
+        # self.upload_btn.disabled = not (has_metadata and has_data and has_cell)
+        #
+        # # Update button text based on readiness
+        # if not has_cell:
+        #     self.upload_btn.name = "🚀 Select Cell First"
+        # elif not has_metadata or not has_data:
+        #     self.upload_btn.name = "🚀 Select Both Files"
+        # else:
+        #     self.upload_btn.name = "🚀 Process Files"
 
 
     def _on_upload_files(self, event):

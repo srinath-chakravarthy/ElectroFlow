@@ -237,10 +237,11 @@ class DataFile:
         return self.universal_data.height
     
     def get_segment_boundaries(self) -> List[Dict[str, Any]]:
-        """Get segment boundaries based on technique_id changes."""
-        if 'technique_id' not in self.universal_data.columns:
+        """Get segment boundaries based on segment_number values from original instrument."""
+        if 'segment_number' not in self.universal_data.columns:
             return [{
-                'technique_id': None,
+                'segment_number': 0,
+                'technique_id': self.universal_data['technique_id'][0] if 'technique_id' in self.universal_data.columns else None,
                 'start_row': 0,
                 'end_row': self.point_count - 1,
                 'start_time_s': 0.0,
@@ -251,18 +252,22 @@ class DataFile:
         segments = []
         df = self.universal_data
         
-        # Group by technique_id to find boundaries
-        technique_groups = df.with_row_count().group_by('technique_id', maintain_order=True)
+        # Group by segment_number to find boundaries (respects original instrument segmentation)
+        segment_groups = df.with_row_count().group_by('segment_number', maintain_order=True)
         
-        for technique_id, group_df in technique_groups:
-            if technique_id[0] is not None:  # technique_id is a tuple from group_by
+        for segment_number, group_df in segment_groups:
+            if segment_number[0] is not None:  # segment_number is a tuple from group_by
                 start_row = int(group_df['row_nr'].min())
                 end_row = int(group_df['row_nr'].max())
                 start_time = float(group_df['time_s'].min()) if 'time_s' in group_df.columns else 0.0
                 end_time = float(group_df['time_s'].max()) if 'time_s' in group_df.columns else 0.0
                 
+                # Get the technique_id for this segment (should be consistent within segment)
+                technique_id = group_df['technique_id'][0] if 'technique_id' in group_df.columns else None
+                
                 segments.append({
-                    'technique_id': technique_id[0],
+                    'segment_number': segment_number[0],
+                    'technique_id': technique_id,
                     'start_row': start_row,
                     'end_row': end_row,
                     'start_time_s': start_time,

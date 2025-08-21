@@ -378,7 +378,7 @@ class BackendAPI:
                     fundamental_technique = "unknown"
             
             segment_info = {
-                'segment_index': i,
+                'segment_index': boundary.get('segment_number', i),  # Use actual segment_number from instrument
                 'technique_id': universal_technique_id or raw_action_id,  # Store universal ID if available
                 'raw_action_id': raw_action_id,  # Keep raw ActionID for reference
                 'technique_name': technique_name,

@@ -229,9 +229,13 @@ class VersaStudioParser(DualFileParser):
     def _parse_csv_data(self, csv_path: Path, metadata: FileMetadata) -> DataFile:
         """Parse CSV data with schema validation and universal conversion."""
         try:
-            # Read CSV without forcing full schema to avoid data corruption
+            # Handle BOM and encoding issues by preprocessing the file
+            clean_csv_path = self._clean_csv_file(csv_path)
+            
+            # Read CSV with explicit schema to ensure proper types
             df = pl.read_csv(
-                csv_path,
+                clean_csv_path,
+                schema=VERSASTUDIO_CSV_SCHEMA,
                 null_values=["", "NULL", "null"]
             )
             
@@ -262,13 +266,55 @@ class VersaStudioParser(DualFileParser):
         except Exception as e:
             raise DataParsingError(str(csv_path), "CSV data", str(e))
     
+    def _clean_csv_file(self, csv_path: Path) -> Path:
+        """Clean CSV file by removing BOM and other encoding artifacts."""
+        import tempfile
+        import codecs
+        
+        # Create temporary cleaned file
+        temp_dir = Path(tempfile.gettempdir())
+        temp_file = temp_dir / f"cleaned_{csv_path.name}"
+        
+        try:
+            # Read file with potential BOM handling
+            with open(csv_path, 'r', encoding='utf-8-sig') as input_file:
+                content = input_file.read()
+            
+            # Write clean content
+            with open(temp_file, 'w', encoding='utf-8') as output_file:
+                output_file.write(content)
+            
+            return temp_file
+            
+        except UnicodeDecodeError:
+            # Fallback for other encoding issues
+            try:
+                with open(csv_path, 'r', encoding='utf-8') as input_file:
+                    content = input_file.read()
+                # Remove BOM manually if present
+                if content.startswith('\ufeff'):
+                    content = content[1:]
+                
+                with open(temp_file, 'w', encoding='utf-8') as output_file:
+                    output_file.write(content)
+                
+                return temp_file
+            except Exception:
+                # If all else fails, return original file
+                return csv_path
+    
     def _map_to_universal_schema(self, df: pl.DataFrame) -> pl.DataFrame:
         """Map VersaStudio CSV columns to universal schema."""
-        # Create mapping for available columns
+        # Create mapping for available columns, avoiding duplicates
         column_mapping = {}
+        used_universal_cols = set()
+        
         for vs_col, universal_col in VERSASTUDIO_CSV_MAPPING.items():
-            if vs_col in df.columns:
+            if vs_col in df.columns and universal_col not in used_universal_cols:
                 column_mapping[vs_col] = universal_col
+                used_universal_cols.add(universal_col)
+        
+        logger.debug(f"Column mapping: {column_mapping}")
         
         # Rename columns to universal schema
         mapped_df = df.rename(column_mapping)
