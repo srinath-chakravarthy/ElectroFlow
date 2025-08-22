@@ -1,12 +1,29 @@
 # Battery Data Analyzer - Project Status Report
 
-**Date:** August 20, 2025  
-**Status:** Production Ready with Universal Technique System and Automatic Analytics  
-**Version:** 4.0 - Universal Technique System
+**Date:** August 21, 2025  
+**Status:** DEVELOPMENT - BLOCKED BY CRITICAL UI BUG  
+**Version:** 4.1 - Group Management UI Implementation (BLOCKED)
 
 ## 🎯 Project Overview
 
 Major architectural advancement with universal technique mapping, automatic analytics engine, and production-grade reliability. The system now features 5 fundamental techniques with instrument-specific ActionID translation, real-time analytics computation, and perfect data organization with CASCADE operations.
+
+## 🚨 CRITICAL BLOCKING ISSUE
+
+### Group Management UI Data Loading Bug
+**Priority 0 - URGENT**
+
+**Issue**: Group management tab (Tab 2) segments table only loads 2 columns instead of full segment data
+- **Expected**: Complete electrochemical data (start_potential_v, end_potential_v, duration_s, etc.)
+- **Actual**: Only 'id' and 'fundamental_technique' columns returned
+- **Root Cause**: API method `get_cell_segments()` calls `get_cell_segments_with_groups()` database method which may be designed for group metadata, not full segment display
+
+**Impact**: 
+- ✅ Group creation/deletion functional
+- ❌ Cannot view segment details for informed grouping decisions
+- ❌ Cannot test full group management workflow
+
+**Status**: BLOCKING all group management functionality until resolved
 
 ## ✅ Major System Improvements Completed
 

@@ -1,10 +1,10 @@
 # Battery Data Analyzer - Universal Electrochemical Data Processing
 
-## Current Status: PRODUCTION-READY WITH DESIGNED EXTENSIONS ✅
+## Current Status: DEVELOPMENT - BLOCKED BY CRITICAL UI BUG 🚧
 
 **Version:** 4.1.0 Universal System with Group Management Foundation  
-**Last Updated:** August 20, 2025  
-**Status:** Production system with universal techniques, automatic analytics, and designed group/analysis extensions
+**Last Updated:** August 21, 2025  
+**Status:** Group management UI implementation blocked by segments table data loading issue - Priority 0 fix required
 
 ## Project Overview
 
@@ -27,19 +27,19 @@ A modular, instrument-agnostic **web application** for R&D electrochemical data 
 10. ✅ **Tab 1 Components**: Complete CellManager, FileUploader, DataViewer with HoloViews plotting
 11. ✅ **Base Application**: Main Panel app with 3-column layout and status system
 12. ✅ **Data Visualization**: AC data detection, Nyquist plots, dynamic decimation
-13. ✅ **Tab 2 Complete**: Group Management fully integrated with real backend API calls
+13. 🚧 **Tab 2 Blocked**: Group Management UI blocked by segments table data loading issue (Priority 0)
 14. 🚧 **Tab 3 Backend Ready**: Analytics API complete, UI integration remaining (20%)
 
-### Group Management System (100% Complete)
+### Group Management System (85% Complete - UI Blocked)
 15. ✅ **Database Schema**: Complete user_groups and user_group_segments tables with CASCADE deletion
 16. ✅ **Backend API Methods**: Full CRUD operations (create_group, delete_group, add_segments_to_group, get_group_segments, etc.)
 17. ✅ **ProcessingResult Integration**: Standardized API returns with proper error handling
 18. ✅ **Junction Table Design**: Many-to-many relationship with automatic cleanup
-19. ✅ **UI Components**: Complete two-tabulator interface with real backend integration
-20. ✅ **Production Ready**: Tab 2 fully functional with testing verified
+19. 🚧 **UI Components**: Three-column interface implemented, blocked by segments table data issue
+20. ❌ **Production Blocked**: Priority 0 segments table bug prevents full functionality testing
 
 ### Ready-to-Use Interfaces
-- **Panel Web App**: `python echem_web.py` → `http://localhost:5007` - Production-ready with Tab 1 & Tab 2 complete, Tab 3 backend ready
+- **Panel Web App**: `python echem_web.py` → `http://localhost:5007` - Tab 1 complete, Tab 2 blocked by Priority 0 bug, Tab 3 backend ready
 - **Command Line**: `python -m src_clean.cli.main --help` - Complete CLI for cell/file operations  
 - **Python Scripts**: `from src_clean.backend import get_backend_api` - Programmatic access
 - **Jupyter Notebooks**: Interactive analysis with plotting examples
@@ -52,6 +52,45 @@ A modular, instrument-agnostic **web application** for R&D electrochemical data 
 - ✅ **Multi-Interface**: GUI for exploration, CLI/scripts for automation and reproducibility
 - ✅ **Group Management Foundation**: Database and API backend complete
 
+## 🚨 PRIORITY 0 - CRITICAL FUNCTIONAL ISSUES
+
+### URGENT: Group Management UI Data Loading Bug
+**Status**: BLOCKING core functionality - segments table not populating correctly
+
+**Issue**: Group management tab (Tab 2) loads but segments table shows incomplete data
+- **Expected**: Full segment data with all electrochemical columns (start_potential_v, end_potential_v, duration_s, etc.)
+- **Actual**: Only 2 columns returned: 'id' and 'fundamental_technique'
+- **Root Cause**: API method `get_cell_segments()` calling wrong database method or database method returning incomplete data
+
+**Console Evidence**:
+```
+Loaded segments with columns: ['id', 'fundamental_technique']
+WARNING:root:Dropping a patch because it contains a previously known reference
+```
+
+**Impact**: 
+- ✅ Group creation/deletion works
+- ✅ Group selection works  
+- ❌ **Cannot view segment details** to make informed grouping decisions
+- ❌ **Cannot add segments to groups** because table shows insufficient data
+
+**Architecture Investigation Needed**:
+- `get_cell_segments()` API method → calls `get_cell_segments_with_groups()` database method
+- Database method may be designed for group metadata, not full segment display
+- Schema mismatch between UI expectations and actual database return structure
+
+**Critical Path**: Fix segments table data loading before completing group management functionality
+
+### ARCHITECTURAL DEBT DOCUMENTATION
+**Major Redesign Identified**: API-Database method consistency across the system
+- **CLI Mirror Validation Strategy**: Comprehensive plan developed for API contract validation
+- **Database-driven Schema**: Dynamic UI schema generation from actual database structure  
+- **API Method Rationalization**: Eliminate nomenclature confusion and redundant methods
+
+**DECISION**: Defer architectural redesign until VersaStudio instrument fully functional
+- **Rationale**: Ship working research tool first, then engineer for multi-instrument scale
+- **Timeline**: Complete VersaStudio → Analytics Tab → BioLogic support → Full API redesign
+
 ## 🎯 CURRENT IMPLEMENTATION PRIORITIES (August 2025)
 
 ### Priority 1: ✅ COMPLETED - Universal Analytics Foundation
@@ -59,15 +98,15 @@ A modular, instrument-agnostic **web application** for R&D electrochemical data 
 - **Automatic Core Analytics**: Real-time metrics computation (capacity, energy, duration, voltage, current)
 - **Group Management Backend**: Complete database schema and API implementation
 
-### Priority 2: ✅ COMPLETED - Group Management UI Integration
+### Priority 2: 🚧 IN PROGRESS - Group Management UI Integration
 **Objective**: Complete Tab 2 Group Management interface
 
-#### ✅ System Status (100% Complete):
-- **Database Schema**: user_groups + user_group_segments tables with CASCADE operations
-- **Backend API**: All CRUD methods implemented with ProcessingResult returns
-- **UI Implementation**: Complete two-tabulator interface with real API integration
-- **Frontend Integration**: All methods using real backend calls (no mock calls)
-- **Testing Verified**: Group creation, segment management, deletion tested with real data
+#### 🚧 System Status (85% Complete - BLOCKED by Priority 0):
+- ✅ **Database Schema**: user_groups + user_group_segments tables with CASCADE operations
+- ✅ **Backend API**: All CRUD methods implemented with ProcessingResult returns
+- ✅ **UI Implementation**: Complete three-column interface with real API integration
+- ✅ **Frontend Integration**: All methods using real backend calls (no mock calls)
+- ❌ **BLOCKED**: Segments table data loading issue prevents full functionality testing
 
 **Available API Methods:**
 ```python
@@ -80,7 +119,7 @@ api.get_group_segments(group_id) → List[Dict]
 api.get_group_info(group_id) → Dict
 ```
 
-**Tab 2 Status**: ✅ Production ready - fully integrated into main Panel application
+**Tab 2 Status**: 🚧 BLOCKED - segments table data loading issue prevents full testing and functionality
 
 ### Priority 3: ✅ COMPLETED - Analytics Backend Implementation
 **Objective**: Complete Tab 3 Data Analysis & Visualization backend
