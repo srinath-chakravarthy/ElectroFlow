@@ -1350,8 +1350,11 @@ class BackendAPI:
             cell = self.db.get_cell_by_name(cell_name)
             if not cell:
                 return []
-            
-            return self.db.get_cell_segments_with_groups(cell['id'])
+            segments =self.db.get_cell_segments_with_groups(cell['id'])
+            print(f"API call {len(segments)} segments")
+            if segments:
+                print(f"First segment keys: {list(segments[0].keys())}")
+            return segments
             
         except Exception as e:
             logger.error(f"Failed to get segments for cell '{cell_name}': {e}")
@@ -1425,6 +1428,79 @@ class BackendAPI:
             logger.error(f"Failed to get segments for groups {group_ids}: {e}")
             return []
 
+    # === Api to get schema columns and column name ==== #
+    def get_segments_display_schema(self) -> Dict[str, Dict]:
+        """Get display schema for segments table - simplified version."""
+        try:
+            with self.db.get_connection() as conn:
+                # Get column information from SQLite
+                cursor = conn.execute("PRAGMA table_info(segments)")
+                columns_info = cursor.fetchall()
+
+                schema = {}
+
+                # Skip internal columns we don't want to display
+                skip_columns = {
+                    'created_at', 'updated_at', 'analysis_results', 'analysis_status'
+                }
+
+                for cid, name, type_name, notnull, dflt_value, pk in columns_info:
+                    if name in skip_columns:
+                        continue
+
+                    schema[name] = {
+                        'display_name': self._simple_display_name(name),
+                        'sql_type': type_name,
+                        'formatter': self._simple_formatter(name, type_name),
+                        'width': 120  # Standard width for all columns
+                    }
+
+                return schema
+
+        except Exception as e:
+            print(f"Failed to get segments schema: {e}")
+            return {}
+
+    def _simple_display_name(self, column_name: str) -> str:
+        """Simple display name generation - just replace underscores and title case."""
+        return column_name.replace('_', ' ').title()
+
+    def _simple_formatter(self, column_name: str, sql_type: str):
+        """Simple formatter - just handle None values and basic types."""
+        sql_type = sql_type.upper()
+
+        if 'REAL' in sql_type or 'FLOAT' in sql_type:
+            # Float values - show 3 decimal places
+            return lambda x: f"{x:.3f}" if x is not None else "N/A"
+        elif 'INT' in sql_type:
+            # Integer values
+            return lambda x: str(x) if x is not None else "N/A"
+        else:
+            # Everything else as string
+            return lambda x: str(x) if x is not None else "N/A"
+
+    def _get_group_content_columns(self) -> List[str]:
+        """Get subset of segment columns for group contents display."""
+        # Show fewer columns in the group contents for space
+        key_columns = ['id', 'fundamental_technique', 'start_time_s', 'duration_s', 'start_potential_v',
+                       'end_potential_v']
+
+        # Filter the full schema to only include these columns
+        return {col: config for col, config in self.segment_columns.items()
+                if col in key_columns}
+
+    def get_cell_groups_with_counts(self, cell_name: str) -> List[Dict[str, Any]]:
+        """Get all groups for a cell with segment counts - needed for group management tab."""
+        try:
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                return []
+
+            return self.db.get_cell_groups(cell['id'])
+
+        except Exception as e:
+            logger.error(f"Failed to get groups with counts for cell '{cell_name}': {e}")
+            return []
 
 # =============================================================================
 # GLOBAL INSTANCE
