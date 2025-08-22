@@ -445,20 +445,20 @@ class VersaStudioParser(DualFileParser):
         # Calculate cumulative values across segments
         segment_totals = segment_totals.with_columns([
             # Net cumulative
-            pl.col('segment_capacity_final').cumsum().alias('capacity_cumulative_segment'),
-            pl.col('segment_energy_final').cumsum().alias('energy_cumulative_segment'),
+            pl.col('segment_capacity_final').cum_sum().alias('capacity_cumulative_segment'),
+            pl.col('segment_energy_final').cum_sum().alias('energy_cumulative_segment'),
             
             # Charge cumulative (positive only)
-            pl.col('segment_capacity_final').clip(lower_bound=0).cumsum().alias('charge_cumulative_segment'),
-            pl.col('segment_energy_final').clip(lower_bound=0).cumsum().alias('energy_charge_cumulative_segment'),
+            pl.col('segment_capacity_final').clip(lower_bound=0).cum_sum().alias('charge_cumulative_segment'),
+            pl.col('segment_energy_final').clip(lower_bound=0).cum_sum().alias('energy_charge_cumulative_segment'),
             
             # Discharge cumulative (negative only)
-            pl.col('segment_capacity_final').clip(upper_bound=0).cumsum().alias('discharge_cumulative_segment'),
-            pl.col('segment_energy_final').clip(upper_bound=0).cumsum().alias('energy_discharge_cumulative_segment'),
+            pl.col('segment_capacity_final').clip(upper_bound=0).cum_sum().alias('discharge_cumulative_segment'),
+            pl.col('segment_energy_final').clip(upper_bound=0).cum_sum().alias('energy_discharge_cumulative_segment'),
             
             # Absolute cumulative
-            pl.col('segment_capacity_final').abs().cumsum().alias('capacity_absolute_cumulative_segment'),
-            pl.col('segment_energy_final').abs().cumsum().alias('energy_absolute_cumulative_segment')
+            pl.col('segment_capacity_final').abs().cum_sum().alias('capacity_absolute_cumulative_segment'),
+            pl.col('segment_energy_final').abs().cum_sum().alias('energy_absolute_cumulative_segment')
         ])
         
         # Join back to main dataframe

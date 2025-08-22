@@ -48,8 +48,8 @@ class CoreMetricsCalculator:
             last_row = segment_data.row(-1, named=True)
             
             # Time boundaries
-            start_time = float(first_row.get('time_s', 0))
-            end_time = float(last_row.get('time_s', 0))
+            start_time = float(first_row.get('time_s') or 0)
+            end_time = float(last_row.get('time_s') or 0)
             duration = end_time - start_time
             
             # Voltage boundaries
@@ -61,22 +61,22 @@ class CoreMetricsCalculator:
             end_current = last_row.get('current_a')
             
             # Final integrated values (computed by parser)
-            final_capacity = float(last_row.get('capacity_ah', 0))
-            final_energy = float(last_row.get('energy_wh', 0))
+            final_capacity = float(last_row.get('capacity_ah') or 0)
+            final_energy = float(last_row.get('energy_wh') or 0)
             
             # Extract timestamp from first row
             start_timestamp = first_row.get('timestamp')
             start_timestamp_str = start_timestamp.isoformat() if start_timestamp else None
             
             # Extract final cumulative values (computed by parser)
-            final_capacity_cumulative = float(last_row.get('capacity_cumulative_ah', 0))
-            final_energy_cumulative = float(last_row.get('energy_cumulative_wh', 0))
-            final_charge_cumulative = float(last_row.get('charge_cumulative_ah', 0))
-            final_discharge_cumulative = float(last_row.get('discharge_cumulative_ah', 0))
-            final_energy_charge_cumulative = float(last_row.get('energy_charge_cumulative_wh', 0))
-            final_energy_discharge_cumulative = float(last_row.get('energy_discharge_cumulative_wh', 0))
-            final_capacity_absolute_cumulative = float(last_row.get('capacity_absolute_cumulative_ah', 0))
-            final_energy_absolute_cumulative = float(last_row.get('energy_absolute_cumulative_wh', 0))
+            final_capacity_cumulative = float(last_row.get('capacity_cumulative_ah') or 0)
+            final_energy_cumulative = float(last_row.get('energy_cumulative_wh') or 0)
+            final_charge_cumulative = float(last_row.get('charge_cumulative_ah') or 0)
+            final_discharge_cumulative = float(last_row.get('discharge_cumulative_ah') or 0)
+            final_energy_charge_cumulative = float(last_row.get('energy_charge_cumulative_wh') or 0)
+            final_energy_discharge_cumulative = float(last_row.get('energy_discharge_cumulative_wh') or 0)
+            final_capacity_absolute_cumulative = float(last_row.get('capacity_absolute_cumulative_ah') or 0)
+            final_energy_absolute_cumulative = float(last_row.get('energy_absolute_cumulative_wh') or 0)
             
             return {
                 # Boundary values
