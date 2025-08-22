@@ -40,12 +40,18 @@ class GroupManagementTab(param.Parameterized):
         self._populate_initial_data()
 
     def _get_segments_schema(self) -> Dict[str, Dict]:
-        """Get segments table schema from database."""
         try:
             schema = self.api.get_segments_display_schema()
             if schema:
-                print(f"Loaded {len(schema)} columns from database schema")
-                return schema
+                # Filter out unwanted columns
+                skip_columns = {
+                    'created_at', 'updated_at', 'analysis_results', 'segment_metadata',
+                    'original_filename'  # Hide the long filename
+                }
+
+                filtered_schema = {k: v for k, v in schema.items() if k not in skip_columns}
+                print(f"Loaded {len(filtered_schema)} columns (filtered from {len(schema)})")
+                return filtered_schema
         except Exception as e:
             print(f"Failed to get segments schema: {e}")
 
@@ -88,7 +94,9 @@ class GroupManagementTab(param.Parameterized):
 
             formatted_data.append(row)
 
-        return pd.DataFrame(formatted_data)
+        df = pd.DataFrame(formatted_data)
+        # Only keep columns that are in the schema
+        return df[list(self.segments_schema.keys())]
 
     def _create_components(self):
         """Create all UI components."""
@@ -112,10 +120,10 @@ class GroupManagementTab(param.Parameterized):
             sortable=True,
             show_index=False,
             configuration={
-                'layout': 'fitColumns',
+                'layout': 'fitData',
                 'height': '600px',
                 'placeholder': 'Select a cell to view segments...',
-                'responsiveLayout': 'hide',
+                # 'responsiveLayout': 'hide',
                 'tooltips': True,
                 'columnDefaults': {'tooltip': True}
             },
@@ -310,8 +318,10 @@ class GroupManagementTab(param.Parameterized):
 
             self.segments_tabulator,
 
-            width=450,
-            margin=(10, 5)
+            # width=450,
+            sizing_mode = 'stretch_width',
+            margin=(10, 5),
+            width_policy='max'
         )
 
         # Middle column - Group Management
@@ -368,8 +378,10 @@ class GroupManagementTab(param.Parameterized):
             self.group_contents_tabulator,
             self.remove_from_group_btn,
 
-            width=280,
-            margin=(10, 5)
+            # width=280,
+            sizing_mode = 'stretch_width',
+            margin=(10, 5),
+            width_policy='min',
         )
 
         # Right column - Preview
@@ -386,8 +398,10 @@ class GroupManagementTab(param.Parameterized):
             self.preview_plot,
             self.summary_stats,
 
-            width=350,
-            margin=(10, 5)
+            # width=350,
+            sizing_mode = 'stretch_width',
+            margin=(10, 5),
+            width_policy='fit'
         )
 
         # Main content
@@ -474,7 +488,13 @@ class GroupManagementTab(param.Parameterized):
         except Exception as e:
             self.segments_tabulator.value = self._create_empty_segments_dataframe()
             self._update_status(f"Error loading segments: {str(e)}", "error")
+        formatted_df = self._format_segments_data(segments)
+        print(f"DEBUG: About to assign DF with columns: {list(formatted_df.columns)}")
+        print(f"DEBUG: DF shape: {formatted_df.shape}")
+        if not formatted_df.empty:
+            print(f"DEBUG: First row sample: {formatted_df.iloc[0].to_dict()}")
 
+        self.segments_tabulator.value = formatted_df
     def _refresh_groups(self):
         """Refresh groups dropdown for current cell."""
         if not self.current_cell:
