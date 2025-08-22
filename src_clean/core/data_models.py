@@ -17,8 +17,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import polars as pl
 
-# Import schema from config
-from ..parsers.configs.universal_schema import UNIVERSAL_SCHEMA, get_polars_schema
+# Import schema from config - moved to function level to avoid circular imports
 
 
 # Note: VersaStudio schemas moved to src_clean/parsers/configs/versastudio_mappings.py
@@ -79,6 +78,8 @@ class DataFile:
     
     def _validate_universal_schema(self):
         """Ensure DataFrame matches universal schema."""
+        from ..parsers.configs.universal_schema import UNIVERSAL_SCHEMA
+        
         expected_columns = set(UNIVERSAL_SCHEMA.keys())
         actual_columns = set(self.universal_data.columns)
         
@@ -182,6 +183,8 @@ class DataFile:
 def validate_universal_schema(df: pl.DataFrame) -> bool:
     """Validate that DataFrame conforms to universal schema."""
     try:
+        from ..parsers.configs.universal_schema import UNIVERSAL_SCHEMA
+        
         # Check required columns exist
         required_columns = set(UNIVERSAL_SCHEMA.keys())
         actual_columns = set(df.columns)
@@ -221,11 +224,14 @@ def _types_compatible(actual_type, expected_type) -> bool:
 
 def create_empty_universal_dataframe() -> pl.DataFrame:
     """Create an empty DataFrame with universal schema."""
+    from ..parsers.configs.universal_schema import get_polars_schema
     return pl.DataFrame(schema=get_polars_schema())
 
 
 def add_missing_universal_columns(df: pl.DataFrame) -> pl.DataFrame:
     """Add missing universal schema columns with null values."""
+    from ..parsers.configs.universal_schema import UNIVERSAL_SCHEMA
+    
     existing_columns = set(df.columns)
     missing_columns = set(UNIVERSAL_SCHEMA.keys()) - existing_columns
     
