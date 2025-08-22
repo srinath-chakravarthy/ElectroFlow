@@ -7,10 +7,12 @@ Modern 3-column layout with database-driven columns and dropdown group selection
 import panel as pn
 import param
 import pandas as pd
+import numpy as np
+import hvplot.pandas
 from typing import List, Dict, Any, Optional
 
-# Ensure tabulator extension is loaded
-pn.extension('tabulator')
+# Ensure extensions are loaded
+pn.extension('tabulator', 'bokeh')
 
 class GroupManagementTab(param.Parameterized):
     """
@@ -240,6 +242,9 @@ class GroupManagementTab(param.Parameterized):
             height=300,
             margin=(5, 5)
         )
+        
+        # Watch for selection changes in group contents for real-time preview
+        self.group_contents_tabulator.param.watch(self._on_group_contents_selection_changed, 'selection')
 
         self.remove_from_group_btn = pn.widgets.Button(
             name="➖ Remove Selected",
@@ -268,12 +273,15 @@ class GroupManagementTab(param.Parameterized):
         self.plot_type_selector.param.watch(self._on_plot_type_changed, 'value')
 
         # Preview plot area
-        self.preview_plot = pn.pane.HTML(
-            self._create_empty_preview_html(),
+        self.preview_plot = pn.pane.HoloViews(
+            None,
             sizing_mode='stretch_width',
             height=350,
             margin=(5, 5)
         )
+        
+        # Show empty plot initially
+        self._clear_preview()
 
         # Summary stats display
         self.summary_stats = pn.pane.HTML(
@@ -569,6 +577,8 @@ class GroupManagementTab(param.Parameterized):
             self._refresh_group_contents()
             self.delete_group_btn.disabled = False
             self.add_to_group_btn.disabled = False
+            # Update preview to show entire group
+            self._update_preview()
         else:
             self._clear_group_selection()
 
@@ -604,6 +614,10 @@ class GroupManagementTab(param.Parameterized):
     def _on_segments_selection_changed(self, event):
         """Handle changes in segment selection for real-time preview."""
         self._update_preview()
+        
+    def _on_group_contents_selection_changed(self, event):
+        """Handle changes in group contents selection for real-time preview."""
+        self._update_preview()
 
     def _on_plot_type_changed(self, event):
         """Handle plot type change."""
@@ -612,23 +626,40 @@ class GroupManagementTab(param.Parameterized):
     def _update_preview(self):
         """Update the preview plot and summary stats."""
         try:
-            # Get selected segments from left panel
-            selected_indices = self.segments_tabulator.selection
-            if not selected_indices:
+            # Check for selections in both tables
+            # Priority: Group Contents selection > All Segments selection > Entire Group
+            
+            group_contents_selection = self.group_contents_tabulator.selection
+            all_segments_selection = self.segments_tabulator.selection
+            
+            selected_segments = None
+            selection_context = ""
+            
+            if group_contents_selection:
+                # User selected specific segments within a group
+                df = self.group_contents_tabulator.value
+                if df is not None and not df.empty:
+                    selected_segments = df.iloc[group_contents_selection]
+                    selection_context = f"Selected {len(selected_segments)} segments from group"
+            elif all_segments_selection:
+                # User selected segments from all segments table
+                df = self.segments_tabulator.value
+                if df is not None and not df.empty:
+                    selected_segments = df.iloc[all_segments_selection]
+                    selection_context = f"Selected {len(selected_segments)} segments from all"
+            elif self.selected_group_id:
+                # Show entire group when group is selected but no specific segments
+                df = self.group_contents_tabulator.value
+                if df is not None and not df.empty:
+                    selected_segments = df
+                    selection_context = f"Entire group ({len(selected_segments)} segments)"
+            
+            if selected_segments is None or selected_segments.empty:
                 self._clear_preview()
                 return
 
-            # Get DataFrame
-            df = self.segments_tabulator.value
-            if df is None or df.empty:
-                self._clear_preview()
-                return
-
-            # Get selected rows
-            selected_segments = df.iloc[selected_indices]
-
-            # Update summary stats
-            self._update_summary_stats(selected_segments)
+            # Update summary stats with context
+            self._update_summary_stats(selected_segments, selection_context)
 
             # Create plot preview
             plot_type = self.plot_type_selector.value
@@ -637,8 +668,8 @@ class GroupManagementTab(param.Parameterized):
         except Exception as e:
             self._update_status(f"Error updating preview: {str(e)}", "error")
 
-    def _update_summary_stats(self, selected_segments: pd.DataFrame):
-        """Update summary statistics display."""
+    def _update_summary_stats(self, selected_segments: pd.DataFrame, context: str = ""):
+        """Update summary statistics display with context awareness."""
         if selected_segments.empty:
             self.summary_stats.object = self._create_empty_summary_html()
             return
@@ -648,8 +679,11 @@ class GroupManagementTab(param.Parameterized):
         if 'fundamental_technique' in selected_segments.columns:
             technique_counts = selected_segments['fundamental_technique'].value_counts().to_dict()
 
-        # Build summary
-        summary_lines = [f"<strong>Current Selection:</strong> {len(selected_segments)} segments"]
+        # Build summary with context
+        if context:
+            summary_lines = [f"<strong>{context}</strong>"]
+        else:
+            summary_lines = [f"<strong>Current Selection:</strong> {len(selected_segments)} segments"]
 
         for technique, count in technique_counts.items():
             color = self._get_technique_color(technique)
@@ -668,6 +702,15 @@ class GroupManagementTab(param.Parameterized):
                 if not voltage_values.isna().all():
                     voltage_range = f"{voltage_values.min():.3f}V - {voltage_values.max():.3f}V"
                     summary_lines.append(f"└─ Voltage Range: {voltage_range}")
+                    
+            # Add duration info if available
+            if 'duration_s' in selected_segments.columns:
+                duration_values = pd.to_numeric(selected_segments['duration_s'].astype(str).str.replace('s', ''), errors='coerce')
+                if not duration_values.isna().all():
+                    total_duration = duration_values.sum()
+                    avg_duration = duration_values.mean()
+                    summary_lines.append(f"├─ Total Duration: {total_duration:.0f}s")
+                    summary_lines.append(f"└─ Average Duration: {avg_duration:.0f}s")
         except Exception:
             pass  # Skip ranges if parsing fails
 
@@ -693,31 +736,192 @@ class GroupManagementTab(param.Parameterized):
         return color_map.get(technique, '#666666')
 
     def _create_preview_plot(self, selected_segments: pd.DataFrame, plot_type: str):
-        """Create preview plot placeholder."""
-        plot_title = plot_type.replace('_', ' ').title()
+        """Create actual hvplot visualization."""
+        try:
+            if selected_segments.empty:
+                self._clear_preview()
+                return
+            
+            # Create plot based on type
+            if plot_type == "voltage_boundaries":
+                plot = self._create_voltage_boundaries_plot(selected_segments)
+            elif plot_type == "voltage_ranges":
+                plot = self._create_voltage_ranges_plot(selected_segments)
+            elif plot_type == "time_duration":
+                plot = self._create_time_duration_plot(selected_segments)
+            elif plot_type == "capacity_time":
+                plot = self._create_capacity_time_plot(selected_segments)
+            else:
+                plot = self._create_voltage_boundaries_plot(selected_segments)  # Default
+            
+            self.preview_plot.object = plot
+            
+        except Exception as e:
+            self._update_status(f"Error creating plot: {str(e)}", "error")
+            self._clear_preview()
 
-        plot_html = f"""
-        <div style='background: #E8F5E8; padding: 30px; border-radius: 4px; 
-                    height: 300px; border: 1px solid #2E7D32; text-align: center;
-                    display: flex; flex-direction: column; justify-content: center;'>
-            <div style='font-size: 32px; opacity: 0.6; margin-bottom: 15px;'>📈</div>
-            <div style='color: #2E7D32; font-weight: 600; margin-bottom: 8px; font-size: 16px;'>
-                {plot_title}
-            </div>
-            <div style='color: #1B5E20; font-size: 14px; margin-bottom: 10px;'>
-                {len(selected_segments)} segments selected
-            </div>
-            <div style='color: #666; font-size: 12px;'>
-                Segment-level visualization<br>
-                (No raw data joins required)
-            </div>
-        </div>
-        """
-        self.preview_plot.object = plot_html
+    def _create_voltage_boundaries_plot(self, df: pd.DataFrame):
+        """Create voltage boundaries vs time plot."""
+        # Prepare data for plotting
+        if 'start_time_s' not in df.columns or 'start_potential_v' not in df.columns:
+            return self._create_empty_plot("Missing voltage/time data")
+        
+        # Convert columns to numeric, handling string values
+        plot_df = df.copy()
+        plot_df['time'] = pd.to_numeric(plot_df['start_time_s'].astype(str).str.replace('s', ''), errors='coerce')
+        plot_df['start_v'] = pd.to_numeric(plot_df['start_potential_v'].astype(str).str.replace('V', ''), errors='coerce')
+        
+        if 'end_potential_v' in df.columns:
+            plot_df['end_v'] = pd.to_numeric(plot_df['end_potential_v'].astype(str).str.replace('V', ''), errors='coerce')
+        else:
+            plot_df['end_v'] = plot_df['start_v']  # Fallback
+        
+        # Remove rows with NaN values
+        plot_df = plot_df.dropna(subset=['time', 'start_v'])
+        
+        if plot_df.empty:
+            return self._create_empty_plot("No valid voltage/time data")
+        
+        # Get technique for coloring
+        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        
+        # Create scatter plot for start voltages
+        plot = plot_df.hvplot.scatter(
+            x='time', y='start_v',
+            color=technique_col,
+            size=60,
+            alpha=0.7,
+            title="Voltage Boundaries vs Time",
+            xlabel="Time (s)",
+            ylabel="Potential (V)",
+            legend='top_right',
+            width=400,
+            height=300
+        )
+        
+        # Add end voltages if available and different
+        if 'end_v' in plot_df.columns and not plot_df['end_v'].equals(plot_df['start_v']):
+            end_plot = plot_df.hvplot.scatter(
+                x='time', y='end_v',
+                color=technique_col,
+                size=40,
+                alpha=0.5,
+                marker='triangle'
+            )
+            plot = plot * end_plot
+        
+        return plot
+
+    def _create_voltage_ranges_plot(self, df: pd.DataFrame):
+        """Create voltage range bars plot."""
+        if 'start_potential_v' not in df.columns:
+            return self._create_empty_plot("Missing voltage data")
+        
+        plot_df = df.copy()
+        plot_df['start_v'] = pd.to_numeric(plot_df['start_potential_v'].astype(str).str.replace('V', ''), errors='coerce')
+        
+        if 'end_potential_v' in df.columns:
+            plot_df['end_v'] = pd.to_numeric(plot_df['end_potential_v'].astype(str).str.replace('V', ''), errors='coerce')
+            plot_df['voltage_range'] = abs(plot_df['end_v'] - plot_df['start_v'])
+        else:
+            plot_df['voltage_range'] = 0.01  # Small default range
+        
+        plot_df = plot_df.dropna(subset=['start_v'])
+        
+        if plot_df.empty:
+            return self._create_empty_plot("No valid voltage data")
+        
+        plot_df['segment_idx'] = range(len(plot_df))
+        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        
+        return plot_df.hvplot.bar(
+            x='segment_idx', y='voltage_range',
+            color=technique_col,
+            title="Voltage Ranges by Segment",
+            xlabel="Segment Index",
+            ylabel="Voltage Range (V)",
+            legend='top_right',
+            width=400,
+            height=300
+        )
+
+    def _create_time_duration_plot(self, df: pd.DataFrame):
+        """Create time vs duration scatter plot."""
+        if 'start_time_s' not in df.columns or 'duration_s' not in df.columns:
+            return self._create_empty_plot("Missing time/duration data")
+        
+        plot_df = df.copy()
+        plot_df['time'] = pd.to_numeric(plot_df['start_time_s'].astype(str).str.replace('s', ''), errors='coerce')
+        plot_df['duration'] = pd.to_numeric(plot_df['duration_s'].astype(str).str.replace('s', ''), errors='coerce')
+        
+        plot_df = plot_df.dropna(subset=['time', 'duration'])
+        
+        if plot_df.empty:
+            return self._create_empty_plot("No valid time/duration data")
+        
+        # Size by voltage range if available
+        if 'start_potential_v' in plot_df.columns and 'end_potential_v' in plot_df.columns:
+            plot_df['start_v'] = pd.to_numeric(plot_df['start_potential_v'].astype(str).str.replace('V', ''), errors='coerce')
+            plot_df['end_v'] = pd.to_numeric(plot_df['end_potential_v'].astype(str).str.replace('V', ''), errors='coerce')
+            plot_df['size'] = abs(plot_df['end_v'] - plot_df['start_v']) * 1000 + 50  # Scale for visibility
+        else:
+            plot_df['size'] = 100
+        
+        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        
+        return plot_df.hvplot.scatter(
+            x='time', y='duration',
+            color=technique_col,
+            size='size',
+            alpha=0.7,
+            title="Duration vs Start Time",
+            xlabel="Start Time (s)",
+            ylabel="Duration (s)",
+            legend='top_right',
+            width=400,
+            height=300
+        )
+
+    def _create_capacity_time_plot(self, df: pd.DataFrame):
+        """Create capacity vs time plot."""
+        # This is a placeholder since capacity is computed during analysis
+        if 'start_time_s' not in df.columns:
+            return self._create_empty_plot("Missing time data")
+        
+        plot_df = df.copy()
+        plot_df['time'] = pd.to_numeric(plot_df['start_time_s'].astype(str).str.replace('s', ''), errors='coerce')
+        plot_df = plot_df.dropna(subset=['time'])
+        
+        if plot_df.empty:
+            return self._create_empty_plot("No valid time data")
+        
+        # Create dummy capacity data (this would come from analysis in real implementation)
+        plot_df['capacity'] = np.cumsum(np.random.normal(0.1, 0.05, len(plot_df)))
+        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        
+        return plot_df.hvplot.line(
+            x='time', y='capacity',
+            color=technique_col,
+            title="Capacity vs Time (Placeholder)",
+            xlabel="Time (s)",
+            ylabel="Capacity (Ah)",
+            legend='top_right',
+            width=400,
+            height=300
+        )
+
+    def _create_empty_plot(self, message: str = "No data to display"):
+        """Create empty plot with message."""
+        import holoviews as hv
+        return hv.Text(0.5, 0.5, message).opts(
+            width=400, height=300,
+            xaxis=None, yaxis=None,
+            title="Preview Plot"
+        )
 
     def _clear_preview(self):
         """Clear preview plot and summary."""
-        self.preview_plot.object = self._create_empty_preview_html()
+        self.preview_plot.object = self._create_empty_plot("Select segments to see preview")
         self.summary_stats.object = self._create_empty_summary_html()
 
     # Group management methods

@@ -26,8 +26,9 @@ This guide outlines the clean implementation approach for the Electrochemical An
 
 ### Parsing Strategy
 - **VersaStudio**: .par (metadata only) + .par.csv (data only)
-- **Universal Schema**: All instruments convert to same 29-column format
-- **No Legacy**: Remove VERSASTUDIO_SCHEMA, only keep VERSASTUDIO_CSV_SCHEMA
+- **Universal Schema**: All instruments convert to same 38-column format with explicit units
+- **Units-Aware**: Automatic unit conversion using Pint library (mA→A, mV→V, etc.)
+- **Config-Driven**: Instrument mappings in separate config files for maintainability
 
 ### Database Design
 - **Segment-Centric**: Each experimental segment is independent unit
@@ -50,9 +51,13 @@ src/
 │   ├── database.py             # Database operations
 │   └── exceptions.py           # Custom exceptions
 ├── parsers/
+│   ├── configs/                # Configuration files
+│   │   ├── __init__.py         # Clean config exports
+│   │   ├── universal_schema.py # 38-column schema with units
+│   │   └── versastudio_mappings.py # VersaStudio column mappings
 │   ├── base.py                 # Abstract parser interface
 │   ├── factory.py              # Parser factory
-│   ├── versastudio.py          # VersaStudio implementation
+│   ├── versastudio.py          # VersaStudio implementation (units-aware)
 │   └── biologic.py             # BioLogic implementation (future)
 ├── backend/
 │   └── api.py                  # Clean backend orchestration
@@ -71,7 +76,8 @@ src/
 
 ### Unit Tests
 - **Data Models**: Schema validation, conversions
-- **Parsers**: File format handling, column mapping
+- **Parsers**: File format handling, column mapping, unit conversions
+- **Config System**: Universal schema and instrument mappings
 - **Database**: CRUD operations, constraints
 - **Backend**: Orchestration logic
 

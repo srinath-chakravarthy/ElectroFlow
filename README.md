@@ -9,19 +9,33 @@ A comprehensive web-based application for electrochemical battery data analysis 
 - **📊 Interactive Visualization**: HoloViews plots with dynamic decimation and technique-specific coloring
 - **🧠 Universal Technique Mapping**: 5 fundamental techniques with instrument-specific ActionID translation
 - **⚡ Automatic Analytics**: Real-time computation of core metrics and technique-specific analysis
+- **🏷️ Group Management**: Visual segment organization with real-time preview plots
+- **🔧 Units-Aware Processing**: Automatic unit conversion (mA→A, mV→V) with Pint library
 - **📁 Perfect Data Organization**: Per-cell structure (raw/, processed/, analysis_results/, user_groups/)
 - **🔧 CASCADE Operations**: Complete file system and database cleanup with atomic transactions
 - **🖥️ Multi-Interface Support**: Web UI, CLI, Python API, and Jupyter integration
 
 ## ✅ Current Implementation Status
 
-### Universal Technique System (NEW)
+### Units-Aware Parser System (NEW)
+- **38-Column Universal Schema**: Explicit units for every column (A, V, Ah, Wh, Hz, Ω)
+- **Automatic Unit Conversion**: Pint library integration for robust unit handling
+- **Config-Driven Architecture**: Instrument mappings in separate configuration files
+- **Schema-Driven Physics**: Units-aware integration eliminates hardcoded conversion factors
+
+### Group Management System (NEW)
+- **3-Column Visual Interface**: Segments table, group operations, real-time preview
+- **Context-Aware Statistics**: Different stats for whole groups vs sub-selections
+- **Real-Time Preview Plots**: 4 visualization types using hvplot/bokeh
+- **Database-Driven Groups**: Complete CRUD operations with segment associations
+
+### Universal Technique System
 - **5 Fundamental Techniques**: Rest, Galvanostatic, Potentiostatic, EIS, Cyclic Voltammetry
 - **VersaStudio ActionID Mapping**: 23→Rest, 20→EIS, 8→Galvanostatic (instrument-specific translation)
 - **Database-Driven**: Universal technique table with foreign key constraints
 - **Automatic Detection**: Real-time technique classification during file processing
 
-### Automatic Analytics Engine (NEW)
+### Automatic Analytics Engine
 - **Core Metrics**: Capacity (Ah), Energy (Wh), Duration (s) for all techniques
 - **Technique-Specific Analysis**: Context-aware rest phase and pulse analysis
 - **Advanced Curve Fitting**: Exponential decay with R² quality metrics
