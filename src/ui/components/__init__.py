@@ -1,1 +1,0 @@
-# Panel UI components for battery data analyzer
