@@ -807,13 +807,18 @@ class GroupManagementTab(param.Parameterized):
         if plot_df.empty:
             return self._create_empty_plot("No valid voltage/time data")
         
-        # Get technique for coloring
-        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        # Get technique for coloring and map to actual colors
+        if 'fundamental_technique' in plot_df.columns:
+            plot_df['color'] = plot_df['fundamental_technique'].apply(self._get_technique_color)
+            color_by = 'fundamental_technique'  # Use categorical coloring
+        else:
+            plot_df['color'] = '#1976D2'  # Default color
+            color_by = None
         
         # Create scatter plot for start voltages
         plot = plot_df.hvplot.scatter(
             x='time', y='start_v',
-            color=technique_col,
+            by=color_by,  # Use 'by' for categorical coloring instead of 'color'
             size=60,
             alpha=0.7,
             title="Voltage Boundaries vs Time",
@@ -828,7 +833,7 @@ class GroupManagementTab(param.Parameterized):
         if 'end_v' in plot_df.columns and not plot_df['end_v'].equals(plot_df['start_v']):
             end_plot = plot_df.hvplot.scatter(
                 x='time', y='end_v',
-                color=technique_col,
+                by=color_by,
                 size=40,
                 alpha=0.5,
                 marker='triangle'
@@ -857,11 +862,16 @@ class GroupManagementTab(param.Parameterized):
             return self._create_empty_plot("No valid voltage data")
         
         plot_df['segment_idx'] = range(len(plot_df))
-        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        
+        # Handle coloring for bar plot
+        if 'fundamental_technique' in plot_df.columns:
+            color_by = 'fundamental_technique'
+        else:
+            color_by = None
         
         return plot_df.hvplot.bar(
             x='segment_idx', y='voltage_range',
-            color=technique_col,
+            by=color_by,
             title="Voltage Ranges by Segment",
             xlabel="Segment Index",
             ylabel="Voltage Range (V)",
@@ -892,11 +902,15 @@ class GroupManagementTab(param.Parameterized):
         else:
             plot_df['size'] = 100
         
-        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        # Handle coloring for scatter plot
+        if 'fundamental_technique' in plot_df.columns:
+            color_by = 'fundamental_technique'
+        else:
+            color_by = None
         
         return plot_df.hvplot.scatter(
             x='time', y='duration',
-            color=technique_col,
+            by=color_by,
             size='size',
             alpha=0.7,
             title="Duration vs Start Time",
@@ -922,11 +936,16 @@ class GroupManagementTab(param.Parameterized):
         
         # Create dummy capacity data (this would come from analysis in real implementation)
         plot_df['capacity'] = np.cumsum(np.random.normal(0.1, 0.05, len(plot_df)))
-        technique_col = 'fundamental_technique' if 'fundamental_technique' in plot_df.columns else None
+        
+        # Handle coloring for line plot
+        if 'fundamental_technique' in plot_df.columns:
+            color_by = 'fundamental_technique'
+        else:
+            color_by = None
         
         return plot_df.hvplot.line(
             x='time', y='capacity',
-            color=technique_col,
+            by=color_by,
             title="Capacity vs Time (Placeholder)",
             xlabel="Time (s)",
             ylabel="Capacity (Ah)",
