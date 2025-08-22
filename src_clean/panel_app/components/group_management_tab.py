@@ -621,6 +621,7 @@ class GroupManagementTab(param.Parameterized):
 
     def _on_plot_type_changed(self, event):
         """Handle plot type change."""
+        print(f"DEBUG: Plot type changed to: {event.new}")  # Debug output
         self._update_preview()
 
     def _update_preview(self):
@@ -663,6 +664,7 @@ class GroupManagementTab(param.Parameterized):
 
             # Create plot preview
             plot_type = self.plot_type_selector.value
+            print(f"DEBUG: Creating plot with type: {plot_type}")  # Debug output
             self._create_preview_plot(selected_segments, plot_type)
 
         except Exception as e:
@@ -701,7 +703,7 @@ class GroupManagementTab(param.Parameterized):
                 voltage_values = pd.to_numeric(selected_segments['start_potential_v'].astype(str).str.replace('V', ''), errors='coerce')
                 if not voltage_values.isna().all():
                     voltage_range = f"{voltage_values.min():.3f}V - {voltage_values.max():.3f}V"
-                    summary_lines.append(f"└─ Voltage Range: {voltage_range}")
+                    summary_lines.append(f"├─ Voltage Range: {voltage_range}")
                     
             # Add duration info if available
             if 'duration_s' in selected_segments.columns:
@@ -713,6 +715,13 @@ class GroupManagementTab(param.Parameterized):
                     summary_lines.append(f"└─ Average Duration: {avg_duration:.0f}s")
         except Exception:
             pass  # Skip ranges if parsing fails
+
+        # Add plot legend explanation
+        current_plot_type = getattr(self.plot_type_selector, 'value', 'voltage_boundaries')
+        plot_legend = self._get_plot_legend(current_plot_type)
+        if plot_legend:
+            summary_lines.append(f"<br><strong>Plot Legend:</strong>")
+            summary_lines.append(plot_legend)
 
         summary_html = f"""
         <div style='background: #E3F2FD; padding: 12px; border-radius: 4px; 
@@ -734,6 +743,16 @@ class GroupManagementTab(param.Parameterized):
             'POTENTIOSTATIC': '#FFD700'
         }
         return color_map.get(technique, '#666666')
+
+    def _get_plot_legend(self, plot_type: str) -> str:
+        """Get legend explanation for current plot type."""
+        legends = {
+            'voltage_boundaries': "● = Start voltage, ▲ = End voltage (colored by technique)",
+            'voltage_ranges': "Bar height = voltage span (start→end), colored by technique",
+            'time_duration': "Point size = voltage range, colored by technique",
+            'capacity_time': "Line shows cumulative capacity over time, colored by technique"
+        }
+        return legends.get(plot_type, "Colors indicate different techniques")
 
     def _create_preview_plot(self, selected_segments: pd.DataFrame, plot_type: str):
         """Create actual hvplot visualization."""
