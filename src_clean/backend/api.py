@@ -264,6 +264,16 @@ class BackendAPI:
             # Generate summary
             summary = self._generate_processing_summary(data_file)
             
+            # Automatically refresh template groups for this cell after successful file processing
+            try:
+                cell = self.db.get_cell_by_name(cell_name)
+                if cell:
+                    created_count = self.db.refresh_template_groups(cell['id'])
+                    logger.info(f"Auto-refreshed template groups for cell '{cell_name}': {created_count} groups updated")
+            except Exception as e:
+                logger.warning(f"Failed to auto-refresh template groups for cell '{cell_name}': {e}")
+                # Don't fail the main operation if template refresh fails
+            
             return ProcessingResult(
                 success=True,
                 file_id=file_id,
@@ -1224,8 +1234,9 @@ class BackendAPI:
     # GROUP MANAGEMENT OPERATIONS
     # =============================================================================
     
-    def create_group(self, cell_name: str, group_name: str, description: str = "") -> ProcessingResult:
-        """Create a new user group for organizing segments."""
+    def create_group(self, cell_name: str, group_name: str, description: str = "", 
+                     is_template: bool = False, template_type: str = None) -> ProcessingResult:
+        """Create a new user group or template group for organizing segments."""
         try:
             # Get cell ID
             cell = self.db.get_cell_by_name(cell_name)
@@ -1235,12 +1246,14 @@ class BackendAPI:
                     error=f"Cell '{cell_name}' not found"
                 )
             
-            group_id = self.db.create_group(cell['id'], group_name, description)
+            group_id = self.db.create_group(cell['id'], group_name, description, 
+                                          is_template, template_type)
             
+            group_type = "template" if is_template else "user"
             return ProcessingResult(
                 success=True,
                 file_id=str(group_id),  # Using file_id field for group_id
-                message=f"Created group '{group_name}' successfully"
+                message=f"Created {group_type} group '{group_name}' successfully"
             )
             
         except Exception as e:
@@ -1501,6 +1514,184 @@ class BackendAPI:
         except Exception as e:
             logger.error(f"Failed to get groups with counts for cell '{cell_name}': {e}")
             return []
+
+    # =============================================================================
+    # TEMPLATE GROUP OPERATIONS
+    # =============================================================================
+
+    def get_template_groups(self, cell_name: str) -> List[Dict[str, Any]]:
+        """Get all template groups for a cell with segment counts."""
+        try:
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                return []
+
+            return self.db.get_template_groups(cell['id'])
+
+        except Exception as e:
+            logger.error(f"Failed to get template groups for cell '{cell_name}': {e}")
+            return []
+
+    def get_user_groups(self, cell_name: str) -> List[Dict[str, Any]]:
+        """Get all user groups (non-template) for a cell with segment counts."""
+        try:
+            cell = self.db.get_cell_by_name(cell_name)
+            if not cell:
+                return []
+
+            return self.db.get_user_groups(cell['id'])
+
+        except Exception as e:
+            logger.error(f"Failed to get user groups for cell '{cell_name}': {e}")
+            return []
+
+    def refresh_template_groups(self, cell_name: str = None) -> ProcessingResult:
+        """
+        Refresh template groups for a specific cell or all cells.
+        
+        Args:
+            cell_name: Cell name to refresh, or None to refresh all cells
+            
+        Returns:
+            ProcessingResult with count of template groups created/updated
+        """
+        try:
+            total_created = 0
+            
+            if cell_name:
+                # Refresh specific cell
+                print(f"DEBUG API: Refreshing template groups for specific cell '{cell_name}'")
+                cell = self.db.get_cell_by_name(cell_name)
+                if not cell:
+                    return ProcessingResult(
+                        success=False,
+                        error=f"Cell '{cell_name}' not found"
+                    )
+                
+                print(f"DEBUG API: Found cell {cell['name']} (ID: {cell['id']})")
+                created_count = self.db.refresh_template_groups(cell['id'])
+                total_created = created_count
+                message = f"Refreshed template groups for cell '{cell_name}': {created_count} groups updated"
+                
+            else:
+                # Refresh all cells
+                print("DEBUG API: Refreshing template groups for ALL cells")
+                cells = self.db.get_all_cells()
+                print(f"DEBUG API: Found {len(cells)} cells to process")
+                
+                for cell in cells:
+                    try:
+                        print(f"DEBUG API: Processing cell '{cell['name']}' (ID: {cell['id']})")
+                        
+                        # Check if this cell has segments
+                        segments = self.db.get_cell_segments_with_groups(cell['id'])
+                        print(f"DEBUG API: Cell '{cell['name']}' has {len(segments)} segments")
+                        
+                        if segments:
+                            # Show what techniques we have
+                            techniques = set(seg.get('fundamental_technique', 'unknown') for seg in segments)
+                            print(f"DEBUG API: Techniques found: {techniques}")
+                        
+                        created_count = self.db.refresh_template_groups(cell['id'])
+                        print(f"DEBUG API: Created/updated {created_count} template groups for '{cell['name']}'")
+                        total_created += created_count
+                        
+                    except Exception as e:
+                        print(f"DEBUG API: Error with cell {cell['name']}: {e}")
+                        logger.warning(f"Failed to refresh template groups for cell {cell['name']}: {e}")
+                
+                message = f"Refreshed template groups for all cells: {total_created} groups updated across {len(cells)} cells"
+            
+            print(f"DEBUG API: Total template groups created/updated: {total_created}")
+            return ProcessingResult(
+                success=True,
+                file_id=str(total_created),  # Using file_id field for count
+                message=message
+            )
+            
+        except Exception as e:
+            print(f"DEBUG API: Exception in refresh_template_groups: {e}")
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=error_info['message']
+            )
+
+    def copy_group(self, group_id: int, new_name: str = None) -> ProcessingResult:
+        """
+        Copy a group (template or user) to a new user group with smart naming.
+        
+        Args:
+            group_id: Source group ID to copy
+            new_name: Optional new name, or None for automatic naming
+            
+        Returns:
+            ProcessingResult with new group ID and details
+        """
+        try:
+            # Get source group info
+            source_group = self.db.get_group_info(group_id)
+            if not source_group:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Source group {group_id} not found"
+                )
+            
+            # Generate new name if not provided
+            if not new_name:
+                new_name = self._generate_copy_name(source_group)
+            
+            # Ensure name is unique
+            cell_id = source_group['cell_id']
+            unique_name = self.db.generate_unique_group_name(cell_id, new_name)
+            
+            # Copy group as user group (never copy as template)
+            new_group_id = self.db.copy_group(group_id, unique_name, copy_as_template=False)
+            
+            # Get source group type for message
+            source_type = "template" if source_group.get('is_template') else "user"
+            
+            return ProcessingResult(
+                success=True,
+                file_id=str(new_group_id),
+                message=f"Copied {source_type} group '{source_group['group_name']}' to user group '{unique_name}'"
+            )
+            
+        except Exception as e:
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=error_info['message']
+            )
+
+    def _generate_copy_name(self, source_group: Dict[str, Any]) -> str:
+        """
+        Generate appropriate copy name based on source group type.
+        
+        Args:
+            source_group: Source group info dictionary
+            
+        Returns:
+            Suggested name for the copied group
+        """
+        source_name = source_group['group_name']
+        is_template = source_group.get('is_template', False)
+        
+        if is_template:
+            # For template groups: "Template_All_Rest" -> "User_Rest"
+            if source_name.startswith("Template_All_"):
+                technique = source_name.replace("Template_All_", "")
+                return f"User_{technique}"
+            else:
+                # Fallback for non-standard template names
+                return f"User_{source_name}"
+        else:
+            # For user groups: "My_Group" -> "Copy_My_Group"
+            return f"Copy_{source_name}"
+
+    def refresh_all_template_groups(self) -> ProcessingResult:
+        """Convenience method to refresh template groups for all cells."""
+        return self.refresh_template_groups(cell_name=None)
 
 # =============================================================================
 # GLOBAL INSTANCE

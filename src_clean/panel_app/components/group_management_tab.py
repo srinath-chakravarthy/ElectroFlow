@@ -174,14 +174,17 @@ class GroupManagementTab(param.Parameterized):
 
         # === MIDDLE COLUMN TOP: GROUP MANAGEMENT ===
 
-        # Group selector dropdown
+        # Single group selector with visual distinction between template and user groups
         self.group_selector = pn.widgets.Select(
-            name="Select Group",
+            name="Available Groups",
             options=[("No groups available", "")],
             width=220,
             margin=(5, 5)
         )
         self.group_selector.param.watch(self._on_group_selected, 'value')
+        
+        # Keep track of selected group type for button enabling/disabling
+        self.selected_group_is_template = False
 
         # New group creation
         self.new_group_name = pn.widgets.TextInput(
@@ -204,6 +207,15 @@ class GroupManagementTab(param.Parameterized):
         )
         self.create_group_btn.on_click(self._on_create_group)
 
+        self.copy_group_btn = pn.widgets.Button(
+            name="📋 Copy Group",
+            button_type="primary",
+            width=105,
+            disabled=True,
+            margin=(5, 5)
+        )
+        self.copy_group_btn.on_click(self._on_copy_group)
+
         self.delete_group_btn = pn.widgets.Button(
             name="🗑️ Delete",
             button_type="light",
@@ -212,6 +224,15 @@ class GroupManagementTab(param.Parameterized):
             margin=(5, 5)
         )
         self.delete_group_btn.on_click(self._on_delete_group)
+
+        # Refresh button for template groups
+        self.refresh_groups_btn = pn.widgets.Button(
+            name="🔄 Refresh Groups",
+            button_type="light",
+            width=220,
+            margin=(5, 5)
+        )
+        self.refresh_groups_btn.on_click(self._on_refresh_groups)
 
         # Group action buttons
         self.add_to_group_btn = pn.widgets.Button(
@@ -368,29 +389,40 @@ class GroupManagementTab(param.Parameterized):
             width_policy='max'
         )
 
-        # Middle column - Group Management
+        # Middle column - Group Management  
         middle_column = pn.Column(
-            # Top section - Group Operations
+            # Top section - Group Selection
             pn.pane.HTML("""
             <div style='color: #2E4057; font-size: 16px; font-weight: 600; 
                         margin: 10px 5px; padding-bottom: 5px; 
                         border-bottom: 2px solid #E0E0E0;'>
-                🏷️ Group Operations
+                🏷️ Group Selection
             </div>
             """),
 
+            # Single group selector with visual distinction
             pn.Column(
                 pn.pane.HTML("<label style='font-weight: 500; color: #555; font-size: 13px;'>Select Group:</label>"),
                 self.group_selector,
+                pn.pane.HTML("""
+                <div style='font-size: 11px; color: #666; margin-top: 2px;'>
+                    🔧 Template groups | 📁 User groups
+                </div>
+                """),
                 margin=(5, 5)
             ),
 
+            # Group action buttons
             pn.Row(
+                self.copy_group_btn,
                 self.delete_group_btn,
-                pn.Spacer(),
                 margin=(5, 5)
             ),
 
+            # Refresh button
+            self.refresh_groups_btn,
+
+            # Create new group section
             pn.pane.HTML("""
             <div style='color: #666; font-size: 13px; font-weight: 500; 
                         margin: 15px 5px 5px 5px; padding-top: 10px; 
@@ -540,53 +572,146 @@ class GroupManagementTab(param.Parameterized):
 
         self.segments_tabulator.value = formatted_df
     def _refresh_groups(self):
-        """Refresh groups dropdown for current cell."""
+        """Refresh groups dropdown with combined template and user groups."""
         if not self.current_cell:
             return
 
         try:
-            groups = self.api.get_cell_groups_with_counts(self.current_cell)
-
-            if groups and len(groups) > 0:
-                options = []
-                for group in groups:
+            # Get both template and user groups
+            template_groups = self.api.get_template_groups(self.current_cell)
+            user_groups = self.api.get_user_groups(self.current_cell)
+            
+            print(f"DEBUG UI: Retrieved {len(template_groups)} template + {len(user_groups)} user groups")
+            
+            # Build combined options list with visual distinction
+            all_options = []
+            
+            # Add template groups first with 🔧 icon
+            if template_groups:
+                for group in template_groups:
                     count = group.get('segment_count', 0)
-                    display_name = f"{group['group_name']} ({count} segments)"
-                    options.append((display_name, str(group['group_id'])))
-
-                self.group_selector.options = options
-                self._update_status(f"Found {len(groups)} groups", "success")
+                    # Format: "🔧 Rest (62 segments)"
+                    technique = self._extract_technique_from_template_name(group['group_name'])
+                    display_name = f"🔧 {technique} ({count} segments)"
+                    # Store group info in value: "template:group_id"
+                    all_options.append((display_name, f"template:{group['group_id']}"))
+                    print(f"DEBUG UI: Template group - {group['group_name']} → {display_name}")
+            
+            # Add separator if we have both types
+            if template_groups and user_groups:
+                all_options.append(("─" * 30, "separator"))
+            
+            # Add user groups with 📁 icon
+            if user_groups:
+                for group in user_groups:
+                    count = group.get('segment_count', 0)
+                    # Format: "📁 My Custom Group (15 segments)"
+                    display_name = f"📁 {group['group_name']} ({count} segments)"
+                    # Store group info in value: "user:group_id"
+                    all_options.append((display_name, f"user:{group['group_id']}"))
+                    print(f"DEBUG UI: User group - {group['group_name']} → {display_name}")
+            
+            # Set options or show empty message
+            if all_options:
+                self.group_selector.options = all_options
+                self._update_status(f"Found {len(template_groups)} template + {len(user_groups)} user groups", "success")
             else:
                 self.group_selector.options = [("No groups available", "")]
                 self._update_status("No groups found - create your first group", "info")
+            
+            print(f"DEBUG UI: Set {len(all_options)} total options in group selector")
+            
+            # Apply initial selection (without causing recursion)
+            self._apply_initial_group_selection()
 
         except Exception as e:
+            print(f"DEBUG UI: Exception in _refresh_groups: {e}")
+            import traceback
+            traceback.print_exc()
             self.group_selector.options = [("Error loading groups", "")]
             self._update_status(f"Error loading groups: {str(e)}", "error")
 
+    def _extract_technique_from_template_name(self, group_name: str) -> str:
+        """
+        Extract technique name from template group name.
+        "Template_All_Rest" -> "Rest"
+        """
+        if group_name.startswith("Template_All_"):
+            return group_name.replace("Template_All_", "")
+        else:
+            # Fallback for non-standard template names
+            return group_name.replace("Template_", "")
+
+    def _format_template_group_name(self, group_name: str, segment_count: int) -> str:
+        """
+        Convert template group name for display.
+        "Template_All_Rest" -> "Rest (5 segments)"
+        """
+        if group_name.startswith("Template_All_"):
+            technique = group_name.replace("Template_All_", "")
+            return f"{technique} ({segment_count} segments)"
+        else:
+            # Fallback for non-standard template names
+            return f"{group_name} ({segment_count} segments)"
+
+    def _apply_initial_group_selection(self):
+        """Apply initial selection logic: first user group OR first template group."""
+        # Clear current selection first
+        self._clear_group_selection()
+        
+        # Skip initial selection to avoid recursion - user can manually select
+        print("DEBUG UI: Skipping initial selection to avoid recursion issues")
+        return
+
     def _on_group_selected(self, event):
-        """Handle group selection."""
-        group_id = event.new
+        """Handle group selection from the unified dropdown."""
+        selection = event.new
 
         # Handle tuple from Select widget
-        if isinstance(group_id, tuple):
-            group_id = group_id[1] if len(group_id) > 1 else group_id[0]
+        if isinstance(selection, tuple):
+            selection = selection[1] if len(selection) > 1 else selection[0]
 
-        if group_id and group_id != "":
-            self.selected_group_id = group_id
-            self._refresh_group_contents()
-            self.delete_group_btn.disabled = False
-            self.add_to_group_btn.disabled = False
-            # Update preview to show entire group
-            self._update_preview()
+        print(f"DEBUG UI: Group selected: {selection}")
+        
+        if selection and selection != "" and selection != "separator":
+            # Parse selection: "template:group_id" or "user:group_id"
+            if ":" in selection:
+                group_type, group_id = selection.split(":", 1)
+                is_template = (group_type == "template")
+                
+                print(f"DEBUG UI: Parsed selection - Type: {group_type}, ID: {group_id}")
+                
+                # Store selection info
+                self.selected_group_id = group_id
+                self.selected_group_is_template = is_template
+                
+                # Refresh group contents and preview
+                self._refresh_group_contents()
+                self._update_preview()
+                
+                # Enable/disable buttons based on group type
+                self.copy_group_btn.disabled = False  # Can copy both types
+                self.delete_group_btn.disabled = is_template  # Can't delete template groups
+                self.add_to_group_btn.disabled = is_template  # Can't add to template groups
+                
+                print(f"DEBUG UI: Buttons - Copy: {not self.copy_group_btn.disabled}, Delete: {not self.delete_group_btn.disabled}, Add: {not self.add_to_group_btn.disabled}")
+            else:
+                print(f"DEBUG UI: Invalid selection format: {selection}")
+                self._clear_group_selection()
         else:
             self._clear_group_selection()
+
+    def _handle_group_selection(self, group_id: str, is_template: bool):
+        """Legacy method - now handled by _on_group_selected."""
+        # This method is no longer used but kept for compatibility
+        pass
 
     def _clear_group_selection(self):
         """Clear group selection and contents."""
         self.selected_group_id = ""
         self.group_contents_tabulator.value = self._create_empty_segments_dataframe()
         self.delete_group_btn.disabled = True
+        self.copy_group_btn.disabled = True
         self.add_to_group_btn.disabled = True
         self.remove_from_group_btn.disabled = True
 
@@ -1064,8 +1189,86 @@ class GroupManagementTab(param.Parameterized):
         except Exception as e:
             self._update_status(f"Error removing segments: {str(e)}", "error")
 
+    def _on_copy_group(self, event):
+        """Copy current group to a new user group."""
+        if not self.selected_group_id:
+            return
+
+        try:
+            result = self.api.copy_group(int(self.selected_group_id))
+
+            if result.success:
+                self._update_status(result.message, "success")
+                self._refresh_groups()
+                # Select the new group
+                if hasattr(result, 'file_id') and result.file_id:
+                    # Find and select the new group in unified dropdown (user groups have "user:" prefix)
+                    new_group_value = f"user:{result.file_id}"
+                    for option in self.group_selector.options:
+                        if option[1] == new_group_value:
+                            self.group_selector.value = option
+                            break
+            else:
+                self._update_status(f"Error copying group: {result.error}", "error")
+
+        except Exception as e:
+            self._update_status(f"Error copying group: {str(e)}", "error")
+
+    def _on_refresh_groups(self, event):
+        """Refresh all template groups for all cells."""
+        try:
+            print("=== REFRESH GROUPS BUTTON CLICKED ===")
+            self._update_status("Refreshing template groups...", "info")
+            
+            # Get all cells first to see what we're working with
+            cells = self.api.get_cells()
+            print(f"DEBUG: Found {len(cells)} cells in database:")
+            for cell in cells:
+                print(f"  - {cell['name']} (ID: {cell['id']})")
+            
+            # Call the refresh API
+            print("DEBUG: Calling api.refresh_all_template_groups()...")
+            result = self.api.refresh_all_template_groups()
+            
+            print(f"DEBUG: Refresh result - Success: {result.success}")
+            if result.success:
+                print(f"DEBUG: Refresh message: {result.message}")
+                print(f"DEBUG: Groups created/updated: {result.file_id}")  # Contains count
+                
+                self._update_status(result.message, "success")
+                
+                # Check groups for current cell after refresh
+                if self.current_cell:
+                    print(f"DEBUG: Checking groups for current cell '{self.current_cell}'...")
+                    groups_before = len(self.group_selector.options)
+                    
+                    self._refresh_groups()
+                    
+                    groups_after = len(self.group_selector.options)
+                    print(f"DEBUG: Groups before: {groups_before}, after: {groups_after}")
+                    
+                    # Show what groups exist now
+                    template_groups = self.api.get_template_groups(self.current_cell)
+                    user_groups = self.api.get_user_groups(self.current_cell)
+                    print(f"DEBUG: Current groups for '{self.current_cell}':")
+                    print(f"  Template groups: {len(template_groups)}")
+                    for group in template_groups:
+                        print(f"    - {group['group_name']} ({group['segment_count']} segments)")
+                    print(f"  User groups: {len(user_groups)}")
+                    for group in user_groups:
+                        print(f"    - {group['group_name']} ({group['segment_count']} segments)")
+            else:
+                print(f"DEBUG: Refresh failed: {result.error}")
+                self._update_status(f"Error refreshing template groups: {result.error}", "error")
+
+        except Exception as e:
+            print(f"DEBUG: Exception in refresh: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self._update_status(f"Error refreshing template groups: {str(e)}", "error")
+
     def _on_delete_group(self, event):
-        """Delete current group."""
+        """Delete current group (user groups only)."""
         if not self.selected_group_id:
             return
 

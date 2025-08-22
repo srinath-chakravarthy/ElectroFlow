@@ -712,19 +712,21 @@ class DatabaseManager:
     # GROUP MANAGEMENT OPERATIONS
     # =============================================================================
     
-    def create_group(self, cell_id: int, group_name: str, description: str = "") -> int:
-        """Create a new user group."""
+    def create_group(self, cell_id: int, group_name: str, description: str = "", 
+                     is_template: bool = False, template_type: str = None) -> int:
+        """Create a new user group or template group."""
         with self.get_connection() as conn:
             conn.execute("BEGIN")
             try:
                 cursor = conn.execute("""
-                    INSERT INTO user_groups (cell_id, group_name, description)
-                    VALUES (?, ?, ?)
-                """, (cell_id, group_name, description))
+                    INSERT INTO user_groups (cell_id, group_name, description, is_template, template_type)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (cell_id, group_name, description, is_template, template_type))
                 
                 group_id = cursor.lastrowid
                 conn.commit()
-                logger.info(f"Created group: {group_name} (ID: {group_id})")
+                group_type = "template" if is_template else "user"
+                logger.info(f"Created {group_type} group: {group_name} (ID: {group_id})")
                 return group_id
                 
             except sqlite3.IntegrityError as e:
@@ -914,6 +916,236 @@ class DatabaseManager:
             """, (group_id, segment_id))
             
             return cursor.fetchone() is not None
+
+    # =============================================================================
+    # TEMPLATE GROUP OPERATIONS
+    # =============================================================================
+
+    def get_template_groups(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get all template groups for a cell with segment counts."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT ug.group_id, ug.group_name, ug.description, ug.template_type,
+                       ug.created_at, ug.updated_at,
+                       COUNT(ugs.segment_id) as segment_count
+                FROM user_groups ug
+                LEFT JOIN user_group_segments ugs ON ug.group_id = ugs.group_id
+                WHERE ug.cell_id = ? AND ug.is_template = 1
+                GROUP BY ug.group_id
+                ORDER BY ug.template_type, ug.created_at DESC
+            """, (cell_id,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_user_groups(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get all user groups (non-template) for a cell with segment counts."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT ug.group_id, ug.group_name, ug.description, ug.is_template, 
+                       ug.template_type, ug.created_at, ug.updated_at,
+                       COUNT(ugs.segment_id) as segment_count
+                FROM user_groups ug
+                LEFT JOIN user_group_segments ugs ON ug.group_id = ugs.group_id
+                WHERE ug.cell_id = ? AND (ug.is_template = 0 OR ug.is_template IS NULL)
+                GROUP BY ug.group_id
+                ORDER BY ug.created_at DESC
+            """, (cell_id,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+
+    def refresh_template_groups(self, cell_id: int) -> int:
+        """
+        Refresh template groups for a cell by creating template groups for all fundamental 
+        techniques that have segments in the cell.
+        
+        Returns the number of template groups created/updated.
+        """
+        with self.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                print(f"DEBUG DB: Starting refresh_template_groups for cell_id {cell_id}")
+                
+                # Get all unique fundamental techniques for this cell's segments
+                # Use case-insensitive comparison since segments have lowercase fundamental_technique
+                # but fundamental_techniques table has proper case technique_name
+                cursor = conn.execute("""
+                    SELECT DISTINCT s.fundamental_technique, ft.technique_name
+                    FROM segments s
+                    JOIN files f ON s.file_id = f.file_id
+                    JOIN fundamental_techniques ft ON LOWER(s.fundamental_technique) = LOWER(ft.technique_name)
+                    WHERE f.cell_id = ?
+                    ORDER BY s.fundamental_technique
+                """, (cell_id,))
+                
+                techniques = cursor.fetchall()
+                print(f"DEBUG DB: Query returned {len(techniques)} technique mappings:")
+                for technique_row in techniques:
+                    print(f"  - {technique_row[0]} → {technique_row[1]}")
+                
+                print(f"DEBUG DB: Processing {len(techniques)} matched techniques")
+                created_count = 0
+                
+                for technique_row in techniques:
+                    fundamental_technique = technique_row[0]
+                    technique_name = technique_row[1]
+                    
+                    template_name = f"Template_All_{fundamental_technique}"
+                    description = f"Auto-generated template group for all {technique_name} segments"
+                    
+                    # Check if template group already exists
+                    check_cursor = conn.execute("""
+                        SELECT group_id FROM user_groups 
+                        WHERE cell_id = ? AND group_name = ? AND is_template = 1
+                    """, (cell_id, template_name))
+                    
+                    existing_group = check_cursor.fetchone()
+                    
+                    if not existing_group:
+                        # Create new template group
+                        insert_cursor = conn.execute("""
+                            INSERT INTO user_groups (cell_id, group_name, description, is_template, template_type)
+                            VALUES (?, ?, ?, 1, ?)
+                        """, (cell_id, template_name, description, fundamental_technique))
+                        
+                        template_group_id = insert_cursor.lastrowid
+                        created_count += 1
+                        
+                        logger.info(f"Created template group: {template_name} (ID: {template_group_id})")
+                    else:
+                        template_group_id = existing_group[0]
+                        logger.debug(f"Template group already exists: {template_name} (ID: {template_group_id})")
+                    
+                    # Get all segments for this technique and add them to the template group
+                    segments_cursor = conn.execute("""
+                        SELECT s.id
+                        FROM segments s
+                        JOIN files f ON s.file_id = f.file_id
+                        WHERE f.cell_id = ? AND s.fundamental_technique = ?
+                    """, (cell_id, fundamental_technique))
+                    
+                    segment_ids = [row[0] for row in segments_cursor.fetchall()]
+                    
+                    if segment_ids:
+                        # Clear existing associations and add all segments
+                        conn.execute("""
+                            DELETE FROM user_group_segments WHERE group_id = ?
+                        """, (template_group_id,))
+                        
+                        for segment_id in segment_ids:
+                            conn.execute("""
+                                INSERT OR IGNORE INTO user_group_segments (group_id, segment_id)
+                                VALUES (?, ?)
+                            """, (template_group_id, segment_id))
+                        
+                        logger.debug(f"Added {len(segment_ids)} segments to template group {template_name}")
+                
+                conn.commit()
+                logger.info(f"Template group refresh completed for cell {cell_id}: {created_count} groups created")
+                return created_count
+                
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Failed to refresh template groups for cell {cell_id}: {e}")
+                raise TransactionError("refresh_template_groups", str(e))
+
+    def copy_group(self, source_group_id: int, new_group_name: str, 
+                   copy_as_template: bool = False) -> int:
+        """
+        Copy a group (template or user) to a new group with all its segment associations.
+        
+        Returns the new group ID.
+        """
+        with self.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                # Get source group info
+                cursor = conn.execute("""
+                    SELECT cell_id, group_name, description, is_template, template_type
+                    FROM user_groups WHERE group_id = ?
+                """, (source_group_id,))
+                
+                source_group = cursor.fetchone()
+                if not source_group:
+                    raise RecordNotFoundError(f"Source group {source_group_id} not found")
+                
+                cell_id, old_name, old_description, is_template, template_type = source_group
+                
+                # Create description for the copied group
+                source_type = "template" if is_template else "user"
+                new_description = f"Copied from {source_type} group '{old_name}'"
+                if old_description:
+                    new_description += f" - {old_description}"
+                
+                # Create new group
+                new_template_type = template_type if copy_as_template else None
+                insert_cursor = conn.execute("""
+                    INSERT INTO user_groups (cell_id, group_name, description, is_template, template_type)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (cell_id, new_group_name, new_description, copy_as_template, new_template_type))
+                
+                new_group_id = insert_cursor.lastrowid
+                
+                # Copy all segment associations
+                conn.execute("""
+                    INSERT INTO user_group_segments (group_id, segment_id)
+                    SELECT ?, segment_id
+                    FROM user_group_segments
+                    WHERE group_id = ?
+                """, (new_group_id, source_group_id))
+                
+                # Get count of copied segments
+                count_cursor = conn.execute("""
+                    SELECT COUNT(*) FROM user_group_segments WHERE group_id = ?
+                """, (new_group_id,))
+                segment_count = count_cursor.fetchone()[0]
+                
+                conn.commit()
+                
+                new_type = "template" if copy_as_template else "user"
+                logger.info(f"Copied group '{old_name}' to new {new_type} group '{new_group_name}' "
+                           f"(ID: {new_group_id}) with {segment_count} segments")
+                
+                return new_group_id
+                
+            except Exception as e:
+                conn.rollback()
+                raise TransactionError("copy_group", str(e))
+
+    def generate_unique_group_name(self, cell_id: int, base_name: str) -> str:
+        """
+        Generate a unique group name by appending numbers if conflicts exist.
+        
+        Args:
+            cell_id: Cell ID to check for conflicts
+            base_name: Base name to make unique
+            
+        Returns:
+            Unique group name (base_name, base_name_1, base_name_2, etc.)
+        """
+        with self.get_connection() as conn:
+            # Check if base name exists
+            cursor = conn.execute("""
+                SELECT 1 FROM user_groups WHERE cell_id = ? AND group_name = ?
+            """, (cell_id, base_name))
+            
+            if not cursor.fetchone():
+                return base_name
+            
+            # Find the next available number
+            counter = 1
+            while True:
+                candidate_name = f"{base_name}_{counter}"
+                cursor = conn.execute("""
+                    SELECT 1 FROM user_groups WHERE cell_id = ? AND group_name = ?
+                """, (cell_id, candidate_name))
+                
+                if not cursor.fetchone():
+                    return candidate_name
+                
+                counter += 1
+                # Safety limit to prevent infinite loops
+                if counter > 1000:
+                    raise DatabaseError(f"Could not generate unique name for '{base_name}' after 1000 attempts")
 
     # =============================================================================
     # ANALYTICS OPERATIONS

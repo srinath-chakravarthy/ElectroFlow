@@ -388,7 +388,7 @@ class ElectrochemicalApp(param.Parameterized):
         </div>
         """)
 
-        # Create tabs
+        # Create tabs with tab switching refresh logic
         tabs = pn.Tabs(
             ("🔋 Cell & File Management", tab1_content),
             ("🔗 Group Management", tab2_content),
@@ -396,6 +396,9 @@ class ElectrochemicalApp(param.Parameterized):
             dynamic=True,
             sizing_mode='stretch_width'
         )
+        
+        # Add tab switching refresh logic for Group Management tab
+        tabs.param.watch(self._on_tab_changed, 'active')
 
         # Complete professional layout
         self.layout = pn.Column(
@@ -476,6 +479,30 @@ class ElectrochemicalApp(param.Parameterized):
     #         min_height=800,
     #         styles={'background': '#F8F9FA'}
     #     )
+
+    def _on_tab_changed(self, event):
+        """Handle tab switching to refresh data when needed."""
+        tab_index = event.new
+        
+        # Tab 1 (index 1) is Group Management
+        if tab_index == 1:
+            try:
+                # Refresh group management data when switching to the tab
+                print("Switching to Group Management tab - refreshing data...")
+                if hasattr(self.group_management_tab, 'current_cell') and self.group_management_tab.current_cell:
+                    # Only refresh if we have a current cell
+                    self.group_management_tab._refresh_groups()
+                    print(f"Refreshed groups for cell: {self.group_management_tab.current_cell}")
+                else:
+                    # Populate initial data if no cell is selected
+                    self.group_management_tab._populate_initial_data()
+                    print("Populated initial group management data")
+                    
+            except Exception as e:
+                print(f"Error refreshing group management tab: {e}")
+                # Set error status on the group management tab
+                if hasattr(self.group_management_tab, '_update_status'):
+                    self.group_management_tab._update_status(f"Error refreshing tab: {str(e)}", "error")
 
     def __panel__(self):
         """Return the professional Panel layout."""
