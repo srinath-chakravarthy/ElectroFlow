@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 import logging
 import polars as pl
+import numpy as np
+
+# Scipy integration - handle deprecation
+try:
+    from scipy.integrate import trapezoid as integrate_trapz
+except ImportError:
+    from scipy.integrate import trapz as integrate_trapz
 
 from .base import DualFileParser
 from ..core.data_models import (
@@ -326,7 +333,7 @@ class VersaStudioParser(DualFileParser):
         return mapped_df.select(available_columns)
     
     def _add_computed_columns(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Add computed columns specific to VersaStudio."""
+        """Add computed columns including physics-based capacity and energy integration."""
         try:
             computed_exprs = []
             
@@ -347,14 +354,139 @@ class VersaStudioParser(DualFileParser):
                     (pl.arctan2(pl.col('impedance_imag_ohm'), pl.col('impedance_real_ohm')) * 180 / 3.14159265359).alias('impedance_phase_deg')
                 )
             
+            # Apply basic computations first
             if computed_exprs:
                 df = df.with_columns(computed_exprs)
+            
+            # Physics-based integration (requires segment grouping)
+            if all(col in df.columns for col in ['time_s', 'current_a', 'segment_number']):
+                df = self._add_integration_columns(df)
             
             return df
             
         except Exception as e:
             logger.warning(f"Failed to add computed columns: {e}")
             return df
+
+    def _add_integration_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Add segment-based integration using scipy trapezoid."""
+        
+        def integrate_segment_capacity(segment_df):
+            """Integrate capacity for one segment using scipy trapezoidal rule."""
+            # Ensure monotonic time before integration
+            segment_df_sorted = segment_df.sort('time_s')
+            segment_data = segment_df_sorted.to_pandas()  # Convert to pandas for numpy operations
+            time_vals = segment_data['time_s'].values
+            current_vals = segment_data['current_a'].values
+            
+            if len(time_vals) < 2:
+                segment_data['capacity_ah'] = 0.0
+                return pl.from_pandas(segment_data)
+            
+            # Scipy trapezoidal integration - cumulative within segment
+            cumulative_capacity = np.zeros_like(time_vals)
+            
+            # For cumulative integration, use cumulative trapz
+            for i in range(1, len(time_vals)):
+                cumulative_capacity[i] = integrate_trapz(
+                    current_vals[:i+1], time_vals[:i+1]
+                ) / 3600.0
+            
+            segment_data['capacity_ah'] = cumulative_capacity
+            return pl.from_pandas(segment_data)
+        
+        def integrate_segment_energy(segment_df):
+            """Integrate energy for one segment using scipy trapezoidal rule."""
+            if 'power_w' not in segment_df.columns:
+                return segment_df.with_columns([pl.lit(0.0).alias('energy_wh')])
+            
+            # Ensure monotonic time before integration
+            segment_df_sorted = segment_df.sort('time_s')
+            segment_data = segment_df_sorted.to_pandas()
+            time_vals = segment_data['time_s'].values
+            power_vals = segment_data['power_w'].values
+            
+            if len(time_vals) < 2:
+                segment_data['energy_wh'] = 0.0
+                return pl.from_pandas(segment_data)
+            
+            # Scipy trapezoidal integration - cumulative within segment
+            cumulative_energy = np.zeros_like(time_vals)
+            for i in range(1, len(time_vals)):
+                cumulative_energy[i] = integrate_trapz(
+                    power_vals[:i+1], time_vals[:i+1]
+                ) / 3600.0  # Convert Ws to Wh
+            
+            segment_data['energy_wh'] = cumulative_energy
+            return pl.from_pandas(segment_data)
+        
+        # Apply segment-based integration
+        df = df.group_by('segment_number', maintain_order=True).map_groups(integrate_segment_capacity)
+        
+        if 'power_w' in df.columns:
+            df = df.group_by('segment_number', maintain_order=True).map_groups(integrate_segment_energy)
+        else:
+            df = df.with_columns([pl.lit(0.0).alias('energy_wh')])
+        
+        # Add file-level cumulative tracking
+        df = self._add_cumulative_tracking(df)
+        
+        return df
+
+    def _add_cumulative_tracking(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Add file-level cumulative capacity and energy tracking."""
+        
+        # Get final values from each segment for cumulative tracking
+        segment_totals = df.group_by('segment_number').agg([
+            pl.col('capacity_ah').sort_by('time_s').last().alias('segment_capacity_final'),
+            pl.col('energy_wh').sort_by('time_s').last().alias('segment_energy_final')
+        ]).sort('segment_number')
+        
+        # Calculate cumulative values across segments
+        segment_totals = segment_totals.with_columns([
+            # Net cumulative
+            pl.col('segment_capacity_final').cumsum().alias('capacity_cumulative_segment'),
+            pl.col('segment_energy_final').cumsum().alias('energy_cumulative_segment'),
+            
+            # Charge cumulative (positive only)
+            pl.col('segment_capacity_final').clip(lower_bound=0).cumsum().alias('charge_cumulative_segment'),
+            pl.col('segment_energy_final').clip(lower_bound=0).cumsum().alias('energy_charge_cumulative_segment'),
+            
+            # Discharge cumulative (negative only)
+            pl.col('segment_capacity_final').clip(upper_bound=0).cumsum().alias('discharge_cumulative_segment'),
+            pl.col('segment_energy_final').clip(upper_bound=0).cumsum().alias('energy_discharge_cumulative_segment'),
+            
+            # Absolute cumulative
+            pl.col('segment_capacity_final').abs().cumsum().alias('capacity_absolute_cumulative_segment'),
+            pl.col('segment_energy_final').abs().cumsum().alias('energy_absolute_cumulative_segment')
+        ])
+        
+        # Join back to main dataframe
+        df = df.join(segment_totals, on='segment_number', how='left')
+        
+        # Convert to point-level cumulative (interpolate within segments)
+        df = df.with_columns([
+            # File-level cumulative = previous segments + current segment progress
+            (pl.col('capacity_cumulative_segment') - pl.col('segment_capacity_final') + pl.col('capacity_ah')).alias('capacity_cumulative_ah'),
+            (pl.col('energy_cumulative_segment') - pl.col('segment_energy_final') + pl.col('energy_wh')).alias('energy_cumulative_wh'),
+            
+            # Charge/discharge tracking
+            (pl.col('charge_cumulative_segment') + pl.col('capacity_ah').clip(lower_bound=0)).alias('charge_cumulative_ah'),
+            (pl.col('discharge_cumulative_segment') + pl.col('capacity_ah').clip(upper_bound=0)).alias('discharge_cumulative_ah'),
+            
+            # Energy equivalents
+            (pl.col('energy_charge_cumulative_segment') + pl.col('energy_wh').clip(lower_bound=0)).alias('energy_charge_cumulative_wh'),
+            (pl.col('energy_discharge_cumulative_segment') + pl.col('energy_wh').clip(upper_bound=0)).alias('energy_discharge_cumulative_wh'),
+            
+            # Absolute tracking
+            (pl.col('capacity_absolute_cumulative_segment') + pl.col('capacity_ah').abs()).alias('capacity_absolute_cumulative_ah'),
+            (pl.col('energy_absolute_cumulative_segment') + pl.col('energy_wh').abs()).alias('energy_absolute_cumulative_wh')
+        ])
+        
+        # Clean up temporary columns
+        df = df.drop([col for col in df.columns if col.endswith('_segment')])
+        
+        return df
     
     def _add_timestamps(self, df: pl.DataFrame, metadata: FileMetadata) -> pl.DataFrame:
         """Add absolute timestamps to data."""

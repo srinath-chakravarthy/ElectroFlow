@@ -1,13 +1,10 @@
 """
-Core Metrics Calculator - Universal Analytics
+Core Metrics Extractor - Simplified Database Storage
 
-Computes core metrics that apply to all electrochemical techniques:
-- Capacity (Ah) from current integration
-- Energy (Wh) from voltage-current integration  
-- Duration and start/end values
+Extracts final segment metrics from parser-computed data for database storage.
+All physics-based integration now happens at parser level.
 """
 
-import numpy as np
 import polars as pl
 from typing import Dict, Any, Optional
 import logging
@@ -17,9 +14,10 @@ logger = logging.getLogger(__name__)
 
 class CoreMetricsCalculator:
     """
-    Calculate universal core metrics for any electrochemical technique segment.
+    Extract segment boundary values and final metrics for database storage.
     
-    These metrics are technique-agnostic and computed for every segment.
+    Physics-based integration is now done at parser level.
+    This class only extracts final values and boundaries.
     """
     
     def __init__(self):
@@ -45,28 +43,43 @@ class CoreMetricsCalculator:
             if segment_data.height == 0:
                 return self._empty_metrics()
             
-            # Time values
-            time_values = segment_data.get_column('time_s').to_numpy()
-            start_time = float(time_values[0])
-            end_time = float(time_values[-1])
+            # Extract boundary values from first and last rows
+            first_row = segment_data.row(0, named=True)
+            last_row = segment_data.row(-1, named=True)
+            
+            # Time boundaries
+            start_time = float(first_row.get('time_s', 0))
+            end_time = float(last_row.get('time_s', 0))
             duration = end_time - start_time
             
-            # Voltage values  
-            voltage_values = segment_data.get_column('potential_v').to_numpy()
-            start_voltage = float(voltage_values[0]) if not np.isnan(voltage_values[0]) else None
-            end_voltage = float(voltage_values[-1]) if not np.isnan(voltage_values[-1]) else None
+            # Voltage boundaries
+            start_voltage = first_row.get('potential_v')
+            end_voltage = last_row.get('potential_v')
             
-            # Current values
-            current_values = segment_data.get_column('current_a').to_numpy()
-            start_current = float(current_values[0]) if not np.isnan(current_values[0]) else None
-            end_current = float(current_values[-1]) if not np.isnan(current_values[-1]) else None
+            # Current boundaries
+            start_current = first_row.get('current_a')
+            end_current = last_row.get('current_a')
             
-            # Core metric calculations
-            capacity_ah = self._calculate_capacity(time_values, current_values)
-            energy_wh = self._calculate_energy(time_values, voltage_values, current_values)
+            # Final integrated values (computed by parser)
+            final_capacity = float(last_row.get('capacity_ah', 0))
+            final_energy = float(last_row.get('energy_wh', 0))
+            
+            # Extract timestamp from first row
+            start_timestamp = first_row.get('timestamp')
+            start_timestamp_str = start_timestamp.isoformat() if start_timestamp else None
+            
+            # Extract final cumulative values (computed by parser)
+            final_capacity_cumulative = float(last_row.get('capacity_cumulative_ah', 0))
+            final_energy_cumulative = float(last_row.get('energy_cumulative_wh', 0))
+            final_charge_cumulative = float(last_row.get('charge_cumulative_ah', 0))
+            final_discharge_cumulative = float(last_row.get('discharge_cumulative_ah', 0))
+            final_energy_charge_cumulative = float(last_row.get('energy_charge_cumulative_wh', 0))
+            final_energy_discharge_cumulative = float(last_row.get('energy_discharge_cumulative_wh', 0))
+            final_capacity_absolute_cumulative = float(last_row.get('capacity_absolute_cumulative_ah', 0))
+            final_energy_absolute_cumulative = float(last_row.get('energy_absolute_cumulative_wh', 0))
             
             return {
-                # Segment boundaries
+                # Boundary values
                 'start_time_s': start_time,
                 'end_time_s': end_time,
                 'duration_s': duration,
@@ -75,88 +88,29 @@ class CoreMetricsCalculator:
                 'start_current_a': start_current,
                 'end_current_a': end_current,
                 
-                # Core metrics
-                'capacity_ah': capacity_ah,
-                'energy_wh': energy_wh,
-                'point_count': segment_data.height
+                # Final integrated values
+                'capacity_ah': final_capacity,
+                'energy_wh': final_energy,
+                'point_count': segment_data.height,
+                
+                # Timestamp
+                'start_timestamp': start_timestamp_str,
+                
+                # Final cumulative values
+                'capacity_cumulative_ah': final_capacity_cumulative,
+                'energy_cumulative_wh': final_energy_cumulative,
+                'charge_cumulative_ah': final_charge_cumulative,
+                'discharge_cumulative_ah': final_discharge_cumulative,
+                'energy_charge_cumulative_wh': final_energy_charge_cumulative,
+                'energy_discharge_cumulative_wh': final_energy_discharge_cumulative,
+                'capacity_absolute_cumulative_ah': final_capacity_absolute_cumulative,
+                'energy_absolute_cumulative_wh': final_energy_absolute_cumulative
             }
             
         except Exception as e:
-            self.logger.error(f"Error calculating core metrics: {e}")
+            self.logger.error(f"Error extracting core metrics: {e}")
             return self._empty_metrics()
     
-    def _calculate_capacity(self, time_values: np.ndarray, 
-                          current_values: np.ndarray) -> Optional[float]:
-        """
-        Calculate capacity using trapezoidal integration: ∫I dt (Ah).
-        
-        Args:
-            time_values: Time points in seconds
-            current_values: Current values in amperes
-            
-        Returns:
-            Capacity in amp-hours, or None if calculation fails
-        """
-        try:
-            # Remove NaN values
-            valid_mask = ~(np.isnan(time_values) | np.isnan(current_values))
-            if not np.any(valid_mask):
-                return None
-                
-            time_clean = time_values[valid_mask]
-            current_clean = current_values[valid_mask]
-            
-            if len(time_clean) < 2:
-                return None
-            
-            # Trapezoidal integration: ∫I dt
-            capacity_as = np.trapz(current_clean, time_clean)  # Amp-seconds
-            capacity_ah = capacity_as / 3600.0  # Convert to Ah
-            
-            return float(capacity_ah)
-            
-        except Exception as e:
-            self.logger.debug(f"Capacity calculation failed: {e}")
-            return None
-    
-    def _calculate_energy(self, time_values: np.ndarray, 
-                        voltage_values: np.ndarray,
-                        current_values: np.ndarray) -> Optional[float]:
-        """
-        Calculate energy using trapezoidal integration: ∫VI dt (Wh).
-        
-        Args:
-            time_values: Time points in seconds
-            voltage_values: Voltage values in volts
-            current_values: Current values in amperes
-            
-        Returns:
-            Energy in watt-hours, or None if calculation fails
-        """
-        try:
-            # Calculate instantaneous power
-            power_values = voltage_values * current_values
-            
-            # Remove NaN values
-            valid_mask = ~(np.isnan(time_values) | np.isnan(power_values))
-            if not np.any(valid_mask):
-                return None
-                
-            time_clean = time_values[valid_mask]
-            power_clean = power_values[valid_mask]
-            
-            if len(time_clean) < 2:
-                return None
-            
-            # Trapezoidal integration: ∫P dt
-            energy_ws = np.trapz(power_clean, time_clean)  # Watt-seconds
-            energy_wh = energy_ws / 3600.0  # Convert to Wh
-            
-            return float(energy_wh)
-            
-        except Exception as e:
-            self.logger.debug(f"Energy calculation failed: {e}")
-            return None
     
     def _empty_metrics(self) -> Dict[str, Any]:
         """Return empty metrics structure for failed calculations."""
@@ -170,5 +124,14 @@ class CoreMetricsCalculator:
             'end_current_a': None,
             'capacity_ah': None,
             'energy_wh': None,
-            'point_count': 0
+            'point_count': 0,
+            'start_timestamp': None,
+            'capacity_cumulative_ah': None,
+            'energy_cumulative_wh': None,
+            'charge_cumulative_ah': None,
+            'discharge_cumulative_ah': None,
+            'energy_charge_cumulative_wh': None,
+            'energy_discharge_cumulative_wh': None,
+            'capacity_absolute_cumulative_ah': None,
+            'energy_absolute_cumulative_wh': None
         }

@@ -114,6 +114,15 @@ class DatabaseManager:
                 end_current_a REAL,
                 capacity_ah REAL,
                 energy_wh REAL,
+                start_timestamp TEXT,
+                capacity_cumulative_ah REAL DEFAULT 0.0,
+                energy_cumulative_wh REAL DEFAULT 0.0,
+                charge_cumulative_ah REAL DEFAULT 0.0,
+                discharge_cumulative_ah REAL DEFAULT 0.0,
+                energy_charge_cumulative_wh REAL DEFAULT 0.0,
+                energy_discharge_cumulative_wh REAL DEFAULT 0.0,
+                capacity_absolute_cumulative_ah REAL DEFAULT 0.0,
+                energy_absolute_cumulative_wh REAL DEFAULT 0.0,
                 analysis_status TEXT DEFAULT 'pending',
                 analysis_results TEXT DEFAULT '{}',
                 segment_metadata TEXT DEFAULT '{}',
@@ -204,7 +213,11 @@ class DatabaseManager:
             required_columns = {
                 'duration_s', 'start_potential_v', 'end_potential_v',
                 'start_current_a', 'end_current_a', 'capacity_ah', 
-                'energy_wh', 'analysis_status', 'analysis_results'
+                'energy_wh', 'start_timestamp', 'capacity_cumulative_ah', 
+                'energy_cumulative_wh', 'charge_cumulative_ah', 'discharge_cumulative_ah',
+                'energy_charge_cumulative_wh', 'energy_discharge_cumulative_wh',
+                'capacity_absolute_cumulative_ah', 'energy_absolute_cumulative_wh',
+                'analysis_status', 'analysis_results'
             }
             
             missing_columns = required_columns - columns
@@ -221,6 +234,15 @@ class DatabaseManager:
                     'end_current_a': 'REAL',
                     'capacity_ah': 'REAL',
                     'energy_wh': 'REAL',
+                    'start_timestamp': 'TEXT',
+                    'capacity_cumulative_ah': 'REAL DEFAULT 0.0',
+                    'energy_cumulative_wh': 'REAL DEFAULT 0.0',
+                    'charge_cumulative_ah': 'REAL DEFAULT 0.0',
+                    'discharge_cumulative_ah': 'REAL DEFAULT 0.0',
+                    'energy_charge_cumulative_wh': 'REAL DEFAULT 0.0',
+                    'energy_discharge_cumulative_wh': 'REAL DEFAULT 0.0',
+                    'capacity_absolute_cumulative_ah': 'REAL DEFAULT 0.0',
+                    'energy_absolute_cumulative_wh': 'REAL DEFAULT 0.0',
                     'analysis_status': 'TEXT DEFAULT "pending"',
                     'analysis_results': 'TEXT DEFAULT "{}"'
                 }
@@ -502,8 +524,11 @@ class DatabaseManager:
                          fundamental_technique, start_row, end_row, start_time_s, 
                          end_time_s, point_count, duration_s, start_potential_v, 
                          end_potential_v, start_current_a, end_current_a, capacity_ah, 
-                         energy_wh, analysis_status, analysis_results, segment_metadata)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         energy_wh, start_timestamp, capacity_cumulative_ah, energy_cumulative_wh,
+                         charge_cumulative_ah, discharge_cumulative_ah, energy_charge_cumulative_wh,
+                         energy_discharge_cumulative_wh, capacity_absolute_cumulative_ah, 
+                         energy_absolute_cumulative_wh, analysis_status, analysis_results, segment_metadata)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         file_id, segment['segment_index'], segment.get('technique_id'),
                         segment['technique_name'], segment['fundamental_technique'],
@@ -512,8 +537,12 @@ class DatabaseManager:
                         segment.get('duration_s'), segment.get('start_potential_v'),
                         segment.get('end_potential_v'), segment.get('start_current_a'),
                         segment.get('end_current_a'), segment.get('capacity_ah'),
-                        segment.get('energy_wh'), segment.get('analysis_status', 'pending'),
-                        analysis_results_json, metadata_json
+                        segment.get('energy_wh'), segment.get('start_timestamp'),
+                        segment.get('capacity_cumulative_ah'), segment.get('energy_cumulative_wh'),
+                        segment.get('charge_cumulative_ah'), segment.get('discharge_cumulative_ah'),
+                        segment.get('energy_charge_cumulative_wh'), segment.get('energy_discharge_cumulative_wh'),
+                        segment.get('capacity_absolute_cumulative_ah'), segment.get('energy_absolute_cumulative_wh'),
+                        segment.get('analysis_status', 'pending'), analysis_results_json, metadata_json
                     ))
                 
                 conn.commit()

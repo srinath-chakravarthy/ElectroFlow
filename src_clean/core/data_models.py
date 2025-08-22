@@ -39,11 +39,21 @@ UNIVERSAL_SCHEMA = {
     'potential_avg_v': pl.Float64,     # Average potential (V)
     'current_avg_a': pl.Float64,       # Average current (A)
     
-    # Battery Analytics (4 columns)
-    'charge_capacity_ah': pl.Float64,  # Charge capacity (Ah)
-    'energy_wh': pl.Float64,           # Energy (Wh)
-    'power_w': pl.Float64,             # Power (W)
+    # Battery Analytics (4 columns) 
+    'capacity_ah': pl.Float64,         # Segment capacity integration (Ah)
+    'energy_wh': pl.Float64,           # Segment energy integration (Wh)
+    'power_w': pl.Float64,             # Instantaneous power (W)
     'temperature_c': pl.Float64,       # Temperature (°C)
+    
+    # Experimental Context - Cumulative Tracking (8 columns)
+    'capacity_cumulative_ah': pl.Float64,        # File-level cumulative capacity
+    'energy_cumulative_wh': pl.Float64,          # File-level cumulative energy
+    'charge_cumulative_ah': pl.Float64,          # Positive capacity cumulative
+    'discharge_cumulative_ah': pl.Float64,       # Negative capacity cumulative
+    'energy_charge_cumulative_wh': pl.Float64,   # Positive energy cumulative
+    'energy_discharge_cumulative_wh': pl.Float64, # Negative energy cumulative
+    'capacity_absolute_cumulative_ah': pl.Float64, # |capacity| cumulative activity
+    'energy_absolute_cumulative_wh': pl.Float64,  # |energy| cumulative activity
     
     # EIS (5 columns)
     'frequency_hz': pl.Float64,        # Frequency (Hz)
@@ -100,7 +110,6 @@ VERSASTUDIO_CSV_MAPPING = {
     'Potential (V)': 'potential_v',
     'Current (A)': 'current_a',
     'Elapsed Time (s)': 'time_s',
-    'Charge (C)': 'charge_capacity_ah',  # Will convert from C to Ah
     'Applied Potential (V)': 'potential_applied_v',
     'ActionId': 'technique_id',
     'Segment': 'segment_number',
@@ -119,12 +128,11 @@ VERSASTUDIO_CSV_MAPPING = {
     'ADC Sync Input(V)': 'aux_voltage_v'
 }
 
-# Computed columns for VersaStudio
+# Computed columns for VersaStudio (basic calculations only)
 VERSASTUDIO_COMPUTED_COLUMNS = {
     'power_w': lambda df: df['potential_v'] * df['current_a'],
-    # Convert charge from Coulombs to Ah (1 Ah = 3600 C)
-    'charge_capacity_ah': lambda df: df['charge_capacity_ah'] / 3600.0 if 'charge_capacity_ah' in df.columns else None
     # Note: impedance_mag_ohm and impedance_phase_deg now come directly from VersaStudio CSV
+    # Note: capacity_ah and energy_wh now computed at parser level with scipy integration
 }
 
 
