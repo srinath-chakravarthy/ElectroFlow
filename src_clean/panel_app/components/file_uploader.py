@@ -1,7 +1,7 @@
 """
-Professional File Uploader Component - Clean Workflow Design
+Professional File Uploader Component - Large File Support with FileDropper
 
-Clear step-by-step file processing with professional styling and visual feedback.
+Clear step-by-step file processing with support for large files (>100MB) using Panel's FileDropper widget.
 """
 
 import panel as pn
@@ -10,13 +10,15 @@ from pathlib import Path
 
 class FileUploader(param.Parameterized):
     """
-    Professional file upload component with clear workflow design.
+    Professional file upload component with large file support via FileDropper.
 
     Features:
-    - Clear step-by-step workflow
+    - Large file support (>100MB) using FileDropper
+    - Clear step-by-step workflow  
     - Professional visual feedback
     - Progress indicators
     - Clean file management
+    - Drag & drop interface
     """
 
     selected_file = param.String(default="", doc="Currently selected file ID")
@@ -26,10 +28,11 @@ class FileUploader(param.Parameterized):
         super().__init__(**params)
         self.api = api
         self.current_cell = None
+        self._cached_files = {}  # Cache file info to avoid redundant API calls
         self._create_components()
 
     def _create_components(self):
-        """Create professional UI components."""
+        """Create professional UI components with FileDropper."""
 
         # Current cell display
         self.cell_display = pn.pane.HTML(
@@ -40,19 +43,24 @@ class FileUploader(param.Parameterized):
             margin=(5, 5)
         )
 
-        # Upload section components
-        self.metadata_upload = pn.widgets.FileInput(
-            # accept=".par",
+        # File droppers for large file support
+        # FIXED: Larger, more prominent FileDroppers
+        self.metadata_dropper = pn.widgets.FileDropper(
+            # accepted_filetypes=['.par', '.PAR'],
             multiple=False,
-            width=280,
-            margin=(5, 5)
+            max_file_size='200MB',
+            height=120,  # Much larger
+            width=350,  # Wider
+            margin=(10, 5)
         )
 
-        self.data_upload = pn.widgets.FileInput(
-            # accept=".csv",
+        self.data_dropper = pn.widgets.FileDropper(
+            # accepted_filetypes=['.csv', '.par.csv', '.PAR.CSV', '.CSV'],
             multiple=False,
-            width=280,
-            margin=(5, 5)
+            max_file_size='200MB',
+            height=120,  # Much larger
+            width=350,  # Wider
+            margin=(10, 5)
         )
 
         self.temperature_input = pn.widgets.NumberInput(
@@ -101,33 +109,26 @@ class FileUploader(param.Parameterized):
             disabled=True,
             margin=(5, 5)
         )
+        self.analyze_btn.on_click(self._on_analyze_file)
 
-        self.delete_file_btn = pn.widgets.Button(
+        self.delete_btn = pn.widgets.Button(
             name="🗑️ Delete",
-            button_type="light",
-            width=90,
+            button_type="primary",
+            width=80,
             disabled=True,
             margin=(5, 5)
         )
-        self.delete_file_btn.on_click(self._on_delete_file)
+        self.delete_btn.on_click(self._on_delete_file)
 
-        self.refresh_files_btn = pn.widgets.Button(
-            name="🔄 Refresh",
-            button_type="light",
-            width=90,
-            margin=(5, 5)
-        )
-        self.refresh_files_btn.on_click(self._on_refresh_files)
-
-        # Simple file upload watchers
-        self.metadata_upload.param.watch(self._check_upload_ready, 'value')
-        self.data_upload.param.watch(self._check_upload_ready, 'value')
+        # File dropper watchers for upload readiness
+        self.metadata_dropper.param.watch(self._check_upload_ready, 'value')
+        self.data_dropper.param.watch(self._check_upload_ready, 'value')
 
     @property
     def panel(self):
-        """Return professional card layout."""
+        """Return professional card layout with proper FileDropper styling."""
 
-        # Header with icon
+        # Professional header (restore gradient)
         header = pn.pane.HTML("""
         <div style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white; 
                     padding: 15px; border-radius: 8px 8px 0 0; margin: 0;'>
@@ -148,63 +149,70 @@ class FileUploader(param.Parameterized):
             margin=(10, 10)
         )
 
-        # Upload workflow section
+        # Upload section with prominent drop zones
+        # SNIPPET: Replace the upload_section in your panel property with this:
+
         upload_section = pn.Column(
             pn.pane.HTML("""
             <div style='color: #2E4057; font-size: 16px; font-weight: 600; 
                         margin: 20px 5px 10px 5px; padding-bottom: 5px; 
                         border-bottom: 2px solid #E0E0E0;'>
-                1. Upload & Process Files
+                1. Upload & Process Files (Drag & Drop)
             </div>
             """),
 
-            # Step indicators
+            # Instructions
             pn.pane.HTML("""
             <div style='background: #F8F9FA; padding: 10px; border-radius: 4px; margin: 5px;'>
-                <div style='font-size: 12px; color: #666; margin-bottom: 8px;'>
-                    Upload paired VersaStudio files for processing:
-                </div>
-                <div style='font-size: 11px; color: #999;'>
-                    • .par file contains metadata and ActionID mappings<br>
-                    • .par.csv file contains the actual measurement data
-                </div>
+                Drag & drop large VersaStudio files (supports >100MB)
             </div>
             """),
 
-            # File inputs
-            pn.Column(
-                pn.pane.HTML("<label style='font-weight: 500; color: #555; font-size: 14px;'>Metadata File (.par):</label>"),
-                self.metadata_upload,
+            # Row 1: Metadata drop zone
+            pn.Row(
+                pn.pane.HTML(
+                    "<label style='font-weight: 500; color: #555; font-size: 14px;'>Metadata File (.par):</label>"),
+                margin=(10, 5)
+            ),
+            pn.Row(
+                self.metadata_dropper,
+                pn.pane.HTML("<small style='color: #666; margin-left: 10px;'>Supports up to 200MB</small>"),
                 margin=(5, 5)
             ),
 
-            pn.Column(
-                pn.pane.HTML("<label style='font-weight: 500; color: #555; font-size: 14px;'>Data File (.par.csv):</label>"),
-                self.data_upload,
+            # Row 2: Data drop zone
+            pn.Row(
+                pn.pane.HTML(
+                    "<label style='font-weight: 500; color: #555; font-size: 14px;'>Data File (.par.csv):</label>"),
+                margin=(10, 5)
+            ),
+            pn.Row(
+                self.data_dropper,
+                pn.pane.HTML("<small style='color: #666; margin-left: 10px;'>Supports up to 200MB</small>"),
                 margin=(5, 5)
             ),
 
-            # Temperature and process
+            # Row 3: Controls
             pn.Row(
                 pn.Column(
-                    pn.pane.HTML("<label style='font-weight: 500; color: #555; font-size: 14px;'>Temperature (°C):</label>"),
+                    pn.pane.HTML("<label style='font-weight: 500; color: #555;'>Temperature (°C):</label>"),
                     self.temperature_input,
-                    width=120
+                    width=150
                 ),
                 pn.Spacer(width=20),
                 pn.Column(
                     pn.Spacer(height=20),
                     self.upload_btn,
-                    width=170
+                    width=200
                 ),
-                margin=(10, 5)
+                margin=(15, 5)
             ),
 
             self.processing_status,
             margin=(10, 10)
         )
 
-        # File management section
+        # File management section (restore original styling)
         files_section = pn.Column(
             pn.pane.HTML("""
             <div style='color: #2E4057; font-size: 16px; font-weight: 600; 
@@ -221,177 +229,151 @@ class FileUploader(param.Parameterized):
             """),
 
             self.file_select,
-
             self.file_info_display,
 
             pn.Row(
                 self.analyze_btn,
-                self.delete_file_btn,
-                self.refresh_files_btn,
+                self.delete_btn,
                 margin=(10, 5)
             ),
 
             margin=(10, 10)
         )
 
-        # Complete card
+        # Complete card with proper styling
         card_content = pn.Column(
             cell_section,
             upload_section,
             files_section,
             styles={'background': 'white', 'border-radius': '0 0 8px 8px',
-                   'box-shadow': '0 2px 8px rgba(0,0,0,0.1)', 'margin': '0'}
+                    'box-shadow': '0 2px 8px rgba(0,0,0,0.1)', 'margin': '0'}
         )
 
         return pn.Column(
             header,
             card_content,
-            width=350,
+            width=800,  # Fixed width
             margin=(10, 10),
             styles={'border-radius': '8px', 'overflow': 'hidden'}
         )
 
+    def _add_dropper_styling(self):
+        """Add custom CSS for FileDropper styling."""
+        pn.config.raw_css.append("""
+        .bk-input-group .file-dropper {
+            border: 2px dashed #ccc !important;
+            border-radius: 8px !important;
+            background: #fafafa !important;
+            transition: all 0.3s ease !important;
+        }
+
+        .bk-input-group .file-dropper:hover {
+            border-color: #1976D2 !important;
+            background: #f0f8ff !important;
+        }
+
+        .bk-input-group .file-dropper.dragover {
+            border-color: #4CAF50 !important;
+            background: #f0fff0 !important;
+        }
+        """)
+
     def set_current_cell(self, cell_name: str):
-        """Set current cell with visual feedback."""
+        """Set current cell and refresh UI."""
         self.current_cell = cell_name
         if cell_name:
             self.cell_display.object = f"""
-            <div style='background: #E8F5E8; padding: 12px; border-radius: 4px; 
-                        border-left: 4px solid #2E7D32; text-align: center;'>
-                <strong style='color: #2E7D32;'>Current Cell:</strong> 
-                <span style='color: #1B5E20; font-weight: 600;'>{cell_name}</span>
-                <span style='color: #4CAF50; float: right;'>✓</span>
+            <div style='background: #E8F5E8; padding: 10px; border-radius: 4px; 
+                        border-left: 4px solid #4CAF50; text-align: center;'>
+                <strong>Selected Cell: {cell_name}</strong>
             </div>
             """
             self._refresh_file_list()
-            self._check_upload_ready(None)
         else:
             self.cell_display.object = """
-            <div style='background: #FFF3E0; padding: 12px; border-radius: 4px; 
+            <div style='background: #FFF3E0; padding: 10px; border-radius: 4px; 
                         border-left: 4px solid #FF9800; text-align: center;'>
-                <strong style='color: #F57C00;'>Please select a cell first</strong>
+                <strong>Please select a cell first</strong>
             </div>
             """
             self.file_select.options = []
-            self.upload_btn.disabled = True
+            self.file_info_display.object = "<div style='color: #666; font-style: italic;'>No cell selected</div>"
+
+        self._check_upload_ready(None)
 
     def _refresh_file_list(self):
-        """Refresh file list with professional formatting."""
+        """Refresh the file list for current cell."""
         if not self.current_cell:
             return
 
         try:
             files = self.api.get_cell_files(self.current_cell)
-
+            
             if files:
-                options = []
+                # Cache file information for quick access
+                self._cached_files = {file_info['file_id']: file_info for file_info in files}
+                
+                # Format options as (display_name, file_id) tuples  
+                file_options = []
                 for file_info in files:
-                    original_name = file_info.get('original_filename', 'Unknown')
-                    segment_count = file_info.get('segment_count', 0)
-
-                    # Clean filename display
-                    if len(original_name) > 25:
-                        display_name = original_name[:22] + "..."
-                    else:
-                        display_name = original_name
-
-                    formatted_name = f"✓ {display_name} ({segment_count} segments)"
-                    options.append((formatted_name, file_info['file_id']))
-
-                self.file_select.options = options
-
-                # Update status
-                self._update_processing_status(f"Found {len(files)} processed files", "success")
+                    # Create display name with status indicators
+                    status_indicator = "✓" if file_info.get('segment_count', 0) > 0 else "⚠️"
+                    segment_text = f"({file_info.get('segment_count', 0)} segments)" if file_info.get('segment_count', 0) > 0 else "(no segments)"
+                    
+                    display_name = f"{status_indicator} {file_info['original_filename']}... {segment_text}"
+                    file_options.append((display_name, file_info['file_id']))
+                
+                self.file_select.options = file_options
             else:
                 self.file_select.options = []
-                self._update_processing_status("No files processed yet", "info")
-
+                self._cached_files = {}
+                
         except Exception as e:
-            self.status_message = f"Error loading files: {str(e)}"
-            self._update_processing_status("Error loading files", "error")
+            self.file_select.options = []
+            self._cached_files = {}
+            print(f"Error refreshing files: {e}")
 
     def refresh_files(self):
         """Public method to refresh file list."""
         self._refresh_file_list()
 
-    def _on_file_selected(self, event):
-        """Handle file selection with info display."""
-        file_id = event.new
-        if file_id:
-            if isinstance(file_id, tuple):
-                file_id = file_id[1]
-            elif not isinstance(file_id, str):
-                file_id = str(file_id)
-
-            self.selected_file = file_id
-            self.delete_file_btn.disabled = False
-            self.analyze_btn.disabled = False
-
-            # Display file info
-            try:
-                files = self.api.get_cell_files(self.current_cell)
-                file_info = next((f for f in files if f['file_id'] == file_id), None)
-
-                if file_info:
-                    original_name = file_info.get('original_filename', 'Unknown')
-                    segment_count = file_info.get('segment_count', 0)
-                    processing_date = file_info.get('processing_date', 'Unknown')
-
-                    self.file_info_display.object = f"""
-                    <div style='background: #F8F9FA; padding: 10px; border-radius: 4px; 
-                                border-left: 3px solid #1976D2; margin: 5px 0;'>
-                        <div style='font-weight: 600; color: #2E4057; margin-bottom: 5px;'>
-                            File Details
-                        </div>
-                        <div style='font-size: 12px; color: #666;'>
-                            <strong>Original:</strong> {original_name}<br>
-                            <strong>Segments:</strong> {segment_count}<br>
-                            <strong>Processed:</strong> {processing_date}
-                        </div>
-                    </div>
-                    """
-                else:
-                    self.file_info_display.object = "<div style='color: #999; font-style: italic;'>File details not available</div>"
-
-            except Exception:
-                self.file_info_display.object = "<div style='color: #999; font-style: italic;'>Error loading file details</div>"
-        else:
-            self.delete_file_btn.disabled = True
-            self.analyze_btn.disabled = True
-            self.file_info_display.object = "<div style='color: #666; font-style: italic;'>Select a file to view details</div>"
-
     def _check_upload_ready(self, event):
         """Check if upload is ready with visual feedback."""
-
-        has_metadata = self.metadata_upload.value is not None
-        has_data = self.data_upload.value is not None
-
+        
+        # FileDropper.value is a dictionary mapping filenames to content
+        has_metadata = self.metadata_dropper.value is not None and len(self.metadata_dropper.value) > 0
+        has_data = self.data_dropper.value is not None and len(self.data_dropper.value) > 0
+        
         print(f"Check upload ready - Metadata: {has_metadata}, Data: {has_data}, Cell: {self.current_cell}")
-
         self.upload_btn.disabled = not (has_metadata and has_data and self.current_cell)
         print(f"Button disabled: {self.upload_btn.disabled}")
-        # has_metadata = self.metadata_upload.value is not None
-        # has_data = self.data_upload.value is not None
-        # has_cell = self.current_cell is not None
-        #
-        # self.upload_btn.disabled = not (has_metadata and has_data and has_cell)
-        #
-        # # Update button text based on readiness
-        # if not has_cell:
-        #     self.upload_btn.name = "🚀 Select Cell First"
-        # elif not has_metadata or not has_data:
-        #     self.upload_btn.name = "🚀 Select Both Files"
-        # else:
-        #     self.upload_btn.name = "🚀 Process Files"
 
+    def _update_processing_status(self, message, status_type="info"):
+        """Update processing status with color coding."""
+        colors = {
+            "info": "#666",
+            "processing": "#2196F3", 
+            "success": "#4CAF50",
+            "error": "#F44336",
+            "warning": "#FF9800"
+        }
+        
+        color = colors.get(status_type, "#666")
+        self.processing_status.object = f"""
+        <div style='color: {color}; font-size: 14px; padding: 5px; font-weight: 500;'>
+            {message}
+        </div>
+        """
 
     def _on_upload_files(self, event):
-        """Handle file upload with progress feedback."""
+        """Handle file upload with progress feedback using FileDropper."""
         if not self.current_cell:
             self.status_message = "No cell selected"
             return
 
-        if not (self.metadata_upload.value and self.data_upload.value):
+        # FileDropper stores files as dictionary mapping filenames to content
+        if not (self.metadata_dropper.value and self.data_dropper.value and 
+                len(self.metadata_dropper.value) > 0 and len(self.data_dropper.value) > 0):
             self.status_message = "Both .par and .par.csv files required"
             return
 
@@ -405,12 +387,25 @@ class FileUploader(param.Parameterized):
             with TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
 
-                # Save uploaded files temporarily
-                metadata_path = temp_path / self.metadata_upload.filename
-                metadata_path.write_bytes(self.metadata_upload.value)
+                # FileDropper stores files as dictionary: filename -> content
+                metadata_filename = list(self.metadata_dropper.value.keys())[0]
+                metadata_content = self.metadata_dropper.value[metadata_filename]
+                
+                data_filename = list(self.data_dropper.value.keys())[0]
+                data_content = self.data_dropper.value[data_filename]
 
-                data_path = temp_path / self.data_upload.filename
-                data_path.write_bytes(self.data_upload.value)
+                # Save uploaded files temporarily
+                metadata_path = temp_path / metadata_filename
+                if isinstance(metadata_content, str):
+                    metadata_path.write_text(metadata_content, encoding='utf-8')
+                else:
+                    metadata_path.write_bytes(metadata_content)
+
+                data_path = temp_path / data_filename
+                if isinstance(data_content, str):
+                    data_path.write_text(data_content, encoding='utf-8')
+                else:
+                    data_path.write_bytes(data_content)
 
                 # Process files
                 result = self.api.process_dual_files(
@@ -424,9 +419,9 @@ class FileUploader(param.Parameterized):
                     self.status_message = f"Successfully processed {result.file_id}"
                     self._update_processing_status(f"✅ Successfully processed: {result.file_id}", "success")
 
-                    # Clear upload widgets
-                    self.metadata_upload.value = None
-                    self.data_upload.value = None
+                    # Clear upload widgets - FileDropper uses empty dict
+                    self.metadata_dropper.value = {}
+                    self.data_dropper.value = {}
                     self._check_upload_ready(None)
 
                     # Refresh file list
@@ -435,16 +430,64 @@ class FileUploader(param.Parameterized):
                 else:
                     self.status_message = f"Processing failed: {result.error}"
                     self._update_processing_status(f"❌ Processing failed: {result.error}", "error")
-                    self.upload_btn.disabled = False
 
         except Exception as e:
-            error_msg = f"Upload error: {str(e)}"
-            self.status_message = error_msg
-            self._update_processing_status(f"❌ {error_msg}", "error")
+            self.status_message = f"Upload error: {str(e)}"
+            self._update_processing_status(f"❌ Upload error: {str(e)}", "error")
+        finally:
             self.upload_btn.disabled = False
+
+    def _on_file_selected(self, event):
+        """Handle file selection with info display."""
+        file_id = event.new
+        if file_id:
+            if isinstance(file_id, tuple):
+                file_id = file_id[1]
+            elif not isinstance(file_id, str):
+                file_id = str(file_id)
+
+            # Update selected file
+            self.selected_file = file_id
+            
+            # Get file info from cache (already loaded by _refresh_file_list)
+            try:
+                file_info = self._cached_files.get(file_id)
+                if file_info:
+                    info_html = f"""
+                    <div style='background: #F8F9FA; padding: 10px; border-radius: 4px; font-size: 13px;'>
+                        <strong>{file_info.get('original_filename', 'Unknown')}</strong><br>
+                        <small style='color: #666;'>
+                        Size: {file_info.get('file_size_bytes', 0) / (1024*1024):.1f} MB<br>
+                        Segments: {file_info.get('segment_count', 0)}<br>
+                        Status: {file_info.get('processing_status', 'Unknown')}
+                        </small>
+                    </div>
+                    """
+                    self.file_info_display.object = info_html
+                    
+                    # Enable buttons
+                    self.analyze_btn.disabled = False
+                    self.delete_btn.disabled = False
+                else:
+                    self.file_info_display.object = "<div style='color: #f44336;'>File info not found in cache</div>"
+                    
+            except Exception as e:
+                self.file_info_display.object = f"<div style='color: #f44336;'>Error loading file info: {str(e)}</div>"
+        else:
+            self.selected_file = ""
+            self.file_info_display.object = "<div style='color: #666; font-style: italic;'>Select a file to view details</div>"
+            self.analyze_btn.disabled = True
+            self.delete_btn.disabled = True
+
+    def _on_analyze_file(self, event):
+        """Handle file analysis."""
+        del event  # Unused parameter
+        if self.selected_file:
+            self.status_message = f"analyze:{self.selected_file}"
 
     def _on_delete_file(self, event):
         """Handle file deletion with confirmation."""
+        del event  # Unused parameter
         file_selection = self.file_select.value
         if not file_selection:
             return
@@ -455,45 +498,19 @@ class FileUploader(param.Parameterized):
         else:
             file_id = file_selection
 
+        if not file_id:
+            return
+
         try:
             result = self.api.delete_file(file_id)
             if result.success:
-                self.status_message = result.message
-                self._update_processing_status(f"🗑️ {result.message}", "success")
+                self.status_message = f"File deleted successfully"
                 self._refresh_file_list()
-                self.selected_file = ""
+                # Clear selection
+                self.file_select.value = None
+                self._on_file_selected(type('Event', (), {'new': None})())
             else:
                 self.status_message = f"Failed to delete file: {result.error}"
-                self._update_processing_status(f"❌ Failed to delete file: {result.error}", "error")
 
         except Exception as e:
-            error_msg = f"Delete error: {str(e)}"
-            self.status_message = error_msg
-            self._update_processing_status(f"❌ {error_msg}", "error")
-
-    def _on_refresh_files(self, event):
-        """Handle file list refresh."""
-        self._refresh_file_list()
-        self._update_processing_status("🔄 Refreshed file list", "success")
-
-    def _update_processing_status(self, message: str, status_type: str = "info"):
-        """Update processing status with styling."""
-        if status_type == "success":
-            color = "#2E7D32"
-            bg_color = "#E8F5E8"
-        elif status_type == "error":
-            color = "#D32F2F"
-            bg_color = "#FFEBEE"
-        elif status_type == "processing":
-            color = "#1976D2"
-            bg_color = "#E3F2FD"
-        else:  # info
-            color = "#666"
-            bg_color = "#F5F5F5"
-
-        self.processing_status.object = f"""
-        <div style='color: {color}; background: {bg_color}; padding: 8px; 
-                    border-radius: 4px; border-left: 3px solid {color}; font-size: 14px;'>
-            {message}
-        </div>
-        """
+            self.status_message = f"Failed to delete file {file_id}: Database operation failed: {str(e)}"
