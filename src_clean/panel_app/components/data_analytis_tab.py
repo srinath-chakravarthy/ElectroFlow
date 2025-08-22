@@ -344,12 +344,19 @@ class DataAnalysisTab(param.Parameterized):
 
     def _on_load_segments(self, event):
         """Load segments from selected groups."""
-        selected_groups = self.groups_table.selection
-        if not selected_groups:
+        selected_indices = self.groups_table.selection
+        if not selected_indices:
             self._update_status("Please select groups first", "warning")
             return
 
         try:
+            # Get group data from table value using selected indices
+            table_data = self.groups_table.value
+            if not table_data or not isinstance(table_data, list):
+                self._update_status("No group data available", "error")
+                return
+                
+            selected_groups = [table_data[i] for i in selected_indices if i < len(table_data)]
             self.selected_groups = [group['group_id'] for group in selected_groups]
 
             # Load all segments from selected groups
@@ -373,8 +380,8 @@ class DataAnalysisTab(param.Parameterized):
                 })
 
             self.segments_table.value = formatted_segments
-            # Auto-select all segments
-            self.segments_table.selection = formatted_segments
+            # Auto-select all segments (use row indices, not data)
+            self.segments_table.selection = list(range(len(formatted_segments)))
             self.loaded_segments = all_segments
 
             # Auto-calculate statistics for all loaded segments
@@ -391,13 +398,21 @@ class DataAnalysisTab(param.Parameterized):
 
     def _on_calculate_stats(self, event):
         """Calculate statistics for selected segments."""
-        selected_segments = self.segments_table.selection
-        if not selected_segments:
+        selected_indices = self.segments_table.selection
+        if not selected_indices:
             self._update_status("Please select segments first", "warning")
             return
 
         try:
-            # Get full segment data for selected segments
+            # Get segment data from table value using selected indices
+            table_data = self.segments_table.value
+            if not table_data or not isinstance(table_data, list):
+                self._update_status("No segment data available", "error")
+                return
+                
+            selected_segments = [table_data[i] for i in selected_indices if i < len(table_data)]
+            
+            # Get full segment data for selected segments using segment_id
             selected_segment_ids = [seg['segment_id'] for seg in selected_segments]
             segment_data = [seg for seg in self.loaded_segments
                             if seg['segment_id'] in selected_segment_ids]
