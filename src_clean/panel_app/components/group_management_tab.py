@@ -12,7 +12,7 @@ import hvplot.pandas
 from typing import List, Dict, Any, Optional
 
 # Ensure extensions are loaded
-pn.extension('tabulator', 'bokeh')
+pn.extension('tabulator')
 
 class GroupManagementTab(param.Parameterized):
     """
@@ -279,15 +279,15 @@ class GroupManagementTab(param.Parameterized):
             height=350,
             margin=(5, 5)
         )
-        
-        # Show empty plot initially
-        self._clear_preview()
 
         # Summary stats display
         self.summary_stats = pn.pane.HTML(
             self._create_empty_summary_html(),
             margin=(5, 5)
         )
+        
+        # Show empty plot initially (after all components are created)
+        self._clear_preview()
 
         # Status display
         self.status_display = pn.pane.HTML(
