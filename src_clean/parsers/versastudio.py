@@ -25,11 +25,9 @@ except ImportError:
     from scipy.integrate import trapz as integrate_trapz
 
 from .base import DualFileParser
-from ..core.data_models import (
-    DataFile, FileMetadata, UNIVERSAL_SCHEMA, 
-    VERSASTUDIO_CSV_SCHEMA, VERSASTUDIO_CSV_MAPPING,
-    VERSASTUDIO_COMPUTED_COLUMNS, add_missing_universal_columns
-)
+from .configs.universal_schema import UNIVERSAL_SCHEMA, get_column_units
+from .configs.versastudio_mappings import VERSASTUDIO_CSV_SCHEMA, VERSASTUDIO_CSV_MAPPING
+from ..core.data_models import DataFile, FileMetadata, add_missing_universal_columns
 from ..core.exceptions import (
     FileFormatError, MetadataExtractionError, DataParsingError
 )
@@ -268,6 +266,9 @@ class VersaStudioParser(DualFileParser):
             # Map to universal schema
             universal_df = self._map_to_universal_schema(df)
             
+            # Convert units to universal standard
+            universal_df = self._convert_units(universal_df)
+            
             # Add computed columns
             universal_df = self._add_computed_columns(universal_df)
             
@@ -332,10 +333,16 @@ class VersaStudioParser(DualFileParser):
         column_mapping = {}
         used_universal_cols = set()
         
-        for vs_col, universal_col in VERSASTUDIO_CSV_MAPPING.items():
-            if vs_col in df.columns and universal_col not in used_universal_cols:
-                column_mapping[vs_col] = universal_col
-                used_universal_cols.add(universal_col)
+        for vs_col, config in VERSASTUDIO_CSV_MAPPING.items():
+            if isinstance(config, dict) and 'universal' in config:
+                universal_col = config['universal']
+                if vs_col in df.columns and universal_col not in used_universal_cols:
+                    column_mapping[vs_col] = universal_col
+                    used_universal_cols.add(universal_col)
+            elif isinstance(config, str):  # Backward compatibility
+                if vs_col in df.columns and config not in used_universal_cols:
+                    column_mapping[vs_col] = config
+                    used_universal_cols.add(config)
         
         logger.debug(f"Column mapping: {column_mapping}")
         
@@ -347,6 +354,64 @@ class VersaStudioParser(DualFileParser):
         available_columns = [col for col in universal_columns if col in mapped_df.columns]
         
         return mapped_df.select(available_columns)
+    
+    def _convert_units(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Convert units from instrument units to universal schema units."""
+        try:
+            # Only import pint when needed to avoid startup overhead
+            import pint
+            ureg = pint.UnitRegistry()
+            
+            # Process each mapped column for unit conversion
+            for vs_col, config in VERSASTUDIO_CSV_MAPPING.items():
+                if not isinstance(config, dict) or 'universal' not in config or 'units' not in config:
+                    continue
+                    
+                universal_col = config['universal']
+                instrument_units = config['units']
+                
+                # Skip non-physical units
+                if instrument_units in ['categorical', 'dimensionless']:
+                    continue
+                    
+                # Check if this column exists in the DataFrame
+                if universal_col not in df.columns:
+                    continue
+                
+                # Get target units from universal schema
+                try:
+                    target_units = get_column_units(universal_col)
+                except ValueError:
+                    logger.warning(f"Universal column '{universal_col}' not found in schema")
+                    continue
+                
+                # Skip if units are already the same
+                if instrument_units == target_units:
+                    continue
+                
+                # Perform unit conversion
+                try:
+                    conversion_factor = ureg(instrument_units).to(target_units).magnitude
+                    df = df.with_columns([
+                        (pl.col(universal_col) * conversion_factor).alias(universal_col)
+                    ])
+                    logger.debug(f"Converted {universal_col}: {instrument_units} → {target_units} (factor: {conversion_factor})")
+                    
+                except pint.errors.UndefinedUnitError:
+                    logger.warning(f"Undefined unit '{instrument_units}' for column {universal_col}")
+                    continue
+                except pint.errors.DimensionalityError:
+                    logger.warning(f"Incompatible units: cannot convert '{instrument_units}' to '{target_units}' for column {universal_col}")
+                    continue
+                    
+            return df
+            
+        except ImportError:
+            logger.warning("Pint library not available - skipping unit conversions")
+            return df
+        except Exception as e:
+            logger.warning(f"Unit conversion failed: {e}")
+            return df
     
     def _add_computed_columns(self, df: pl.DataFrame) -> pl.DataFrame:
         """Add computed columns including physics-based capacity and energy integration."""
@@ -385,7 +450,30 @@ class VersaStudioParser(DualFileParser):
             return df
 
     def _add_integration_columns(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Add segment-based integration using scipy trapezoid."""
+        """Add segment-based integration using scipy trapezoid with units from schema."""
+        
+        # Get units from universal schema for proper conversion factors
+        try:
+            current_units = get_column_units('current_a')  # Should be 'A'
+            time_units = get_column_units('time_s')        # Should be 's' 
+            capacity_units = get_column_units('capacity_ah')  # Should be 'Ah'
+            energy_units = get_column_units('energy_wh')   # Should be 'Wh'
+            power_units = get_column_units('power_w')      # Should be 'W'
+            
+            # Calculate conversion factors using Pint
+            import pint
+            ureg = pint.UnitRegistry()
+            
+            # Capacity integration: current*time → capacity
+            capacity_conversion = ureg(f"{current_units}*{time_units}").to(capacity_units).magnitude
+            
+            # Energy integration: power*time → energy  
+            energy_conversion = ureg(f"{power_units}*{time_units}").to(energy_units).magnitude
+            
+        except (ImportError, ValueError) as e:
+            logger.warning(f"Could not calculate unit conversions, using defaults: {e}")
+            capacity_conversion = 1/3600.0  # Default A*s → Ah
+            energy_conversion = 1/3600.0    # Default W*s → Wh
         
         def integrate_segment_capacity(segment_df):
             """Integrate capacity for one segment using scipy trapezoidal rule."""
@@ -406,7 +494,7 @@ class VersaStudioParser(DualFileParser):
             for i in range(1, len(time_vals)):
                 cumulative_capacity[i] = integrate_trapz(
                     current_vals[:i+1], time_vals[:i+1]
-                ) / 3600.0
+                ) * capacity_conversion  # Units-aware conversion
             
             segment_data['capacity_ah'] = cumulative_capacity
             return pl.from_pandas(segment_data)
@@ -431,7 +519,7 @@ class VersaStudioParser(DualFileParser):
             for i in range(1, len(time_vals)):
                 cumulative_energy[i] = integrate_trapz(
                     power_vals[:i+1], time_vals[:i+1]
-                ) / 3600.0  # Convert Ws to Wh
+                ) * energy_conversion  # Units-aware conversion
             
             segment_data['energy_wh'] = cumulative_energy
             return pl.from_pandas(segment_data)

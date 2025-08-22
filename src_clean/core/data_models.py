@@ -17,123 +17,11 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import polars as pl
 
-
-# =============================================================================
-# UNIVERSAL SCHEMA - Single source of truth for all instruments
-# =============================================================================
-
-UNIVERSAL_SCHEMA = {
-    # Core Time & Indexing (6 columns)
-    'time_s': pl.Float64,              # Relative time from experiment start
-    'timestamp': pl.Datetime,          # Absolute timestamp (ISO format)
-    'segment_number': pl.Int64,        # Experimental segment index
-    'point_number': pl.Int64,          # Point within segment
-    'loop_number': pl.Int64,           # Loop iteration
-    'battery_cycle': pl.Int64,         # Battery cycle number
-    
-    # Electrochemical Core (6 columns)
-    'potential_v': pl.Float64,         # Working electrode potential (V)
-    'current_a': pl.Float64,           # Current (A)
-    'potential_applied_v': pl.Float64, # Applied potential (V)
-    'current_applied_a': pl.Float64,   # Applied current (A)
-    'potential_avg_v': pl.Float64,     # Average potential (V)
-    'current_avg_a': pl.Float64,       # Average current (A)
-    
-    # Battery Analytics (4 columns) 
-    'capacity_ah': pl.Float64,         # Segment capacity integration (Ah)
-    'energy_wh': pl.Float64,           # Segment energy integration (Wh)
-    'power_w': pl.Float64,             # Instantaneous power (W)
-    'temperature_c': pl.Float64,       # Temperature (°C)
-    
-    # Experimental Context - Cumulative Tracking (8 columns)
-    'capacity_cumulative_ah': pl.Float64,        # File-level cumulative capacity
-    'energy_cumulative_wh': pl.Float64,          # File-level cumulative energy
-    'charge_cumulative_ah': pl.Float64,          # Positive capacity cumulative
-    'discharge_cumulative_ah': pl.Float64,       # Negative capacity cumulative
-    'energy_charge_cumulative_wh': pl.Float64,   # Positive energy cumulative
-    'energy_discharge_cumulative_wh': pl.Float64, # Negative energy cumulative
-    'capacity_absolute_cumulative_ah': pl.Float64, # |capacity| cumulative activity
-    'energy_absolute_cumulative_wh': pl.Float64,  # |energy| cumulative activity
-    
-    # EIS (5 columns)
-    'frequency_hz': pl.Float64,        # Frequency (Hz)
-    'impedance_real_ohm': pl.Float64,  # Real impedance (Ω)
-    'impedance_imag_ohm': pl.Float64,  # Imaginary impedance (Ω)
-    'impedance_mag_ohm': pl.Float64,   # Magnitude impedance (Ω)
-    'impedance_phase_deg': pl.Float64, # Phase (degrees)
-    
-    # Status & Advanced (8 columns)
-    'current_range': pl.Utf8,          # Current range setting
-    'potential_range': pl.Utf8,        # Potential range setting
-    'mode': pl.Utf8,                   # Measurement mode
-    'technique_id': pl.Int64,          # ActionID/Technique identifier
-    'status_flags': pl.Utf8,           # Status flags
-    'ce_potential_v': pl.Float64,      # Counter electrode potential
-    'cell_potential_v': pl.Float64,    # Cell potential
-    'ac_amplitude_v': pl.Float64,      # AC amplitude
-    'aux_voltage_v': pl.Float64        # Auxiliary voltage
-}
+# Import schema from config
+from ..parsers.configs.universal_schema import UNIVERSAL_SCHEMA, get_polars_schema
 
 
-# =============================================================================
-# VERSASTUDIO SCHEMAS - Clean implementation
-# =============================================================================
-
-# VersaStudio CSV schema (for .par.csv files)
-VERSASTUDIO_CSV_SCHEMA = {
-    'Potential (V)': pl.Float64,
-    'Current (A)': pl.Float64,
-    'Elapsed Time (s)': pl.Float64,
-    'Charge (C)': pl.Float64,
-    'Applied Potential (V)': pl.Float64,
-    'Frequency (Hz)': pl.Float64,
-    '|Z| (ohms)': pl.Float64,
-    'Zre (ohms)': pl.Float64,
-    'Zim (ohms)': pl.Float64,
-    'Phase of Z (deg)': pl.Float64,
-    'Segment': pl.Int64,
-    'Point': pl.Int64,
-    'ActionId': pl.Int64,
-    # Alternative column names that might exist
-    'Segment #': pl.Int64,
-    'Point #': pl.Int64,
-    'Frequency(Hz)': pl.Float64,
-    'Current Range': pl.Utf8,
-    'Status': pl.Utf8,
-    'AC Amplitude': pl.Float64,
-    'ADC Sync Input(V)': pl.Float64
-}
-
-# VersaStudio to Universal column mapping
-VERSASTUDIO_CSV_MAPPING = {
-    # Direct mappings
-    'Potential (V)': 'potential_v',
-    'Current (A)': 'current_a',
-    'Elapsed Time (s)': 'time_s',
-    'Applied Potential (V)': 'potential_applied_v',
-    'ActionId': 'technique_id',
-    'Segment': 'segment_number',
-    'Segment #': 'segment_number',  # Alternative column name
-    'Point': 'point_number',
-    'Point #': 'point_number',      # Alternative column name
-    'Frequency (Hz)': 'frequency_hz',
-    'Frequency(Hz)': 'frequency_hz',  # Alternative column name
-    'Zre (ohms)': 'impedance_real_ohm',
-    'Zim (ohms)': 'impedance_imag_ohm',
-    '|Z| (ohms)': 'impedance_mag_ohm',
-    'Phase of Z (deg)': 'impedance_phase_deg',
-    'Current Range': 'current_range',
-    'Status': 'status_flags',
-    'AC Amplitude': 'ac_amplitude_v',
-    'ADC Sync Input(V)': 'aux_voltage_v'
-}
-
-# Computed columns for VersaStudio (basic calculations only)
-VERSASTUDIO_COMPUTED_COLUMNS = {
-    'power_w': lambda df: df['potential_v'] * df['current_a'],
-    # Note: impedance_mag_ohm and impedance_phase_deg now come directly from VersaStudio CSV
-    # Note: capacity_ah and energy_wh now computed at parser level with scipy integration
-}
+# Note: VersaStudio schemas moved to src_clean/parsers/configs/versastudio_mappings.py
 
 
 # =============================================================================
@@ -200,7 +88,8 @@ class DataFile:
             raise ValueError(f"Missing required columns: {missing_columns}")
         
         # Check column types (allow extra columns for flexibility)
-        for col_name, expected_type in UNIVERSAL_SCHEMA.items():
+        for col_name, col_info in UNIVERSAL_SCHEMA.items():
+            expected_type = col_info['type']  # Extract type from dict
             if col_name in actual_columns:
                 actual_type = self.universal_data.schema[col_name]
                 if actual_type != expected_type:
@@ -302,7 +191,8 @@ def validate_universal_schema(df: pl.DataFrame) -> bool:
             return False
         
         # Check column types
-        for col_name, expected_type in UNIVERSAL_SCHEMA.items():
+        for col_name, col_info in UNIVERSAL_SCHEMA.items():
+            expected_type = col_info['type']  # Extract type from dict
             if col_name in df.columns:
                 actual_type = df.schema[col_name]
                 if actual_type != expected_type:
@@ -331,7 +221,7 @@ def _types_compatible(actual_type, expected_type) -> bool:
 
 def create_empty_universal_dataframe() -> pl.DataFrame:
     """Create an empty DataFrame with universal schema."""
-    return pl.DataFrame(schema=UNIVERSAL_SCHEMA)
+    return pl.DataFrame(schema=get_polars_schema())
 
 
 def add_missing_universal_columns(df: pl.DataFrame) -> pl.DataFrame:
@@ -340,7 +230,7 @@ def add_missing_universal_columns(df: pl.DataFrame) -> pl.DataFrame:
     missing_columns = set(UNIVERSAL_SCHEMA.keys()) - existing_columns
     
     for col_name in missing_columns:
-        col_type = UNIVERSAL_SCHEMA[col_name]
+        col_type = UNIVERSAL_SCHEMA[col_name]['type']  # Extract type from dict
         # Add column with appropriate null values
         if col_type == pl.Utf8:
             df = df.with_columns(pl.lit(None).cast(col_type).alias(col_name))

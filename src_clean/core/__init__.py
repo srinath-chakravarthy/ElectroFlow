@@ -5,11 +5,14 @@ Essential data structures, database operations, and exceptions.
 """
 
 from .data_models import (
-    UNIVERSAL_SCHEMA, VERSASTUDIO_CSV_SCHEMA, VERSASTUDIO_CSV_MAPPING,
     DataFile, FileMetadata, validate_universal_schema, 
     create_empty_universal_dataframe, add_missing_universal_columns,
     FUNDAMENTAL_TECHNIQUES, DEFAULT_ACTIONID_MAPPINGS
 )
+
+# Import configs separately
+from ..parsers.configs.universal_schema import UNIVERSAL_SCHEMA
+from ..parsers.configs.versastudio_mappings import VERSASTUDIO_CSV_MAPPING, VERSASTUDIO_CSV_SCHEMA
 from .database import DatabaseManager
 from .exceptions import (
     ElectrochemicalAnalysisError, ValidationError, ParsingError,
