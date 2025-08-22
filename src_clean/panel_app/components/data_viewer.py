@@ -361,6 +361,12 @@ class DataViewer(param.Parameterized):
     def _on_plot_type_selected(self, event):
         """Handle plot type selection."""
         plot_type = event.new
+        
+        # Handle tuple case from Select widget (display_name, actual_value)
+        if isinstance(plot_type, tuple):
+            plot_type = plot_type[1] if len(plot_type) > 1 else plot_type[0]
+        elif not isinstance(plot_type, str):
+            plot_type = str(plot_type) if plot_type is not None else ""
 
         if plot_type in ["Select a file first...", "No plottable data available", "Error loading data"]:
             return
