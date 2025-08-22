@@ -664,6 +664,9 @@ class GroupManagementTab(param.Parameterized):
 
             # Create plot preview
             plot_type = self.plot_type_selector.value
+            # Handle tuple from Select widget
+            if isinstance(plot_type, tuple):
+                plot_type = plot_type[1] if len(plot_type) > 1 else plot_type[0]
             print(f"DEBUG: Creating plot with type: {plot_type}")  # Debug output
             self._create_preview_plot(selected_segments, plot_type)
 
@@ -718,6 +721,9 @@ class GroupManagementTab(param.Parameterized):
 
         # Add plot legend explanation
         current_plot_type = getattr(self.plot_type_selector, 'value', 'voltage_boundaries')
+        # Handle tuple from Select widget
+        if isinstance(current_plot_type, tuple):
+            current_plot_type = current_plot_type[1] if len(current_plot_type) > 1 else current_plot_type[0]
         plot_legend = self._get_plot_legend(current_plot_type)
         if plot_legend:
             summary_lines.append(f"<br><strong>Plot Legend:</strong>")
