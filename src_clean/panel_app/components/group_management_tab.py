@@ -46,7 +46,8 @@ class GroupManagementTab(param.Parameterized):
                 # Filter out unwanted columns
                 skip_columns = {
                     'created_at', 'updated_at', 'analysis_results', 'segment_metadata',
-                    'original_filename'  # Hide the long filename
+                    'original_filename',  # Hide the long filename
+                    'file_id'  # Hide file_id - not needed for segment selection
                 }
 
                 filtered_schema = {k: v for k, v in schema.items() if k not in skip_columns}
@@ -97,6 +98,41 @@ class GroupManagementTab(param.Parameterized):
         df = pd.DataFrame(formatted_data)
         # Only keep columns that are in the schema
         return df[list(self.segments_schema.keys())]
+
+    def _format_group_contents_data(self, segments: List[Dict]) -> pd.DataFrame:
+        """Format group contents data - simplified view without file_id."""
+        if not segments:
+            return self._create_empty_segments_dataframe()
+
+        # Define simplified schema for group contents (file-agnostic)
+        group_contents_schema = {
+            'id': self.segments_schema.get('id', {'formatter': str}),
+            'fundamental_technique': self.segments_schema.get('fundamental_technique', {'formatter': str}),
+            'start_time_s': self.segments_schema.get('start_time_s', {'formatter': str}),
+            'duration_s': self.segments_schema.get('duration_s', {'formatter': str}),
+            'start_potential_v': self.segments_schema.get('start_potential_v', {'formatter': str}),
+            'end_potential_v': self.segments_schema.get('end_potential_v', {'formatter': str})
+        }
+
+        formatted_data = []
+        for segment in segments:
+            row = {}
+            for col_name, col_config in group_contents_schema.items():
+                if col_name in self.segments_schema:  # Only include if available in main schema
+                    raw_value = segment.get(col_name)
+                    formatter = col_config.get('formatter', lambda x: str(x) if x is not None else "")
+
+                    try:
+                        row[col_name] = formatter(raw_value)
+                    except Exception:
+                        row[col_name] = str(raw_value) if raw_value is not None else ""
+
+            formatted_data.append(row)
+
+        df = pd.DataFrame(formatted_data)
+        # Only keep columns that exist in both schemas
+        available_columns = [col for col in group_contents_schema.keys() if col in df.columns]
+        return df[available_columns] if available_columns else pd.DataFrame()
 
     def _create_components(self):
         """Create all UI components."""
@@ -551,7 +587,7 @@ class GroupManagementTab(param.Parameterized):
 
         try:
             segments = self.api.get_group_segments(int(self.selected_group_id))
-            formatted_df = self._format_segments_data(segments)
+            formatted_df = self._format_group_contents_data(segments)  # Use file-agnostic formatting
             self.group_contents_tabulator.value = formatted_df
 
             self.remove_from_group_btn.disabled = len(segments) == 0
