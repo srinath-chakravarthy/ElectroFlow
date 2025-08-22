@@ -97,7 +97,10 @@ class TechniqueAnalyzer:
     def _analyze_rest_phase(self, segment_data: pl.DataFrame, 
                            previous_segment_info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Analyze rest phase with context-aware decay fitting.
+        Analyze rest phase with comprehensive dual decay fitting.
+        
+        Always attempts both voltage decay and current decay analysis,
+        returning the better fit or indicating insufficient data.
         
         Args:
             segment_data: Segment DataFrame
@@ -111,23 +114,40 @@ class TechniqueAnalyzer:
             voltage_values = segment_data.get_column('potential_v').to_numpy()
             current_values = segment_data.get_column('current_a').to_numpy()
             
-            # Determine what type of decay to analyze based on previous segment
-            if previous_segment_info and 'end_current_a' in previous_segment_info:
-                prev_current = previous_segment_info.get('end_current_a', 0.0)
-                if abs(prev_current or 0.0) > 1e-6:  # Previous had significant current
-                    return self._analyze_voltage_decay(time_values, voltage_values)
-                else:
-                    return self._analyze_current_decay(time_values, current_values)
-            else:
-                # Default: analyze both and return the better fit
-                voltage_result = self._analyze_voltage_decay(time_values, voltage_values)
-                current_result = self._analyze_current_decay(time_values, current_values)
+            # Always attempt both voltage and current decay analysis
+            voltage_result = self._analyze_voltage_decay(time_values, voltage_values)
+            current_result = self._analyze_current_decay(time_values, current_values)
+            
+            # Determine which analysis succeeded and return the best result
+            voltage_success = voltage_result.get('success', False)
+            current_success = current_result.get('success', False)
+            
+            if voltage_success and current_success:
+                # Both succeeded - return the better fit based on R²
+                voltage_r2 = voltage_result.get('r_squared', 0)
+                current_r2 = current_result.get('r_squared', 0)
                 
-                # Return the result with better R²
-                if (voltage_result.get('r_squared', 0) > current_result.get('r_squared', 0)):
+                if voltage_r2 >= current_r2:
                     return voltage_result
                 else:
                     return current_result
+                    
+            elif voltage_success:
+                # Only voltage analysis succeeded
+                return voltage_result
+                
+            elif current_success:
+                # Only current analysis succeeded
+                return current_result
+                
+            else:
+                # Both failed - return insufficient data message
+                return {
+                    'analysis_type': 'rest_insufficient_data', 
+                    'success': False,
+                    'voltage_error': voltage_result.get('error', 'Unknown'),
+                    'current_error': current_result.get('error', 'Unknown')
+                }
                     
         except Exception as e:
             self.logger.debug(f"Rest phase analysis failed: {e}")
