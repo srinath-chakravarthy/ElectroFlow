@@ -118,22 +118,38 @@ class VersaStudioParser(DualFileParser):
             version_match = re.search(r'VERSION\s+(.+)', content, re.IGNORECASE)
             software_version = version_match.group(1).strip() if version_match else "Unknown"
             
-            # Date and time
-            date_match = re.search(r'DATE ACQUIRED\s+(.+)', content, re.IGNORECASE)
-            time_match = re.search(r'TIME ACQUIRED\s+(.+)', content, re.IGNORECASE)
+            # Date and time - handle both old and new VersaStudio formats
+            date_match = re.search(r'DateAcquired=(.+)', content) or re.search(r'DATE ACQUIRED\s+(.+)', content, re.IGNORECASE)
+            time_match = re.search(r'TimeAcquired=(.+)', content) or re.search(r'TIME ACQUIRED\s+(.+)', content, re.IGNORECASE)
             
             if date_match and time_match:
                 date_str = date_match.group(1).strip()
                 time_str = time_match.group(1).strip()
-                try:
-                    acquisition_start = datetime.strptime(f"{date_str} {time_str}", "%m/%d/%Y %H:%M:%S")
-                except ValueError:
-                    # Try alternative format
+                
+                # Try multiple datetime formats
+                datetime_formats = [
+                    "%A, %B %d, %Y %I:%M:%S %p",    # Monday, April 7, 2025 12:41:57 PM
+                    "%m/%d/%Y %H:%M:%S",             # 04/07/2025 12:41:57
+                    "%d/%m/%Y %H:%M:%S",             # 07/04/2025 12:41:57
+                    "%Y-%m-%d %H:%M:%S",             # 2025-04-07 12:41:57
+                    "%m/%d/%Y %I:%M:%S %p",          # 04/07/2025 12:41:57 PM
+                    "%d/%m/%Y %I:%M:%S %p"           # 07/04/2025 12:41:57 PM
+                ]
+                
+                acquisition_start = None
+                for fmt in datetime_formats:
                     try:
-                        acquisition_start = datetime.strptime(f"{date_str} {time_str}", "%d/%m/%Y %H:%M:%S")
+                        acquisition_start = datetime.strptime(f"{date_str} {time_str}", fmt)
+                        logger.debug(f"Parsed timestamp with format: {fmt}")
+                        break
                     except ValueError:
-                        acquisition_start = datetime.now()
+                        continue
+                
+                if acquisition_start is None:
+                    logger.warning(f"Could not parse timestamp: '{date_str} {time_str}' - using current time")
+                    acquisition_start = datetime.now()
             else:
+                logger.warning(f"Date/time not found in file - using current time")
                 acquisition_start = datetime.now()
             
             # Notes
