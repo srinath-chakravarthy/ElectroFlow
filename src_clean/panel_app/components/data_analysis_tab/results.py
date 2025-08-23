@@ -241,11 +241,8 @@ class ResultsDisplay:
         
         avg_resistance = resistance_data.get('average_resistance_ohm', 0.0)
         
-        # Calculate equilibrium voltage statistics
-        eq_voltages = []
-        for eq_data in equilibrium_data.values():
-            if eq_data and 'equilibrium_voltage_v' in eq_data:
-                eq_voltages.append(eq_data['equilibrium_voltage_v'])
+        # Calculate equilibrium voltage statistics from kinetics_data instead of equilibrium_data  
+        eq_voltages = kinetics_data.get('equilibrium_voltages', [])
         
         avg_eq_voltage = sum(eq_voltages) / len(eq_voltages) if eq_voltages else 0.0
         
@@ -263,31 +260,22 @@ class ResultsDisplay:
         )
         
         html_content = f"""
-        <div style='background: #E8F5E8; padding: 15px; border-radius: 6px; border: 1px solid #2E7D32;'>
-            <div style='color: #2E7D32; font-weight: 600; font-size: 16px; margin-bottom: 12px;'>
-                ⚡ Kinetics Analysis Results
+        <div style='background: #E8F5E8; padding: 10px; border-radius: 4px; border: 1px solid #2E7D32;'>
+            <div style='color: #2E7D32; font-weight: 600; font-size: 14px; margin-bottom: 8px;'>
+                ⚡ Kinetics Analysis Summary
             </div>
             
-            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;'>
-                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
-                    <strong>Time Constants:</strong> {num_time_constants} parameters
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;'>
+                <div style='background: white; padding: 5px; border-radius: 3px; border: 1px solid #E8E8E8; font-size: 11px;'>
+                    <strong>Equilibrium V:</strong> {avg_eq_voltage:.4f} V ({len(eq_voltages)} points)
                 </div>
-                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
-                    <strong>Diffusion Coeffs:</strong> {num_diffusion_coeffs} computed
-                </div>
-                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
-                    <strong>Avg Resistance:</strong> {avg_resistance:.4f} Ω
-                </div>
-                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
-                    <strong>Equilibrium V:</strong> {avg_eq_voltage:.4f} V
-                </div>
-                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8; grid-column: 1 / -1;'>
-                    <strong>Analysis Status:</strong> {completeness_indicator} ({completeness_score}% complete)
+                <div style='background: white; padding: 5px; border-radius: 3px; border: 1px solid #E8E8E8; font-size: 11px;'>
+                    <strong>Status:</strong> {completeness_indicator} ({completeness_score}%)
                 </div>
             </div>
             
-            <div style='color: #666; font-size: 12px; margin-top: 8px;'>
-                <em>Comprehensive kinetics backend • {num_equilibrium_points} equilibrium points analyzed</em>
+            <div style='color: #666; font-size: 10px; text-align: center;'>
+                <em>📊 Detailed kinetics analysis available in plot area below</em>
             </div>
         </div>
         """

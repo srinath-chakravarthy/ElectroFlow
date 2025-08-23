@@ -212,10 +212,14 @@ class ElectrochemicalInsights:
             # Track equilibrium evolution
             evolution = self._track_equilibrium_evolution(equilibrium_results)
             
+            # Calculate diffusion coefficients from time constants
+            diffusion_coefficients = self._calculate_diffusion_coefficients(equilibrium_results)
+            
             return {
                 'analysis_type': 'equilibrium_voltage_analysis',
                 'segment_count': len([s for s in segment_data if s.get('technique_name', '').upper() == 'REST']),
-                'individual_equilibrium': [self._equilibrium_to_dict(e) for e in equilibrium_results],
+                'individual_equilibrium': [self._equilibrium_to_dict(e, diffusion_coefficients.get(e.segment_id)) for e in equilibrium_results],
+                'diffusion_coefficients': diffusion_coefficients,
                 'equilibrium_evolution': evolution,
                 'electrochemical_insights': self._interpret_equilibrium_analysis(equilibrium_results)
             }
@@ -332,39 +336,45 @@ class ElectrochemicalInsights:
         return kinetics
     
     def _calculate_instantaneous_resistance(self, segment: Dict[str, Any]) -> Optional[ResistanceAnalysis]:
-        """Calculate instantaneous resistance from segment boundary data."""
+        """Extract resistance analysis from segment analysis_results (already calculated)."""
         try:
-            # Get voltage and current changes
-            start_voltage = segment.get('start_potential_v', 0.0)
-            end_voltage = segment.get('end_potential_v', 0.0)
-            start_current = segment.get('start_current_a', 0.0)
-            end_current = segment.get('end_current_a', 0.0)
-            duration = segment.get('duration_s', 0.0)
+            # Extract resistance analysis from analysis_results (direct fields, not calculated)
+            analysis_results = segment.get('analysis_results', {})
+            if isinstance(analysis_results, str):
+                try:
+                    analysis_results = json.loads(analysis_results)
+                except json.JSONDecodeError:
+                    analysis_results = {}
             
-            voltage_change = end_voltage - start_voltage
-            current_change = end_current - start_current
+            # Check if this is a current_pulse analysis with resistance data
+            if not (analysis_results.get('success') and analysis_results.get('analysis_type') == 'current_pulse'):
+                return None
             
             resistance_analysis = ResistanceAnalysis(
                 segment_id="",  # Will be set by caller
                 technique="GALVANOSTATIC",
-                current_pulse_a=end_current,
-                voltage_change_v=voltage_change,
-                pulse_duration_s=duration
+                current_pulse_a=segment.get('end_current_a', 0.0),
+                voltage_change_v=segment.get('end_potential_v', 0.0) - segment.get('start_potential_v', 0.0),
+                pulse_duration_s=segment.get('duration_s', 0.0)
             )
             
-            # Calculate instantaneous resistance (ΔV/ΔI)
-            if abs(current_change) > 1e-6:  # Avoid division by zero
-                resistance_analysis.ir_immediate_ohm = voltage_change / current_change
-                resistance_analysis.calculation_quality = self._assess_resistance_quality(
-                    resistance_analysis.ir_immediate_ohm, current_change
-                )
+            # Extract resistance values using analytics_config current_pulse schema field names
+            resistance_analysis.ir_immediate_ohm = analysis_results.get('ir_immediate_ohm')
+            resistance_analysis.ir_10s_ohm = analysis_results.get('ir_10s_ohm') 
+            resistance_analysis.ir_30s_ohm = analysis_results.get('ir_30s_ohm')
+            resistance_analysis.baseline_voltage_v = analysis_results.get('baseline_voltage_v')
+            resistance_analysis.average_current_a = analysis_results.get('average_current_a')
+            
+            # Set quality based on data availability
+            if resistance_analysis.ir_immediate_ohm is not None:
+                resistance_analysis.calculation_quality = "good"  # Data already validated during analysis
             else:
                 resistance_analysis.calculation_quality = "invalid"
             
             return resistance_analysis
             
         except Exception as e:
-            self.logger.error(f"Failed to calculate instantaneous resistance: {e}")
+            self.logger.error(f"Failed to extract resistance analysis: {e}")
             return None
     
     def _analyze_equilibrium_voltage(self, segment: Dict[str, Any]) -> Optional[EquilibriumAnalysis]:
@@ -389,16 +399,14 @@ class ElectrochemicalInsights:
                 end_voltage_v=end_voltage
             )
             
-            # Get equilibrium voltage from fit coefficients if available
-            all_fits = analysis_results.get('all_fit_coefficients', {})
-            voltage_fit = (all_fits.get('exponential_fits', {}).get('voltage', {}) or
-                          all_fits.get('sqrt_fits', {}).get('voltage', {}))
-            
-            if voltage_fit:
-                equilibrium_analysis.voltage_infinity = voltage_fit.get('voltage_infinity', end_voltage)
-                equilibrium_analysis.time_constant_s = voltage_fit.get('time_constant_s')
-                equilibrium_analysis.voltage_amplitude = voltage_fit.get('voltage_amplitude')
-                equilibrium_analysis.r_squared = voltage_fit.get('r_squared')
+            # Get equilibrium voltage from analysis_results (direct fields, not nested)
+            # Fields match analytics_config exponential_fit schema: voltage_infinity, time_constant_s, etc.
+            if analysis_results.get('success'):
+                # Use analytics_config field names directly
+                equilibrium_analysis.voltage_infinity = analysis_results.get('voltage_infinity', end_voltage)
+                equilibrium_analysis.time_constant_s = analysis_results.get('time_constant_s')
+                equilibrium_analysis.voltage_amplitude = analysis_results.get('voltage_amplitude')
+                equilibrium_analysis.r_squared = analysis_results.get('r_squared')
             else:
                 equilibrium_analysis.voltage_infinity = end_voltage
             
@@ -442,6 +450,34 @@ class ElectrochemicalInsights:
             })
         
         return decay_results
+    
+    def _calculate_diffusion_coefficients(self, equilibrium_results: List[EquilibriumAnalysis]) -> Dict[str, float]:
+        """
+        Calculate diffusion coefficients from time constants using Cottrell equation.
+        
+        Args:
+            equilibrium_results: List of equilibrium analysis results with time constants
+            
+        Returns:
+            Dictionary mapping segment_id to diffusion coefficient in cm²/s
+        """
+        diffusion_coefficients = {}
+        
+        # Typical electrode dimensions for Li-ion cells
+        # These should ideally be extracted from cell metadata
+        characteristic_length_cm = 0.01  # 100 μm typical electrode thickness
+        
+        for equilibrium in equilibrium_results:
+            if equilibrium.time_constant_s is not None and equilibrium.time_constant_s > 0:
+                # Cottrell equation: D = L² / (π² * τ)
+                # Where: D = diffusion coefficient, L = characteristic length, τ = time constant
+                diffusion_coeff = (characteristic_length_cm ** 2) / (np.pi ** 2 * equilibrium.time_constant_s)
+                diffusion_coefficients[equilibrium.segment_id] = diffusion_coeff
+                
+                self.logger.debug(f"Calculated diffusion coefficient for segment {equilibrium.segment_id}: "
+                                f"{diffusion_coeff:.2e} cm²/s (τ = {equilibrium.time_constant_s:.1f} s)")
+        
+        return diffusion_coefficients
     
     def _assess_fit_quality(self, r_squared: float) -> str:
         """Assess fit quality based on R² value."""
@@ -689,7 +725,7 @@ class ElectrochemicalInsights:
             'calculation_quality': resistance.calculation_quality
         }
     
-    def _equilibrium_to_dict(self, equilibrium: EquilibriumAnalysis) -> Dict[str, Any]:
+    def _equilibrium_to_dict(self, equilibrium: EquilibriumAnalysis, diffusion_coeff: Optional[float] = None) -> Dict[str, Any]:
         """Convert EquilibriumAnalysis to dictionary using analytics_config exponential_fit schema."""
         return {
             'segment_id': equilibrium.segment_id,
@@ -702,7 +738,8 @@ class ElectrochemicalInsights:
             'r_squared': equilibrium.r_squared,                       # Analytics config
             'voltage_drift_mv_min': equilibrium.voltage_drift_mv_min, # Supplementary
             'stability_achieved': equilibrium.stability_achieved,     # Supplementary
-            'stability_time_s': equilibrium.stability_time_s         # Supplementary
+            'stability_time_s': equilibrium.stability_time_s,         # Supplementary
+            'diffusion_coefficient_cm2_s': diffusion_coeff            # Calculated on-the-fly
         }
 
 

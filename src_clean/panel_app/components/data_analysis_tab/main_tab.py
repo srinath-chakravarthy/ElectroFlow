@@ -551,13 +551,11 @@ class DataAnalysisTab(param.Parameterized):
                     'total_measurements': 0,
                     'valid_measurements': 0,
                     'null_measurements': 0,
-                    'invalid_measurements': 0,
                     'resistance_values_ohm': [],
                     'time_points_s': [],
                     'average_resistance_ohm': 0.0,
                     'resistance_std_ohm': 0.0,
-                    'measurement_types': set(),
-                    'calculation_quality': []
+                    'measurement_types': set()
                 }
                 
                 # Extract resistance measurements from backend structure
@@ -568,15 +566,9 @@ class DataAnalysisTab(param.Parameterized):
                     for resistance_data in individual_resistances:
                         if isinstance(resistance_data, dict):
                             segment_id = resistance_data.get('segment_id', 'unknown')
-                            quality = resistance_data.get('calculation_quality', 'unknown')
-                            resistance_summary['calculation_quality'].append(quality)
                             
                             # Count all measurements first
                             resistance_summary['total_measurements'] += 1
-                            
-                            # Track quality
-                            if quality == 'invalid':
-                                resistance_summary['invalid_measurements'] += 1
                             
                             # Process each resistance type using analytics config current_pulse schema
                             for key, time_point, type_name in [
@@ -661,13 +653,10 @@ class DataAnalysisTab(param.Parameterized):
                 results['total_measurements'] = resistance_summary['total_measurements']
                 results['valid_measurements'] = resistance_summary['valid_measurements']
                 results['null_measurements'] = resistance_summary['null_measurements']
-                results['invalid_measurements'] = resistance_summary['invalid_measurements']
                 results['measurement_types'] = list(resistance_summary['measurement_types'])
-                results['calculation_quality'] = resistance_summary['calculation_quality']
                 
-                # Enhanced logging with quality information
-                quality_info = f"valid:{results['valid_measurements']}, null:{results['null_measurements']}, invalid:{results['invalid_measurements']}"
-                print(f"Resistance analysis complete: {results['total_measurements']} total measurements ({quality_info}), avg={results['avg_resistance']:.4f}Ω")
+                # Enhanced logging
+                print(f"Resistance analysis complete: {results['total_measurements']} total measurements (valid:{results['valid_measurements']}, null:{results['null_measurements']}), avg={results['avg_resistance']:.4f}Ω")
                 
             else:
                 print("No resistance analysis data returned from backend")

@@ -228,11 +228,13 @@ class PlottingManager:
         return pn.pane.HTML(summary_html)
     
     def _create_statistics_histogram(self, data: Dict[str, Any]):
-        """Create histogram visualization for statistics with real electrochemical data."""
+        """Create histogram visualization for per-technique statistics with real electrochemical data."""
         
-        backend_results = data.get('backend_results', {})
+        technique_breakdown = data.get('technique_breakdown', {})
+        techniques_found = data.get('techniques_found', [])
+        total_segments = data.get('total_segments', 0)
         
-        if not backend_results:
+        if not technique_breakdown:
             return self._create_empty_plot("No statistical data available for histogram")
         
         # Extract data for histogram visualization
@@ -1283,63 +1285,69 @@ class PlottingManager:
             """
         
         kinetics_html = f"""
-        <div style='padding: 20px;'>
-            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
-                <h3 style='color: #2E4057; margin: 0;'>⚗️ Kinetics Analysis - Voltage & Time</h3>
-                <div style='color: #666; font-size: 12px;'>
+        <div style='width: 100%; max-width: 700px; padding: 10px; margin: 0; overflow: hidden; box-sizing: border-box;'>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;'>
+                <h3 style='color: #2E4057; margin: 0; font-size: 18px;'>⚗️ Kinetics Analysis - Voltage & Time</h3>
+                <div style='color: #666; font-size: 11px; text-align: right;'>
                     {len(equilibrium_voltages)} equilibrium voltages<br>
                     <em>Electrochemical equilibrium backend</em>
                 </div>
             </div>
             
             <!-- Primary equilibrium voltage data -->
-            <div style='margin-bottom: 20px;'>
-                <h4 style='color: #1976D2; margin-bottom: 10px;'>Equilibrium Voltages</h4>
-                <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-                    <thead>
-                        <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
-                            <th style='padding: 10px; text-align: left; font-weight: 600;'>Parameter</th>
-                            <th style='padding: 10px; text-align: right; font-weight: 600;'>Value</th>
-                            <th style='padding: 10px; text-align: right; font-weight: 600;'>Unit</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {eq_voltage_rows}
-                    </tbody>
-                </table>
-            </div>
-            
-            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px;'>
-                <div>
-                    <h4 style='color: #1976D2; margin-bottom: 10px;'>Time Constants</h4>
-                    <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            <div style='margin-bottom: 12px;'>
+                <h4 style='color: #1976D2; margin-bottom: 6px; font-size: 14px;'>Equilibrium Voltages</h4>
+                <div style='max-height: 180px; overflow-y: auto;'>
+                    <table style='width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 11px;'>
                         <thead>
                             <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
-                                <th style='padding: 10px; text-align: left; font-weight: 600;'>Parameter</th>
-                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Value</th>
-                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Unit</th>
+                                <th style='padding: 6px; text-align: left; font-weight: 600;'>Parameter</th>
+                                <th style='padding: 6px; text-align: right; font-weight: 600;'>Value</th>
+                                <th style='padding: 6px; text-align: right; font-weight: 600;'>Unit</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {tc_rows}
+                            {eq_voltage_rows}
                         </tbody>
                     </table>
                 </div>
+            </div>
+            
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;'>
+                <div style='max-height: 140px;'>
+                    <h4 style='color: #1976D2; margin-bottom: 6px; font-size: 13px;'>Time Constants</h4>
+                    <div style='max-height: 120px; overflow-y: auto;'>
+                        <table style='width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 10px;'>
+                            <thead>
+                                <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
+                                    <th style='padding: 4px; text-align: left; font-weight: 600;'>Param</th>
+                                    <th style='padding: 4px; text-align: right; font-weight: 600;'>Value</th>
+                                    <th style='padding: 4px; text-align: right; font-weight: 600;'>Unit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {tc_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
                 
-                <div>
-                    <h4 style='color: #1976D2; margin-bottom: 10px;'>Diffusion Coefficients</h4>
-                    <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-                        <thead>
-                            <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
-                                <th style='padding: 10px; text-align: left; font-weight: 600;'>Parameter</th>
-                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Value</th>
-                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Units</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {dc_rows}
-                        </tbody>
-                    </table>
+                <div style='max-height: 140px;'>
+                    <h4 style='color: #1976D2; margin-bottom: 6px; font-size: 13px;'>Diffusion Coefficients</h4>
+                    <div style='max-height: 120px; overflow-y: auto;'>
+                        <table style='width: 100%; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 10px;'>
+                            <thead>
+                                <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
+                                    <th style='padding: 4px; text-align: left; font-weight: 600;'>Param</th>
+                                    <th style='padding: 4px; text-align: right; font-weight: 600;'>Value</th>
+                                    <th style='padding: 4px; text-align: right; font-weight: 600;'>Unit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {dc_rows}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
             

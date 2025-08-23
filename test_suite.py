@@ -33,9 +33,10 @@ try:
     from src_clean.parsers import get_parser_factory
     from src_clean.core import DatabaseManager
     from src_clean.core.data_models import (
-        UNIVERSAL_SCHEMA, VERSASTUDIO_CSV_SCHEMA,
+        VERSASTUDIO_CSV_SCHEMA,
         create_empty_universal_dataframe, FileMetadata
     )
+    from src_clean.parsers.configs.universal_schema import UNIVERSAL_SCHEMA
     from src_clean.core.exceptions import format_error_for_user
     import polars as pl
 except ImportError as e:
