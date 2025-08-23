@@ -1147,15 +1147,25 @@ class PlottingManager:
             """
             return pn.pane.HTML(diagnostic_html)
         
-        # Extract kinetics data
-        time_constants = kinetics_data.get('time_constants', [])
-        diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
-        equilibrium_voltages = kinetics_data.get('equilibrium_voltages', [])
+        # Extract kinetics data with proper handling of None values
+        raw_time_constants = kinetics_data.get('time_constants', [])
+        raw_diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
+        raw_equilibrium_voltages = kinetics_data.get('equilibrium_voltages', [])
         calculation_quality = kinetics_data.get('calculation_quality', [])
         
-        # Show meaningful diagnostic even with some valid data
+        # Filter out None values and convert to proper numeric data
+        time_constants = [tc for tc in raw_time_constants if tc is not None and isinstance(tc, (int, float))]
+        diffusion_coeffs = [dc for dc in raw_diffusion_coeffs if dc is not None and isinstance(dc, (int, float))]
+        equilibrium_voltages = [ev for ev in raw_equilibrium_voltages if ev is not None and isinstance(ev, (int, float))]
+        
+        print(f"DEBUG: Filtered data - {len(equilibrium_voltages)} valid equilibrium voltages, {len(time_constants)} valid time constants, {len(diffusion_coeffs)} valid diffusion coeffs")
+        
+        # Show meaningful diagnostic only if we have no data at all
         if not time_constants and not diffusion_coeffs and not equilibrium_voltages:
             return self._create_empty_plot("No valid kinetics parameters (time constants, diffusion coefficients, or equilibrium voltages) available")
+            
+        # Show info about what data we have
+        print(f"DEBUG: Creating kinetics plots with {len(equilibrium_voltages)} equilibrium voltages, {len(time_constants)} time constants, {len(diffusion_coeffs)} diffusion coefficients")
         
         # Create interactive plots for kinetics data
         try:
@@ -1250,14 +1260,22 @@ class PlottingManager:
                 plots.append(quality_plot)
             
             # Combine plots in a layout
+            print(f"DEBUG: Created {len(plots)} individual plots")
+            
             if len(plots) >= 3:
                 plot_layout = (plots[0] + plots[1] + plots[2]).cols(2).opts(shared_axes=False)
                 if len(plots) > 3:
                     plot_layout = (plots[0] + plots[1] + plots[2] + plots[3]).cols(2).opts(shared_axes=False)
+                print(f"DEBUG: Created combined layout with {len(plots)} plots")
             elif len(plots) == 2:
                 plot_layout = (plots[0] + plots[1]).opts(shared_axes=False)
+                print(f"DEBUG: Created 2-plot layout")
+            elif len(plots) == 1:
+                plot_layout = plots[0]
+                print(f"DEBUG: Using single plot layout")
             else:
-                plot_layout = plots[0] if plots else None
+                plot_layout = None
+                print(f"DEBUG: No plots created, returning empty")
             
             if not plot_layout:
                 return self._create_empty_plot("No kinetics data available for plotting")
@@ -1282,7 +1300,9 @@ class PlottingManager:
             *Electrochemical equilibrium backend • Interactive hvplot visualization*
             """, margin=(10, 20))
             
-            return pn.Column(summary_info, pn.pane.HoloViews(plot_layout), sizing_mode='stretch_width')
+            result_column = pn.Column(summary_info, pn.pane.HoloViews(plot_layout), sizing_mode='stretch_width')
+            print(f"DEBUG: Returning Column with {len(result_column)} components: {[type(comp).__name__ for comp in result_column]}")
+            return result_column
         
         else:
             # Fallback error display using Markdown
