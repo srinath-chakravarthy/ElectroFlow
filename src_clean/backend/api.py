@@ -1693,6 +1693,360 @@ class BackendAPI:
         """Convenience method to refresh template groups for all cells."""
         return self.refresh_template_groups(cell_name=None)
 
+    # =============================================================================
+    # ADVANCED GROUP ANALYTICS
+    # =============================================================================
+
+    def get_group_temporal_analytics(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get temporal analytics for groups including cumulative calculations.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Dictionary with time-series data and cumulative analytics
+        """
+        try:
+            from src_clean.analysis.cumulative_calculator import get_cumulative_calculator
+            from src_clean.analysis.analytics_config import get_config as get_analytics_config
+            
+            calculator = get_cumulative_calculator()
+            config = get_analytics_config()
+            
+            # Get all segments for the groups
+            all_segments = []
+            group_files = []
+            
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+                
+                # Collect unique file information
+                for segment in segments:
+                    file_info = {
+                        'file_id': segment.get('file_id'),
+                        'cell_name': self._get_cell_name_from_segment(segment),
+                        'original_filename': segment.get('original_filename', segment.get('file_id'))
+                    }
+                    if file_info not in group_files:
+                        group_files.append(file_info)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Get cumulative context for the files
+            context = calculator.get_group_cumulative_context(group_files)
+            
+            # Calculate temporal analytics
+            temporal_data = {
+                'segments': [],
+                'time_series': {
+                    'time_points': [],
+                    'cumulative_capacity': [],
+                    'cumulative_energy': [],
+                    'individual_capacity': [],
+                    'individual_energy': [],
+                    'voltage_start': [],
+                    'voltage_end': []
+                },
+                'summary': {
+                    'total_duration_s': 0.0,
+                    'total_capacity_ah': 0.0,
+                    'total_energy_wh': 0.0,
+                    'segment_count': len(all_segments),
+                    'file_count': len(group_files)
+                }
+            }
+            
+            # Sort segments by start time for proper temporal order
+            sorted_segments = sorted(all_segments, key=lambda s: s.get('start_time_s', 0))
+            
+            running_capacity = 0.0
+            running_energy = 0.0
+            
+            for segment in sorted_segments:
+                # Calculate cumulative values for this segment
+                cumulative_values = calculator.calculate_segment_cumulative_values(segment, context)
+                
+                # Add to temporal data
+                segment_capacity = segment.get('capacity_ah', 0.0)
+                segment_energy = segment.get('energy_wh', 0.0)
+                
+                running_capacity += segment_capacity
+                running_energy += segment_energy
+                
+                temporal_data['segments'].append({
+                    **segment,
+                    **cumulative_values
+                })
+                
+                # Add to time series
+                temporal_data['time_series']['time_points'].append(segment.get('start_time_s', 0))
+                temporal_data['time_series']['cumulative_capacity'].append(running_capacity)
+                temporal_data['time_series']['cumulative_energy'].append(running_energy)
+                temporal_data['time_series']['individual_capacity'].append(segment_capacity)
+                temporal_data['time_series']['individual_energy'].append(segment_energy)
+                temporal_data['time_series']['voltage_start'].append(segment.get('start_potential_v', 0))
+                temporal_data['time_series']['voltage_end'].append(segment.get('end_potential_v', 0))
+            
+            # Update summary
+            if sorted_segments:
+                temporal_data['summary'].update({
+                    'total_duration_s': max(s.get('end_time_s', 0) for s in sorted_segments),
+                    'total_capacity_ah': running_capacity,
+                    'total_energy_wh': running_energy
+                })
+            
+            return temporal_data
+            
+        except Exception as e:
+            logger.error(f"Failed to get group temporal analytics: {e}")
+            return {'error': str(e)}
+
+    def get_group_fit_quality_statistics(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get fitting quality statistics across group techniques.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Dictionary with R² distributions and fit success rates
+        """
+        try:
+            import json
+            import numpy as np
+            from collections import defaultdict
+            
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Collect fit quality data
+            fit_quality = {
+                'exponential_fits': defaultdict(list),
+                'sqrt_fits': defaultdict(list),
+                'overall_stats': {},
+                'technique_breakdown': defaultdict(lambda: {
+                    'total_segments': 0,
+                    'successful_exp_fits': 0,
+                    'successful_sqrt_fits': 0,
+                    'exp_r2_values': [],
+                    'sqrt_r2_values': []
+                })
+            }
+            
+            for segment in all_segments:
+                technique = segment.get('fundamental_technique', 'Unknown')
+                analysis_results = segment.get('analysis_results')
+                
+                fit_quality['technique_breakdown'][technique]['total_segments'] += 1
+                
+                if analysis_results:
+                    try:
+                        # Parse JSON if it's a string
+                        if isinstance(analysis_results, str):
+                            results = json.loads(analysis_results)
+                        else:
+                            results = analysis_results
+                        
+                        # Extract fitting results
+                        all_coeffs = results.get('all_fit_coefficients', {})
+                        
+                        # Exponential fit data
+                        exp_fits = all_coeffs.get('exponential_fits', {})
+                        for variable, fit_data in exp_fits.items():
+                            r2 = fit_data.get('r_squared', 0.0)
+                            if r2 > 0:
+                                fit_quality['exponential_fits'][variable].append(r2)
+                                fit_quality['technique_breakdown'][technique]['exp_r2_values'].append(r2)
+                                fit_quality['technique_breakdown'][technique]['successful_exp_fits'] += 1
+                        
+                        # sqrt(t) fit data
+                        sqrt_fits = all_coeffs.get('sqrt_fits', {})
+                        for variable, fit_data in sqrt_fits.items():
+                            r2 = fit_data.get('r_squared', 0.0)
+                            if r2 > 0:
+                                fit_quality['sqrt_fits'][variable].append(r2)
+                                fit_quality['technique_breakdown'][technique]['sqrt_r2_values'].append(r2)
+                                fit_quality['technique_breakdown'][technique]['successful_sqrt_fits'] += 1
+                                
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(f"Failed to parse analysis results for segment {segment.get('id', 'unknown')}: {e}")
+            
+            # Calculate overall statistics
+            all_exp_r2 = []
+            all_sqrt_r2 = []
+            
+            for variable_r2_list in fit_quality['exponential_fits'].values():
+                all_exp_r2.extend(variable_r2_list)
+            
+            for variable_r2_list in fit_quality['sqrt_fits'].values():
+                all_sqrt_r2.extend(variable_r2_list)
+            
+            fit_quality['overall_stats'] = {
+                'exponential_fits': {
+                    'count': len(all_exp_r2),
+                    'mean_r2': float(np.mean(all_exp_r2)) if all_exp_r2 else 0.0,
+                    'std_r2': float(np.std(all_exp_r2)) if all_exp_r2 else 0.0,
+                    'min_r2': float(np.min(all_exp_r2)) if all_exp_r2 else 0.0,
+                    'max_r2': float(np.max(all_exp_r2)) if all_exp_r2 else 0.0
+                },
+                'sqrt_fits': {
+                    'count': len(all_sqrt_r2),
+                    'mean_r2': float(np.mean(all_sqrt_r2)) if all_sqrt_r2 else 0.0,
+                    'std_r2': float(np.std(all_sqrt_r2)) if all_sqrt_r2 else 0.0,
+                    'min_r2': float(np.min(all_sqrt_r2)) if all_sqrt_r2 else 0.0,
+                    'max_r2': float(np.max(all_sqrt_r2)) if all_sqrt_r2 else 0.0
+                },
+                'total_segments': len(all_segments),
+                'segments_with_fits': len([s for s in all_segments if s.get('analysis_results')])
+            }
+            
+            # Convert defaultdicts to regular dicts for JSON serialization
+            fit_quality['exponential_fits'] = dict(fit_quality['exponential_fits'])
+            fit_quality['sqrt_fits'] = dict(fit_quality['sqrt_fits'])
+            fit_quality['technique_breakdown'] = dict(fit_quality['technique_breakdown'])
+            
+            return fit_quality
+            
+        except Exception as e:
+            logger.error(f"Failed to get group fit quality statistics: {e}")
+            return {'error': str(e)}
+
+    def get_group_voltage_correlation_analytics(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get voltage correlation analytics for groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Dictionary with correlation analysis between metrics and voltages
+        """
+        try:
+            import numpy as np
+            from scipy.stats import pearsonr, spearmanr
+            
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Extract relevant metrics
+            metrics = {
+                'start_voltage': [],
+                'end_voltage': [],
+                'capacity': [],
+                'energy': [],
+                'duration': [],
+                'start_current': [],
+                'end_current': []
+            }
+            
+            for segment in all_segments:
+                metrics['start_voltage'].append(segment.get('start_potential_v', 0.0))
+                metrics['end_voltage'].append(segment.get('end_potential_v', 0.0))
+                metrics['capacity'].append(segment.get('capacity_ah', 0.0))
+                metrics['energy'].append(segment.get('energy_wh', 0.0))
+                metrics['duration'].append(segment.get('duration_s', 0.0))
+                metrics['start_current'].append(segment.get('start_current_a', 0.0))
+                metrics['end_current'].append(segment.get('end_current_a', 0.0))
+            
+            # Calculate correlations
+            correlations = {
+                'vs_start_voltage': {},
+                'vs_end_voltage': {},
+                'summary': {
+                    'segment_count': len(all_segments),
+                    'voltage_range_start': [float(np.min(metrics['start_voltage'])), float(np.max(metrics['start_voltage']))],
+                    'voltage_range_end': [float(np.min(metrics['end_voltage'])), float(np.max(metrics['end_voltage']))]
+                }
+            }
+            
+            # Correlations with start voltage
+            for metric_name in ['capacity', 'energy', 'duration', 'end_voltage']:
+                if len(metrics[metric_name]) > 2:  # Need at least 3 points for meaningful correlation
+                    try:
+                        pearson_r, pearson_p = pearsonr(metrics['start_voltage'], metrics[metric_name])
+                        spearman_r, spearman_p = spearmanr(metrics['start_voltage'], metrics[metric_name])
+                        
+                        correlations['vs_start_voltage'][metric_name] = {
+                            'pearson_r': float(pearson_r) if not np.isnan(pearson_r) else 0.0,
+                            'pearson_p': float(pearson_p) if not np.isnan(pearson_p) else 1.0,
+                            'spearman_r': float(spearman_r) if not np.isnan(spearman_r) else 0.0,
+                            'spearman_p': float(spearman_p) if not np.isnan(spearman_p) else 1.0,
+                            'data_points': len(metrics[metric_name])
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate correlation for {metric_name} vs start_voltage: {e}")
+                        correlations['vs_start_voltage'][metric_name] = {'error': str(e)}
+            
+            # Correlations with end voltage
+            for metric_name in ['capacity', 'energy', 'duration', 'start_voltage']:
+                if len(metrics[metric_name]) > 2:
+                    try:
+                        pearson_r, pearson_p = pearsonr(metrics['end_voltage'], metrics[metric_name])
+                        spearman_r, spearman_p = spearmanr(metrics['end_voltage'], metrics[metric_name])
+                        
+                        correlations['vs_end_voltage'][metric_name] = {
+                            'pearson_r': float(pearson_r) if not np.isnan(pearson_r) else 0.0,
+                            'pearson_p': float(pearson_p) if not np.isnan(pearson_p) else 1.0,
+                            'spearman_r': float(spearman_r) if not np.isnan(spearman_r) else 0.0,
+                            'spearman_p': float(spearman_p) if not np.isnan(spearman_p) else 1.0,
+                            'data_points': len(metrics[metric_name])
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate correlation for {metric_name} vs end_voltage: {e}")
+                        correlations['vs_end_voltage'][metric_name] = {'error': str(e)}
+            
+            return correlations
+            
+        except Exception as e:
+            logger.error(f"Failed to get group voltage correlation analytics: {e}")
+            return {'error': str(e)}
+
+    def _get_cell_name_from_segment(self, segment: Dict[str, Any]) -> str:
+        """Helper to get cell name from segment data."""
+        # This would typically require a database lookup
+        # For now, try to extract from existing data or return default
+        return segment.get('cell_name', 'unknown')
+
+    def get_cumulative_field_names(self) -> List[str]:
+        """
+        Get list of all cumulative field names from analytics config.
+        
+        Returns:
+            List of field names that contain 'cumulative'
+        """
+        try:
+            from src_clean.analysis.analytics_config import get_config as get_analytics_config
+            
+            config = get_analytics_config()
+            cumulative_fields = list(config.get('segment_cumulative_fields', {}).keys())
+            
+            # Also check base fields for any with 'cumulative' in name
+            base_fields = config.get('segment_base_fields', {})
+            for field_name in base_fields.keys():
+                if 'cumulative' in field_name.lower() and field_name not in cumulative_fields:
+                    cumulative_fields.append(field_name)
+            
+            return cumulative_fields
+            
+        except Exception as e:
+            logger.error(f"Failed to get cumulative field names: {e}")
+            return []
+
 # =============================================================================
 # GLOBAL INSTANCE
 # =============================================================================
