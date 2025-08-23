@@ -1259,23 +1259,16 @@ class PlottingManager:
                 )
                 plots.append(quality_plot)
             
-            # Combine plots in a layout
+            # Combine plots in a simpler layout to avoid rendering issues
             print(f"DEBUG: Created {len(plots)} individual plots")
             
-            if len(plots) >= 3:
-                plot_layout = (plots[0] + plots[1] + plots[2]).cols(2).opts(shared_axes=False)
-                if len(plots) > 3:
-                    plot_layout = (plots[0] + plots[1] + plots[2] + plots[3]).cols(2).opts(shared_axes=False)
-                print(f"DEBUG: Created combined layout with {len(plots)} plots")
-            elif len(plots) == 2:
-                plot_layout = (plots[0] + plots[1]).opts(shared_axes=False)
-                print(f"DEBUG: Created 2-plot layout")
-            elif len(plots) == 1:
-                plot_layout = plots[0]
-                print(f"DEBUG: Using single plot layout")
-            else:
+            if len(plots) == 0:
                 plot_layout = None
                 print(f"DEBUG: No plots created, returning empty")
+            else:
+                # Try simpler layout approach - just use the first plot for now to test rendering
+                plot_layout = plots[0]
+                print(f"DEBUG: Using first plot only for testing: {type(plot_layout)}")
             
             if not plot_layout:
                 return self._create_empty_plot("No kinetics data available for plotting")
@@ -1300,9 +1293,16 @@ class PlottingManager:
             *Electrochemical equilibrium backend • Interactive hvplot visualization*
             """, margin=(10, 20))
             
-            result_column = pn.Column(summary_info, pn.pane.HoloViews(plot_layout), sizing_mode='stretch_width')
-            print(f"DEBUG: Returning Column with {len(result_column)} components: {[type(comp).__name__ for comp in result_column]}")
-            return result_column
+            # Try direct plot return instead of HoloViews pane wrapper
+            try:
+                result_column = pn.Column(summary_info, plot_layout, sizing_mode='stretch_width')
+                print(f"DEBUG: Returning Column with direct plot - {len(result_column)} components: {[type(comp).__name__ for comp in result_column]}")
+                return result_column
+            except Exception as pane_error:
+                print(f"DEBUG: Direct plot failed: {pane_error}, trying HoloViews pane")
+                result_column = pn.Column(summary_info, pn.pane.HoloViews(plot_layout), sizing_mode='stretch_width')
+                print(f"DEBUG: Returning Column with HoloViews pane - {len(result_column)} components: {[type(comp).__name__ for comp in result_column]}")
+                return result_column
         
         else:
             # Fallback error display using Markdown
