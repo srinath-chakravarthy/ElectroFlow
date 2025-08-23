@@ -45,6 +45,9 @@ class GroupManagementTab(param.Parameterized):
         try:
             schema = self.api.get_segments_display_schema()
             if schema:
+                print(f"DEBUG: Raw schema from API: {list(schema.keys())}")
+                print(f"DEBUG: Looking for 'capacity_cumulative_ah' in raw schema: {'capacity_cumulative_ah' in schema}")
+                
                 # Filter out unwanted columns
                 skip_columns = {
                     'created_at', 'updated_at', 'analysis_results', 'segment_metadata',
@@ -53,6 +56,8 @@ class GroupManagementTab(param.Parameterized):
                 }
 
                 filtered_schema = {k: v for k, v in schema.items() if k not in skip_columns}
+                print(f"DEBUG: After filtering: {list(filtered_schema.keys())}")
+                print(f"DEBUG: 'capacity_cumulative_ah' after filtering: {'capacity_cumulative_ah' in filtered_schema}")
                 print(f"Loaded {len(filtered_schema)} columns (filtered from {len(schema)})")
                 return filtered_schema
         except Exception as e:
@@ -83,6 +88,10 @@ class GroupManagementTab(param.Parameterized):
         if not segments:
             return self._create_empty_segments_dataframe()
 
+        # First create a DataFrame with ALL segment data to preserve full columns
+        raw_df = pd.DataFrame(segments)
+        
+        # Then format only the display columns according to schema
         formatted_data = []
         for segment in segments:
             row = {}
@@ -97,14 +106,23 @@ class GroupManagementTab(param.Parameterized):
 
             formatted_data.append(row)
 
-        df = pd.DataFrame(formatted_data)
-        # Only keep columns that are in the schema
-        return df[list(self.segments_schema.keys())]
+        formatted_df = pd.DataFrame(formatted_data)
+        
+        # Keep display columns for the tabulator, but add back all raw columns for plotting
+        display_columns = list(self.segments_schema.keys())
+        for col in raw_df.columns:
+            if col not in display_columns:
+                formatted_df[col] = raw_df[col]
+        
+        return formatted_df
 
     def _format_group_contents_data(self, segments: List[Dict]) -> pd.DataFrame:
         """Format group contents data - simplified view without file_id."""
         if not segments:
             return self._create_empty_segments_dataframe()
+
+        # First create a DataFrame with ALL segment data to preserve full columns
+        raw_df = pd.DataFrame(segments)
 
         # Define simplified schema for group contents (file-agnostic)
         group_contents_schema = {
@@ -131,10 +149,15 @@ class GroupManagementTab(param.Parameterized):
 
             formatted_data.append(row)
 
-        df = pd.DataFrame(formatted_data)
-        # Only keep columns that exist in both schemas
-        available_columns = [col for col in group_contents_schema.keys() if col in df.columns]
-        return df[available_columns] if available_columns else pd.DataFrame()
+        formatted_df = pd.DataFrame(formatted_data)
+        
+        # Keep display columns for the tabulator, but add back all raw columns for plotting
+        display_columns = [col for col in group_contents_schema.keys() if col in formatted_df.columns]
+        for col in raw_df.columns:
+            if col not in display_columns:
+                formatted_df[col] = raw_df[col]
+                
+        return formatted_df if not formatted_df.empty else pd.DataFrame()
 
     def _create_components(self):
         """Create all UI components."""
@@ -900,6 +923,9 @@ class GroupManagementTab(param.Parameterized):
             elif plot_type == "time_duration":
                 plot = self._create_time_duration_plot(selected_segments)
             elif plot_type == "capacity_time":
+                print(f"DEBUG: Selected segments columns before plot: {list(selected_segments.columns)}")
+                print(f"DEBUG: Schema keys available: {list(self.segments_schema.keys())}")
+                print(f"DEBUG: capacity_cumulative_ah in schema? {'capacity_cumulative_ah' in self.segments_schema}")
                 plot = self._create_capacity_time_plot(selected_segments)
             else:
                 plot = self._create_voltage_boundaries_plot(selected_segments)  # Default
@@ -1047,20 +1073,40 @@ class GroupManagementTab(param.Parameterized):
         )
 
     def _create_capacity_time_plot(self, df: pd.DataFrame):
-        """Create capacity vs time plot."""
-        # This is a placeholder since capacity is computed during analysis
+        """Create cumulative capacity vs cumulative time plot."""
         if 'start_time_s' not in df.columns:
             return self._create_empty_plot("Missing time data")
         
         plot_df = df.copy()
-        plot_df['time'] = pd.to_numeric(plot_df['start_time_s'].astype(str).str.replace('s', ''), errors='coerce')
-        plot_df = plot_df.dropna(subset=['time'])
+        
+        # Convert time columns to numeric
+        plot_df['start_time'] = pd.to_numeric(plot_df['start_time_s'].astype(str).str.replace('s', ''), errors='coerce')
+        if 'end_time_s' in plot_df.columns:
+            plot_df['end_time'] = pd.to_numeric(plot_df['end_time_s'].astype(str).str.replace('s', ''), errors='coerce')
+        else:
+            # Fallback if end_time not available
+            plot_df['end_time'] = plot_df['start_time']
+        
+        # Sort by start time for proper accumulation
+        plot_df = plot_df.sort_values('start_time').reset_index(drop=True)
+        
+        # Calculate segment durations and accumulate time
+        plot_df['duration'] = plot_df['end_time'] - plot_df['start_time']
+        plot_df['cumulative_time'] = plot_df['duration'].cumsum()
+        
+        # Use cumulative capacity data
+        print(f"DEBUG: Available columns in plot_df: {list(plot_df.columns)}")
+        print(f"DEBUG: Looking for 'capacity_cumulative_ah', found: {'capacity_cumulative_ah' in plot_df.columns}")
+        if 'capacity_cumulative_ah' in plot_df.columns:
+            print(f"DEBUG: Sample capacity values: {plot_df['capacity_cumulative_ah'].head()}")
+            plot_df['capacity'] = pd.to_numeric(plot_df['capacity_cumulative_ah'], errors='coerce')
+            plot_df = plot_df.dropna(subset=['capacity', 'cumulative_time'])
+            print(f"DEBUG: After processing, {len(plot_df)} rows remain")
+        else:
+            return self._create_empty_plot("No cumulative capacity data available")
         
         if plot_df.empty:
-            return self._create_empty_plot("No valid time data")
-        
-        # Create dummy capacity data (this would come from analysis in real implementation)
-        plot_df['capacity'] = np.cumsum(np.random.normal(0.1, 0.05, len(plot_df)))
+            return self._create_empty_plot("No valid capacity/time data")
         
         # Handle coloring for line plot
         if 'fundamental_technique' in plot_df.columns:
@@ -1069,11 +1115,11 @@ class GroupManagementTab(param.Parameterized):
             color_by = None
         
         return plot_df.hvplot.line(
-            x='time', y='capacity',
+            x='cumulative_time', y='capacity',
             by=color_by,
-            title="Capacity vs Time (Placeholder)",
-            xlabel="Time (s)",
-            ylabel="Capacity (Ah)",
+            title="Cumulative Capacity vs Cumulative Time",
+            xlabel="Cumulative Time (s)",
+            ylabel="Cumulative Capacity (Ah)",
             legend='top_right',
             width=400,
             height=300
