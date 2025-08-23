@@ -841,48 +841,42 @@ class DataAnalysisTab(param.Parameterized):
                     'calculation_quality': []
                 }
                 
-                # Process backend structure using analytics config schemas
-                # Look for segments with analysis_results containing exponential_fit data
-                if hasattr(equilibrium_results, '__iter__'):
-                    for segment_data in equilibrium_results:
-                        if isinstance(segment_data, dict) and 'analysis_results' in segment_data:
-                            analysis_results = segment_data.get('analysis_results', {})
+                # Process backend structure - equilibrium data in individual_equilibrium array
+                # Backend returns analytics_config fields directly (not nested in analysis_results)
+                if 'individual_equilibrium' in equilibrium_results:
+                    individual_equilibrium = equilibrium_results['individual_equilibrium']
+                    
+                    for equilibrium_data in individual_equilibrium:
+                        if isinstance(equilibrium_data, dict):
                             kinetics_summary['total_measurements'] += 1
                             
-                            # Process exponential_fit schema for equilibrium voltage and time constants
-                            if isinstance(analysis_results, dict) and 'exponential_fit' in analysis_results:
-                                exp_fit = analysis_results['exponential_fit']
-                                
-                                # Extract equilibrium voltage using analytics config schema
-                                if 'voltage_infinity' in exp_fit and exp_fit['voltage_infinity'] is not None:
-                                    kinetics_summary['equilibrium_voltages'].append(exp_fit['voltage_infinity'])
-                                    kinetics_summary['valid_measurements'] += 1
-                                else:
-                                    kinetics_summary['null_measurements'] += 1
-                                
-                                # Extract time constant using analytics config schema
-                                if 'time_constant_s' in exp_fit and exp_fit['time_constant_s'] is not None:
-                                    kinetics_summary['time_constants'].append(exp_fit['time_constant_s'])
-                                
-                                # Track R² quality from exponential fit
-                                if 'r_squared' in exp_fit:
-                                    r_squared = exp_fit['r_squared']
-                                    if r_squared and r_squared > 0.8:
-                                        quality = 'valid'
-                                    elif r_squared and r_squared > 0.5:
-                                        quality = 'marginal'
-                                    else:
-                                        quality = 'invalid'
-                                    kinetics_summary['calculation_quality'].append(quality)
-                                    if quality == 'invalid':
-                                        kinetics_summary['invalid_measurements'] += 1
+                            # Extract equilibrium voltage using analytics config schema (direct field)
+                            if 'voltage_infinity' in equilibrium_data and equilibrium_data['voltage_infinity'] is not None:
+                                kinetics_summary['equilibrium_voltages'].append(equilibrium_data['voltage_infinity'])
+                                kinetics_summary['valid_measurements'] += 1
+                            else:
+                                kinetics_summary['null_measurements'] += 1
                             
-                            # Also check sqrt_fit schema for additional kinetics data
-                            if isinstance(analysis_results, dict) and 'sqrt_fit' in analysis_results:
-                                sqrt_fit = analysis_results['sqrt_fit']
-                                
-                                # Could extract diffusion-related data from sqrt_fit if available
-                                # For now, we'll focus on the exponential fit data
+                            # Extract time constant using analytics config schema (direct field)
+                            if 'time_constant_s' in equilibrium_data and equilibrium_data['time_constant_s'] is not None:
+                                kinetics_summary['time_constants'].append(equilibrium_data['time_constant_s'])
+                            
+                            # Track R² quality from analytics config (direct field)
+                            if 'r_squared' in equilibrium_data:
+                                r_squared = equilibrium_data['r_squared']
+                                if r_squared and r_squared > 0.8:
+                                    quality = 'valid'
+                                elif r_squared and r_squared > 0.5:
+                                    quality = 'marginal'
+                                else:
+                                    quality = 'invalid'
+                                kinetics_summary['calculation_quality'].append(quality)
+                                if quality == 'invalid':
+                                    kinetics_summary['invalid_measurements'] += 1
+                            else:
+                                # No r_squared available, assume valid if we have voltage_infinity
+                                quality = 'valid' if equilibrium_data.get('voltage_infinity') is not None else 'invalid'
+                                kinetics_summary['calculation_quality'].append(quality)
                                 
                 # Fallback: if backend returns direct key-value pairs (older format)
                 else:
