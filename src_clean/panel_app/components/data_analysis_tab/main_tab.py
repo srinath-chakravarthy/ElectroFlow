@@ -407,11 +407,11 @@ class DataAnalysisTab(param.Parameterized):
         """Run basic statistics analysis using existing backend."""
         
         try:
-            # Phase 3: Use real backend API methods
+            # Enhanced basic statistics with per-technique breakdown
             print(f"Running basic statistics analysis for groups: {selected_groups}")
             
-            # Use existing get_group_base_statistics method
-            stats_results = self.api.get_group_base_statistics(selected_groups)
+            # Get all segments from selected groups with technique information
+            all_segments = self.api.get_multi_group_segments(selected_groups)
             
             # Format results for UI display
             results = {
@@ -420,65 +420,94 @@ class DataAnalysisTab(param.Parameterized):
                 'total_groups': len(selected_groups),
                 'settings': settings,
                 'analysis_timestamp': pd.Timestamp.now().isoformat(),
-                'backend_results': stats_results
+                'total_segments': len(all_segments)
             }
             
-            # Extract key statistics for display
-            if stats_results and isinstance(stats_results, dict):
-                # Extract metrics if available
-                if 'duration_s' in stats_results:
-                    results['duration_mean'] = stats_results['duration_s'].get('mean', 0)
-                    results['duration_std'] = stats_results['duration_s'].get('std', 0)
-                    results['duration_count'] = stats_results['duration_s'].get('count', 0)
-                
-                if 'start_potential_v' in stats_results:
-                    results['voltage_mean'] = stats_results['start_potential_v'].get('mean', 0)
-                    results['voltage_std'] = stats_results['start_potential_v'].get('std', 0)
-                    
-                if 'capacity_ah' in stats_results:
-                    results['capacity_mean'] = stats_results['capacity_ah'].get('mean', 0)
-                    results['capacity_std'] = stats_results['capacity_ah'].get('std', 0)
-                
-                # Count total segments
-                total_segments = 0
-                for metric_stats in stats_results.values():
-                    if isinstance(metric_stats, dict) and 'count' in metric_stats:
-                        total_segments = max(total_segments, metric_stats['count'])
-                results['total_segments'] = total_segments
-            else:
-                # Fallback values if API call didn't return expected format
-                results.update({
-                    'total_segments': len(selected_groups) * 15,  
-                    'duration_mean': 125.4,
-                    'duration_std': 23.1,
-                    'voltage_mean': 3.85,
-                    'voltage_std': 0.12,
-                    'capacity_mean': 0.045,
-                    'capacity_std': 0.008,
-                    'note': 'Using fallback data - backend results format unexpected'
-                })
+            if not all_segments:
+                results['technique_breakdown'] = {}
+                results['message'] = "No segments found in selected groups"
+                return results
             
-            return results
+            # Group segments by fundamental technique
+            technique_groups = {}
+            for segment in all_segments:
+                # Get technique from segment data
+                technique = segment.get('fundamental_technique', 'UNKNOWN')
+                if technique not in technique_groups:
+                    technique_groups[technique] = []
+                technique_groups[technique].append(segment)
+            
+            # Calculate statistics per technique
+            technique_breakdown = {}
+            for technique, segments in technique_groups.items():
+                if not segments:
+                    continue
+                
+                # Extract metrics for this technique
+                durations = [seg.get('duration_s', 0) for seg in segments if seg.get('duration_s') is not None]
+                start_voltages = [seg.get('start_potential_v', 0) for seg in segments if seg.get('start_potential_v') is not None]
+                end_voltages = [seg.get('end_potential_v', 0) for seg in segments if seg.get('end_potential_v') is not None]
+                capacities = [seg.get('capacity_ah', 0) for seg in segments if seg.get('capacity_ah') is not None]
+                energies = [seg.get('energy_wh', 0) for seg in segments if seg.get('energy_wh') is not None]
+                
+                technique_breakdown[technique] = {
+                    'count': len(segments),
+                    'duration_s': {
+                        'mean': sum(durations) / len(durations) if durations else 0,
+                        'std': pd.Series(durations).std() if len(durations) > 1 else 0,
+                        'min': min(durations) if durations else 0,
+                        'max': max(durations) if durations else 0
+                    },
+                    'start_potential_v': {
+                        'mean': sum(start_voltages) / len(start_voltages) if start_voltages else 0,
+                        'std': pd.Series(start_voltages).std() if len(start_voltages) > 1 else 0,
+                        'min': min(start_voltages) if start_voltages else 0,
+                        'max': max(start_voltages) if start_voltages else 0
+                    },
+                    'end_potential_v': {
+                        'mean': sum(end_voltages) / len(end_voltages) if end_voltages else 0,
+                        'std': pd.Series(end_voltages).std() if len(end_voltages) > 1 else 0,
+                        'min': min(end_voltages) if end_voltages else 0,
+                        'max': max(end_voltages) if end_voltages else 0
+                    },
+                    'capacity_ah': {
+                        'mean': sum(capacities) / len(capacities) if capacities else 0,
+                        'std': pd.Series(capacities).std() if len(capacities) > 1 else 0,
+                        'min': min(capacities) if capacities else 0,
+                        'max': max(capacities) if capacities else 0,
+                        'total': sum(capacities) if capacities else 0
+                    },
+                    'energy_wh': {
+                        'mean': sum(energies) / len(energies) if energies else 0,
+                        'std': pd.Series(energies).std() if len(energies) > 1 else 0,
+                        'min': min(energies) if energies else 0,
+                        'max': max(energies) if energies else 0,
+                        'total': sum(energies) if energies else 0
+                    }
+                }
+            
+            results['technique_breakdown'] = technique_breakdown
+            results['techniques_found'] = list(technique_groups.keys())
+            
+            print(f"  - Analyzed {len(all_segments)} segments across {len(technique_groups)} techniques: {', '.join(technique_groups.keys())}")
+            
+            # Keep overall totals for compatibility
+            total_capacity = sum(seg.get('capacity_ah', 0) for seg in all_segments if seg.get('capacity_ah') is not None)
+            total_energy = sum(seg.get('energy_wh', 0) for seg in all_segments if seg.get('energy_wh') is not None)
+            results['total_capacity_ah'] = total_capacity
+            results['total_energy_wh'] = total_energy
             
         except Exception as e:
-            print(f"Backend API error: {e}")
-            # Fallback to simulated data if backend fails
+            print(f"Basic statistics analysis error: {e}")
             return {
                 'analysis_type': 'basic_statistics',
                 'selected_groups': selected_groups,
-                'total_groups': len(selected_groups),
-                'settings': settings,
-                'total_segments': len(selected_groups) * 15,
-                'duration_mean': 125.4,
-                'duration_std': 23.1,
-                'voltage_mean': 3.85,
-                'voltage_std': 0.12,
-                'capacity_mean': 0.045,
-                'capacity_std': 0.008,
-                'analysis_timestamp': pd.Timestamp.now().isoformat(),
-                'error': f"Backend analysis failed: {str(e)}",
-                'note': 'Using fallback data'
+                'technique_breakdown': {},
+                'error': str(e),
+                'message': f'Basic statistics analysis failed: {str(e)}'
             }
+        
+        return results
     
     def _run_resistance_analysis(self, selected_groups: List[str], settings: Dict[str, Any]) -> Dict[str, Any]:
         """Run resistance analysis using electrochemical resistance backend - Phase 1: New implementation."""

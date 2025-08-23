@@ -67,18 +67,20 @@ class EquilibriumAnalysis:
     segment_id: str
     technique: str
     
-    # Equilibrium tracking
-    start_voltage_v: float
-    end_voltage_v: float
-    equilibrium_voltage_v: Optional[float] = None
+    # Equilibrium tracking (using analytics_config exponential_fit schema)
+    start_voltage_v: float  # Keep for context
+    end_voltage_v: float    # Keep for context
+    voltage_infinity: Optional[float] = None  # Analytics config field name
     
-    # Stability metrics
+    # Kinetics metrics (analytics_config exponential_fit schema)
+    time_constant_s: Optional[float] = None
+    voltage_amplitude: Optional[float] = None  # Decay amplitude
+    r_squared: Optional[float] = None  # Fit quality
+    
+    # Additional stability metrics (can be kept as supplementary)
     voltage_drift_mv_min: Optional[float] = None
     stability_achieved: bool = False
     stability_time_s: Optional[float] = None
-    
-    # Quality assessment
-    equilibrium_quality: str = "unknown"  # stable, drifting, unstable
 
 
 class ElectrochemicalInsights:
@@ -393,9 +395,12 @@ class ElectrochemicalInsights:
                           all_fits.get('sqrt_fits', {}).get('voltage', {}))
             
             if voltage_fit:
-                equilibrium_analysis.equilibrium_voltage_v = voltage_fit.get('voltage_infinity', end_voltage)
+                equilibrium_analysis.voltage_infinity = voltage_fit.get('voltage_infinity', end_voltage)
+                equilibrium_analysis.time_constant_s = voltage_fit.get('time_constant_s')
+                equilibrium_analysis.voltage_amplitude = voltage_fit.get('voltage_amplitude')
+                equilibrium_analysis.r_squared = voltage_fit.get('r_squared')
             else:
-                equilibrium_analysis.equilibrium_voltage_v = end_voltage
+                equilibrium_analysis.voltage_infinity = end_voltage
             
             # Calculate drift rate
             if duration > 0:
@@ -520,7 +525,7 @@ class ElectrochemicalInsights:
         if not equilibrium_results:
             return {}
         
-        equilibrium_voltages = [e.equilibrium_voltage_v for e in equilibrium_results if e.equilibrium_voltage_v]
+        equilibrium_voltages = [e.voltage_infinity for e in equilibrium_results if e.voltage_infinity]
         drift_rates = [e.voltage_drift_mv_min for e in equilibrium_results if e.voltage_drift_mv_min]
         
         evolution = {}
@@ -616,7 +621,7 @@ class ElectrochemicalInsights:
             interpretations['stability_assessment'] = 'Poor equilibrium stability - consider longer rest times'
         
         # Voltage evolution
-        equilibrium_voltages = [e.equilibrium_voltage_v for e in equilibrium_results if e.equilibrium_voltage_v]
+        equilibrium_voltages = [e.voltage_infinity for e in equilibrium_results if e.voltage_infinity]
         if len(equilibrium_voltages) > 1:
             voltage_change = abs(equilibrium_voltages[-1] - equilibrium_voltages[0])
             if voltage_change > 0.1:  # > 100mV change
@@ -685,17 +690,19 @@ class ElectrochemicalInsights:
         }
     
     def _equilibrium_to_dict(self, equilibrium: EquilibriumAnalysis) -> Dict[str, Any]:
-        """Convert EquilibriumAnalysis to dictionary."""
+        """Convert EquilibriumAnalysis to dictionary using analytics_config exponential_fit schema."""
         return {
             'segment_id': equilibrium.segment_id,
             'technique': equilibrium.technique,
-            'start_voltage_v': equilibrium.start_voltage_v,
-            'end_voltage_v': equilibrium.end_voltage_v,
-            'equilibrium_voltage_v': equilibrium.equilibrium_voltage_v,
-            'voltage_drift_mv_min': equilibrium.voltage_drift_mv_min,
-            'stability_achieved': equilibrium.stability_achieved,
-            'stability_time_s': equilibrium.stability_time_s,
-            'equilibrium_quality': equilibrium.equilibrium_quality
+            'start_voltage_v': equilibrium.start_voltage_v,  # Context
+            'end_voltage_v': equilibrium.end_voltage_v,      # Context
+            'voltage_infinity': equilibrium.voltage_infinity,         # Analytics config
+            'time_constant_s': equilibrium.time_constant_s,           # Analytics config
+            'voltage_amplitude': equilibrium.voltage_amplitude,       # Analytics config
+            'r_squared': equilibrium.r_squared,                       # Analytics config
+            'voltage_drift_mv_min': equilibrium.voltage_drift_mv_min, # Supplementary
+            'stability_achieved': equilibrium.stability_achieved,     # Supplementary
+            'stability_time_s': equilibrium.stability_time_s         # Supplementary
         }
 
 
