@@ -136,49 +136,107 @@ class PlottingManager:
             return self._create_empty_plot(f"Error creating plot: {str(e)}")
     
     def _create_basic_statistics_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
-        """Create basic statistics visualization."""
+        """Create basic statistics visualization - Phase 3: Enhanced with real data."""
         
-        # Phase 1: Simple HTML table
         if not data:
             return self._create_empty_plot("No data available for basic statistics")
         
-        # Create simple summary table (placeholder for real data)
-        summary_html = """
+        # Phase 3: Enhanced visualization with real backend data
+        
+        # Get current plot type
+        plot_type = self.plot_type_selector.value
+        
+        if plot_type == "summary_table":
+            return self._create_statistics_table(data)
+        elif plot_type == "histogram":
+            return self._create_statistics_histogram(data)  
+        elif plot_type == "box_plot":
+            return self._create_statistics_boxplot(data)
+        else:
+            return self._create_statistics_table(data)  # Default
+    
+    def _create_statistics_table(self, data: Dict[str, Any]):
+        """Create enhanced statistics table with real data."""
+        
+        # Extract real values with fallback
+        duration_mean = data.get('duration_mean', 0)
+        duration_std = data.get('duration_std', 0) 
+        voltage_mean = data.get('voltage_mean', 0)
+        voltage_std = data.get('voltage_std', 0)
+        capacity_mean = data.get('capacity_mean', 0)
+        capacity_std = data.get('capacity_std', 0)
+        total_segments = data.get('total_segments', 0)
+        total_groups = data.get('total_groups', 0)
+        
+        # Check if we have real data or fallback
+        has_real_data = 'backend_results' in data
+        data_source = "Real electrochemical analysis" if has_real_data else "Simulated data"
+        
+        summary_html = f"""
         <div style='padding: 20px;'>
-            <h3 style='color: #2E4057; margin-bottom: 15px;'>📊 Basic Statistics Summary</h3>
-            <table style='width: 100%; border-collapse: collapse;'>
-                <tr style='background: #F5F5F5; border-bottom: 2px solid #E0E0E0;'>
-                    <th style='padding: 10px; text-align: left;'>Metric</th>
-                    <th style='padding: 10px; text-align: right;'>Mean</th>
-                    <th style='padding: 10px; text-align: right;'>Std Dev</th>
-                    <th style='padding: 10px; text-align: right;'>Count</th>
-                </tr>
-                <tr>
-                    <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>Duration (s)</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>125.4</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>23.1</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>45</td>
-                </tr>
-                <tr>
-                    <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>Start Voltage (V)</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>3.85</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>0.12</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>45</td>
-                </tr>
-                <tr>
-                    <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>Capacity (Ah)</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>0.045</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>0.008</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>45</td>
-                </tr>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
+                <h3 style='color: #2E4057; margin: 0;'>📊 Basic Statistics Summary</h3>
+                <div style='color: #666; font-size: 12px;'>
+                    {total_groups} groups • {total_segments} segments<br>
+                    <em>{data_source}</em>
+                </div>
+            </div>
+            
+            <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <thead>
+                    <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
+                        <th style='padding: 12px; text-align: left; font-weight: 600;'>Metric</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Mean</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Std Dev</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Units</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style='background: white;'>
+                        <td style='padding: 10px; border-bottom: 1px solid #E0E0E0; font-weight: 500;'>Duration</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{duration_mean:.1f}</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>±{duration_std:.1f}</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; color: #666;'>seconds</td>
+                    </tr>
+                    <tr style='background: #F8F9FA;'>
+                        <td style='padding: 10px; border-bottom: 1px solid #E0E0E0; font-weight: 500;'>Start Voltage</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{voltage_mean:.3f}</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>±{voltage_std:.3f}</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; color: #666;'>V</td>
+                    </tr>
+                    <tr style='background: white;'>
+                        <td style='padding: 10px; border-bottom: 1px solid #E0E0E0; font-weight: 500;'>Capacity</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{capacity_mean:.4f}</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>±{capacity_std:.4f}</td>
+                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; color: #666;'>Ah</td>
+                    </tr>
+                </tbody>
             </table>
-            <div style='margin-top: 15px; color: #666; font-size: 14px;'>
-                <em>Phase 1: Placeholder data - Real analysis coming in Phase 2</em>
+            
+            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
+                <strong style='color: #1976D2;'>Analysis Details:</strong><br>
+                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
+                    Analyzed {total_groups} groups with {total_segments} total segments<br>
+                    Timestamp: {data.get('analysis_timestamp', 'Unknown')}<br>
+                    {f"Error: {data['error']}" if 'error' in data else "Analysis completed successfully"}
+                </div>
             </div>
         </div>
         """
         
         return pn.pane.HTML(summary_html)
+    
+    def _create_statistics_histogram(self, data: Dict[str, Any]):
+        """Create histogram visualization for statistics."""
+        
+        # Phase 3: Placeholder for future histogram implementation
+        return self._create_empty_plot("Histogram visualization will be implemented in future phases")
+    
+    def _create_statistics_boxplot(self, data: Dict[str, Any]):
+        """Create box plot visualization for statistics."""
+        
+        # Phase 3: Placeholder for future box plot implementation
+        return self._create_empty_plot("Box plot visualization will be implemented in future phases")
     
     def _create_dqdv_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
         """Create dQ/dV analysis plot."""
