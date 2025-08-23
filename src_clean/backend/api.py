@@ -26,6 +26,8 @@ from src_clean.core.exceptions import (
 )
 from src_clean.parsers import get_parser_factory, auto_parse_dual_files
 from src_clean.analysis import FundamentalAnalytics
+from src_clean.backend.lazy_data_service import get_lazy_data_service
+from src_clean.analysis.electrochemical_insights import get_electrochemical_insights
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,8 @@ class BackendAPI:
         self.parser_factory = get_parser_factory()
         self.migration_manager = DataMigrationManager()
         self.analytics_engine = FundamentalAnalytics()
+        self.lazy_data_service = get_lazy_data_service()
+        self.electrochemical_insights = get_electrochemical_insights()
         
         logger.info(f"Backend API initialized - Data: {self.data_dir}, DB: {self.db_path}")
         if logger.isEnabledFor(logging.DEBUG):
@@ -2046,6 +2050,254 @@ class BackendAPI:
         except Exception as e:
             logger.error(f"Failed to get cumulative field names: {e}")
             return []
+
+    # =============================================================================
+    # TAB 3 ANALYTICS - LAZY DATA & ELECTROCHEMICAL INSIGHTS
+    # =============================================================================
+    
+    def create_lazy_data_query(self, file_infos: List[Dict[str, Any]]) -> str:
+        """
+        Create lazy data query for Tab 3 analysis.
+        
+        Args:
+            file_infos: List of file info dictionaries
+            
+        Returns:
+            Query ID for subsequent operations
+        """
+        try:
+            return self.lazy_data_service.create_multi_file_lazy_query(file_infos)
+        except Exception as e:
+            logger.error(f"Failed to create lazy data query: {e}")
+            raise
+    
+    def apply_data_filters(self, query_id: str, filters: Dict[str, Any]) -> str:
+        """
+        Apply filters to lazy data query.
+        
+        Args:
+            query_id: Existing query ID
+            filters: Filter conditions
+            
+        Returns:
+            New query ID with filters applied
+        """
+        try:
+            return self.lazy_data_service.apply_filters_to_query(query_id, filters)
+        except Exception as e:
+            logger.error(f"Failed to apply filters to query {query_id}: {e}")
+            raise
+    
+    def materialize_data_for_visualization(self, query_id: str, 
+                                         columns: Optional[List[str]] = None,
+                                         limit: Optional[int] = None) -> pl.DataFrame:
+        """
+        Materialize lazy query data for visualization.
+        
+        Args:
+            query_id: Query ID to materialize
+            columns: Specific columns to load
+            limit: Maximum rows to return
+            
+        Returns:
+            Materialized Polars DataFrame
+        """
+        try:
+            return self.lazy_data_service.materialize_query_for_viz(query_id, columns, limit)
+        except Exception as e:
+            logger.error(f"Failed to materialize query {query_id}: {e}")
+            raise
+    
+    def get_electrochemical_rest_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical REST analysis for groups using unified pattern.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            REST relaxation kinetics analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Extract relaxation kinetics using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_rest_relaxation_kinetics(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in REST analysis for groups {group_ids}: {e}")
+            return {'error': f'REST analysis error: {str(e)}'}
+    
+    def get_electrochemical_resistance_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical resistance analysis for GALVANOSTATIC groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Instantaneous resistance analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Calculate resistance using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_instantaneous_resistance_analysis(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in resistance analysis for groups {group_ids}: {e}")
+            return {'error': f'Resistance analysis error: {str(e)}'}
+    
+    def get_electrochemical_equilibrium_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical equilibrium voltage analysis for groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Equilibrium voltage tracking analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Analyze equilibrium voltage using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_equilibrium_voltage_analysis(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in equilibrium analysis for groups {group_ids}: {e}")
+            return {'error': f'Equilibrium analysis error: {str(e)}'}
+    
+    def get_electrochemical_current_decay_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical current decay analysis for POTENTIOSTATIC groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Current decay kinetics analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Analyze current decay using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_current_decay_kinetics(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in current decay analysis for groups {group_ids}: {e}")
+            return {'error': f'Current decay analysis error: {str(e)}'}
+    
+    def get_unified_electrochemical_analysis(self, group_ids: List[str], 
+                                           analysis_types: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Get unified electrochemical analysis across all techniques.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            analysis_types: Optional list of specific analysis types to run
+            
+        Returns:
+            Comprehensive electrochemical analysis
+        """
+        try:
+            # Default to all analysis types if not specified
+            if analysis_types is None:
+                analysis_types = ['rest', 'resistance', 'equilibrium', 'current_decay']
+            
+            results = {
+                'group_ids': group_ids,
+                'analysis_timestamp': datetime.now().isoformat(),
+                'analysis_types_requested': analysis_types,
+                'results': {}
+            }
+            
+            # Run each requested analysis type
+            if 'rest' in analysis_types:
+                results['results']['rest_relaxation'] = self.get_electrochemical_rest_analysis(group_ids)
+            
+            if 'resistance' in analysis_types:
+                results['results']['instantaneous_resistance'] = self.get_electrochemical_resistance_analysis(group_ids)
+            
+            if 'equilibrium' in analysis_types:
+                results['results']['equilibrium_voltage'] = self.get_electrochemical_equilibrium_analysis(group_ids)
+            
+            if 'current_decay' in analysis_types:
+                results['results']['current_decay'] = self.get_electrochemical_current_decay_analysis(group_ids)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in unified electrochemical analysis for groups {group_ids}: {e}")
+            return {'error': f'Unified analysis error: {str(e)}'}
+    
+    def get_lazy_query_info(self, query_id: str) -> Optional[Dict[str, Any]]:
+        """Get information about a cached lazy query."""
+        try:
+            return self.lazy_data_service.get_query_info(query_id)
+        except Exception as e:
+            logger.error(f"Failed to get query info for {query_id}: {e}")
+            return None
+    
+    def cleanup_lazy_query(self, query_id: str) -> bool:
+        """Remove specific lazy query from cache."""
+        try:
+            return self.lazy_data_service.cleanup_query(query_id)
+        except Exception as e:
+            logger.error(f"Failed to cleanup query {query_id}: {e}")
+            return False
 
 # =============================================================================
 # GLOBAL INSTANCE
