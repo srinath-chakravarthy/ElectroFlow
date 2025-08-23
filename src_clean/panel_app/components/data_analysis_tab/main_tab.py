@@ -549,11 +549,11 @@ class DataAnalysisTab(param.Parameterized):
                             if quality == 'invalid':
                                 resistance_summary['invalid_measurements'] += 1
                             
-                            # Process each resistance type using analytics config schema (current_pulse)
+                            # Process each resistance type using actual backend API field names
                             for key, time_point, type_name in [
-                                ('ir_immediate_ohm', 0, 'immediate'),
-                                ('ir_10s_ohm', 10, '10s'), 
-                                ('ir_30s_ohm', 30, '30s')
+                                ('instantaneous_resistance_ohm', 0, 'instantaneous'),
+                                ('resistance_10s_ohm', 10, '10s'), 
+                                ('resistance_30s_ohm', 30, '30s')
                             ]:
                                 if key in resistance_data:
                                     value = resistance_data[key]
@@ -578,11 +578,11 @@ class DataAnalysisTab(param.Parameterized):
                                 current_pulse = analysis_results['current_pulse']
                                 resistance_summary['total_measurements'] += 1
                                 
-                                # Process using analytics config current_pulse schema
+                                # Process using actual backend API field names
                                 for key, time_point, type_name in [
-                                    ('ir_immediate_ohm', 0, 'immediate'),
-                                    ('ir_10s_ohm', 10, '10s'), 
-                                    ('ir_30s_ohm', 30, '30s')
+                                    ('instantaneous_resistance_ohm', 0, 'instantaneous'),
+                                    ('resistance_10s_ohm', 10, '10s'), 
+                                    ('resistance_30s_ohm', 30, '30s')
                                 ]:
                                     if key in current_pulse:
                                         value = current_pulse[key]
