@@ -577,7 +577,19 @@ class PlottingManager:
         """Update the plot area with new plot."""
         
         self.current_plot = plot_object
-        self.plot_area.object = plot_object
+        
+        # Handle Panel HTML objects vs strings
+        if plot_object is None:
+            self.plot_area.object = ""
+        elif hasattr(plot_object, 'object'):
+            # If it's a Panel HTML pane, extract the HTML content
+            self.plot_area.object = plot_object.object
+        elif isinstance(plot_object, str):
+            # If it's already a string, use it directly
+            self.plot_area.object = plot_object
+        else:
+            # Convert to string as fallback
+            self.plot_area.object = str(plot_object)
         
         # Enable export button when plot is available
         self.export_plot_btn.disabled = (plot_object is None)
