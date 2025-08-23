@@ -850,6 +850,10 @@ class DataAnalysisTab(param.Parameterized):
                             if 'time_constant_s' in equilibrium_data and equilibrium_data['time_constant_s'] is not None:
                                 kinetics_summary['time_constants'].append(equilibrium_data['time_constant_s'])
                             
+                            # Extract diffusion coefficient (calculated on-the-fly by backend)
+                            if 'diffusion_coefficient_cm2_s' in equilibrium_data and equilibrium_data['diffusion_coefficient_cm2_s'] is not None:
+                                kinetics_summary['diffusion_coefficients'].append(equilibrium_data['diffusion_coefficient_cm2_s'])
+                            
                             # Track R² quality from analytics config (direct field)
                             if 'r_squared' in equilibrium_data:
                                 r_squared = equilibrium_data['r_squared']
@@ -866,7 +870,15 @@ class DataAnalysisTab(param.Parameterized):
                                 # No r_squared available, assume valid if we have voltage_infinity
                                 quality = 'valid' if equilibrium_data.get('voltage_infinity') is not None else 'invalid'
                                 kinetics_summary['calculation_quality'].append(quality)
-                                
+                
+                # Also extract from top-level diffusion_coefficients dict if available
+                if 'diffusion_coefficients' in equilibrium_results:
+                    diff_coeffs_dict = equilibrium_results['diffusion_coefficients']
+                    if isinstance(diff_coeffs_dict, dict):
+                        # Add any additional diffusion coefficients not already captured
+                        for segment_id, coeff in diff_coeffs_dict.items():
+                            if coeff is not None and coeff not in kinetics_summary['diffusion_coefficients']:
+                                kinetics_summary['diffusion_coefficients'].append(coeff)
                 # Fallback: if backend returns direct key-value pairs (older format)
                 else:
                     for key, value in equilibrium_results.items():
