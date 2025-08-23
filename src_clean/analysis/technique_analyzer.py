@@ -99,8 +99,8 @@ class TechniqueAnalyzer:
         """
         Analyze rest phase with comprehensive dual decay fitting.
         
-        Always attempts both voltage decay and current decay analysis,
-        returning the better fit or indicating insufficient data.
+        Always attempts both voltage and current decay analysis with both exponential
+        and sqrt(t) fitting models, returning the best fit or indicating insufficient data.
         
         Args:
             segment_data: Segment DataFrame
@@ -114,40 +114,51 @@ class TechniqueAnalyzer:
             voltage_values = segment_data.get_column('potential_v').to_numpy()
             current_values = segment_data.get_column('current_a').to_numpy()
             
-            # Always attempt both voltage and current decay analysis
-            voltage_result = self._analyze_voltage_decay(time_values, voltage_values)
-            current_result = self._analyze_current_decay(time_values, current_values)
+            # Always attempt both voltage and current decay analysis with both models
+            voltage_exp_result = self._analyze_voltage_decay(time_values, voltage_values)
+            current_exp_result = self._analyze_current_decay(time_values, current_values)
+            voltage_sqrt_result = self._analyze_voltage_sqrt_decay(time_values, voltage_values)
+            current_sqrt_result = self._analyze_current_sqrt_decay(time_values, current_values)
             
-            # Determine which analysis succeeded and return the best result
-            voltage_success = voltage_result.get('success', False)
-            current_success = current_result.get('success', False)
+            # Collect all successful results
+            results = []
+            for result in [voltage_exp_result, current_exp_result, voltage_sqrt_result, current_sqrt_result]:
+                if result.get('success', False):
+                    results.append(result)
             
-            if voltage_success and current_success:
-                # Both succeeded - return the better fit based on R²
-                voltage_r2 = voltage_result.get('r_squared', 0)
-                current_r2 = current_result.get('r_squared', 0)
-                
-                if voltage_r2 >= current_r2:
-                    return voltage_result
-                else:
-                    return current_result
-                    
-            elif voltage_success:
-                # Only voltage analysis succeeded
-                return voltage_result
-                
-            elif current_success:
-                # Only current analysis succeeded
-                return current_result
-                
-            else:
-                # Both failed - return insufficient data message
+            if not results:
+                # All fitting attempts failed
                 return {
                     'analysis_type': 'rest_insufficient_data', 
                     'success': False,
-                    'voltage_error': voltage_result.get('error', 'Unknown'),
-                    'current_error': current_result.get('error', 'Unknown')
+                    'voltage_exp_error': voltage_exp_result.get('error', 'Unknown'),
+                    'current_exp_error': current_exp_result.get('error', 'Unknown'),
+                    'voltage_sqrt_error': voltage_sqrt_result.get('error', 'Unknown'),
+                    'current_sqrt_error': current_sqrt_result.get('error', 'Unknown')
                 }
+            
+            # Return the best fit based on R² value
+            best_result = max(results, key=lambda x: x.get('r_squared', 0))
+            
+            # Store all fit coefficients in the result for replotting capability
+            fit_coefficients = {
+                'exponential_fits': {},
+                'sqrt_fits': {}
+            }
+            
+            if voltage_exp_result.get('success'):
+                fit_coefficients['exponential_fits']['voltage'] = self._extract_fit_coefficients(voltage_exp_result)
+            if current_exp_result.get('success'):
+                fit_coefficients['exponential_fits']['current'] = self._extract_fit_coefficients(current_exp_result)
+            if voltage_sqrt_result.get('success'):
+                fit_coefficients['sqrt_fits']['voltage'] = self._extract_fit_coefficients(voltage_sqrt_result)
+            if current_sqrt_result.get('success'):
+                fit_coefficients['sqrt_fits']['current'] = self._extract_fit_coefficients(current_sqrt_result)
+            
+            # Add fit coefficients to the best result
+            best_result['all_fit_coefficients'] = fit_coefficients
+            
+            return best_result
                     
         except Exception as e:
             self.logger.debug(f"Rest phase analysis failed: {e}")
@@ -212,6 +223,66 @@ class TechniqueAnalyzer:
             
         except Exception as e:
             return {'analysis_type': 'current_decay_failed', 'success': False, 'error': str(e)}
+    
+    def _analyze_voltage_sqrt_decay(self, time_values: np.ndarray, 
+                                  voltage_values: np.ndarray) -> Dict[str, Any]:
+        """
+        Analyze voltage decay with sqrt(t) fitting: V(t) = V∞ + A·√t.
+        
+        Args:
+            time_values: Time points in seconds
+            voltage_values: Voltage values in volts
+            
+        Returns:
+            Fit parameters and quality metrics
+        """
+        try:
+            # Remove NaN and normalize time to start at 0
+            valid_mask = ~(np.isnan(time_values) | np.isnan(voltage_values))
+            if not np.any(valid_mask) or np.sum(valid_mask) < 10:
+                return {'analysis_type': 'voltage_sqrt_insufficient_data', 'success': False}
+            
+            t_clean = time_values[valid_mask] - time_values[valid_mask][0]
+            v_clean = voltage_values[valid_mask]
+            
+            # sqrt(t) fitting
+            result = self._fit_sqrt_decay(t_clean, v_clean, 'voltage')
+            result['analysis_type'] = 'voltage_sqrt_decay'
+            
+            return result
+            
+        except Exception as e:
+            return {'analysis_type': 'voltage_sqrt_failed', 'success': False, 'error': str(e)}
+    
+    def _analyze_current_sqrt_decay(self, time_values: np.ndarray,
+                                  current_values: np.ndarray) -> Dict[str, Any]:
+        """
+        Analyze current decay with sqrt(t) fitting: I(t) = I∞ + A·√t.
+        
+        Args:
+            time_values: Time points in seconds
+            current_values: Current values in amperes
+            
+        Returns:
+            Fit parameters and quality metrics
+        """
+        try:
+            # Remove NaN and normalize time to start at 0
+            valid_mask = ~(np.isnan(time_values) | np.isnan(current_values))
+            if not np.any(valid_mask) or np.sum(valid_mask) < 10:
+                return {'analysis_type': 'current_sqrt_insufficient_data', 'success': False}
+            
+            t_clean = time_values[valid_mask] - time_values[valid_mask][0]
+            i_clean = current_values[valid_mask]
+            
+            # sqrt(t) fitting
+            result = self._fit_sqrt_decay(t_clean, i_clean, 'current')
+            result['analysis_type'] = 'current_sqrt_decay'
+            
+            return result
+            
+        except Exception as e:
+            return {'analysis_type': 'current_sqrt_failed', 'success': False, 'error': str(e)}
     
     def _fit_exponential_decay(self, t: np.ndarray, y: np.ndarray, 
                              variable_type: str) -> Dict[str, Any]:
@@ -286,6 +357,109 @@ class TechniqueAnalyzer:
             
         except Exception as e:
             return {'success': False, 'error': str(e)}
+    
+    def _fit_sqrt_decay(self, t: np.ndarray, y: np.ndarray, 
+                       variable_type: str) -> Dict[str, Any]:
+        """
+        Fit sqrt(t) decay: y(t) = y∞ + A·√t.
+        
+        Args:
+            t: Time values (normalized to start at 0)
+            y: Signal values (voltage or current)
+            variable_type: 'voltage' or 'current' for proper naming
+            
+        Returns:
+            Fit parameters and quality metrics
+        """
+        try:
+            if len(t) < 10:
+                return {'success': False, 'error': 'Insufficient data points'}
+            
+            # Avoid sqrt(0) by adding small offset to time
+            t_offset = t + 1e-6
+            sqrt_t = np.sqrt(t_offset)
+            
+            # Initial parameter estimates
+            y_initial = y[0]
+            y_final = y[-1]
+            y_infinity_guess = y_final
+            A_guess = (y_initial - y_final) / np.sqrt(np.max(t_offset))
+            
+            # Define sqrt(t) decay function
+            def sqrt_decay(t_vals, y_inf, A):
+                return y_inf + A * np.sqrt(t_vals + 1e-6)
+            
+            # Perform curve fitting
+            popt, pcov = optimize.curve_fit(
+                sqrt_decay, t, y,
+                p0=[y_infinity_guess, A_guess],
+                maxfev=1000
+            )
+            
+            y_infinity, A = popt
+            
+            # Calculate fit quality
+            y_fit = sqrt_decay(t, *popt)
+            r_squared = self._calculate_r_squared(y, y_fit)
+            rmse = np.sqrt(np.mean((y - y_fit)**2))
+            
+            # Parameter uncertainties
+            param_errors = np.sqrt(np.diag(pcov)) if pcov is not None else [0, 0]
+            
+            prefix = variable_type  # 'voltage' or 'current'
+            
+            result = {
+                'success': True,
+                'fit_type': 'sqrt_decay',
+                f'{prefix}_infinity': float(y_infinity),
+                f'{prefix}_sqrt_amplitude': float(A),
+                'r_squared': float(r_squared),
+                'rmse': float(rmse),
+                'param_errors': {
+                    f'{prefix}_infinity_error': float(param_errors[0]),
+                    f'{prefix}_sqrt_amplitude_error': float(param_errors[1])
+                },
+                'data_points': len(t)
+            }
+            
+            return result
+            
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _extract_fit_coefficients(self, fit_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract fit coefficients from analysis result for storage and replotting.
+        
+        Args:
+            fit_result: Result dictionary from fitting analysis
+            
+        Returns:
+            Dictionary with essential coefficients for replotting
+        """
+        coefficients = {
+            'fit_type': fit_result.get('fit_type', 'unknown'),
+            'r_squared': fit_result.get('r_squared', 0.0),
+            'rmse': fit_result.get('rmse', 0.0),
+            'data_points': fit_result.get('data_points', 0)
+        }
+        
+        # Extract coefficients based on fit type
+        if fit_result.get('fit_type') == 'exponential_decay':
+            # Exponential: y = y∞ + A·exp(-t/τ)
+            for key in ['voltage_infinity', 'current_infinity', 'voltage_amplitude', 
+                       'current_amplitude', 'time_constant_s']:
+                if key in fit_result:
+                    coefficients[key] = fit_result[key]
+                    
+        elif fit_result.get('fit_type') == 'sqrt_decay':
+            # sqrt(t): y = y∞ + A·√t
+            for key in ['voltage_infinity', 'current_infinity', 'voltage_sqrt_amplitude',
+                       'current_sqrt_amplitude']:
+                if key in fit_result:
+                    coefficients[key] = fit_result[key]
+        
+        return coefficients
     
     def _is_current_pulse(self, segment_data: pl.DataFrame) -> bool:
         """

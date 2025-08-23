@@ -26,6 +26,8 @@ from src_clean.core.exceptions import (
 )
 from src_clean.parsers import get_parser_factory, auto_parse_dual_files
 from src_clean.analysis import FundamentalAnalytics
+from src_clean.backend.lazy_data_service import get_lazy_data_service
+from src_clean.analysis.electrochemical_insights import get_electrochemical_insights
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,8 @@ class BackendAPI:
         self.parser_factory = get_parser_factory()
         self.migration_manager = DataMigrationManager()
         self.analytics_engine = FundamentalAnalytics()
+        self.lazy_data_service = get_lazy_data_service()
+        self.electrochemical_insights = get_electrochemical_insights()
         
         logger.info(f"Backend API initialized - Data: {self.data_dir}, DB: {self.db_path}")
         if logger.isEnabledFor(logging.DEBUG):
@@ -1692,6 +1696,608 @@ class BackendAPI:
     def refresh_all_template_groups(self) -> ProcessingResult:
         """Convenience method to refresh template groups for all cells."""
         return self.refresh_template_groups(cell_name=None)
+
+    # =============================================================================
+    # ADVANCED GROUP ANALYTICS
+    # =============================================================================
+
+    def get_group_temporal_analytics(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get temporal analytics for groups including cumulative calculations.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Dictionary with time-series data and cumulative analytics
+        """
+        try:
+            from src_clean.analysis.cumulative_calculator import get_cumulative_calculator
+            from src_clean.analysis.analytics_config import get_config as get_analytics_config
+            
+            calculator = get_cumulative_calculator()
+            config = get_analytics_config()
+            
+            # Get all segments for the groups
+            all_segments = []
+            group_files = []
+            
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+                
+                # Collect unique file information
+                for segment in segments:
+                    file_info = {
+                        'file_id': segment.get('file_id'),
+                        'cell_name': self._get_cell_name_from_segment(segment),
+                        'original_filename': segment.get('original_filename', segment.get('file_id'))
+                    }
+                    if file_info not in group_files:
+                        group_files.append(file_info)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Get cumulative context for the files
+            context = calculator.get_group_cumulative_context(group_files)
+            
+            # Calculate temporal analytics
+            temporal_data = {
+                'segments': [],
+                'time_series': {
+                    'time_points': [],
+                    'cumulative_capacity': [],
+                    'cumulative_energy': [],
+                    'individual_capacity': [],
+                    'individual_energy': [],
+                    'voltage_start': [],
+                    'voltage_end': []
+                },
+                'summary': {
+                    'total_duration_s': 0.0,
+                    'total_capacity_ah': 0.0,
+                    'total_energy_wh': 0.0,
+                    'segment_count': len(all_segments),
+                    'file_count': len(group_files)
+                }
+            }
+            
+            # Sort segments by start time for proper temporal order
+            sorted_segments = sorted(all_segments, key=lambda s: s.get('start_time_s', 0))
+            
+            running_capacity = 0.0
+            running_energy = 0.0
+            
+            for segment in sorted_segments:
+                # Calculate cumulative values for this segment
+                cumulative_values = calculator.calculate_segment_cumulative_values(segment, context)
+                
+                # Add to temporal data
+                segment_capacity = segment.get('capacity_ah', 0.0)
+                segment_energy = segment.get('energy_wh', 0.0)
+                
+                running_capacity += segment_capacity
+                running_energy += segment_energy
+                
+                temporal_data['segments'].append({
+                    **segment,
+                    **cumulative_values
+                })
+                
+                # Add to time series
+                temporal_data['time_series']['time_points'].append(segment.get('start_time_s', 0))
+                temporal_data['time_series']['cumulative_capacity'].append(running_capacity)
+                temporal_data['time_series']['cumulative_energy'].append(running_energy)
+                temporal_data['time_series']['individual_capacity'].append(segment_capacity)
+                temporal_data['time_series']['individual_energy'].append(segment_energy)
+                temporal_data['time_series']['voltage_start'].append(segment.get('start_potential_v', 0))
+                temporal_data['time_series']['voltage_end'].append(segment.get('end_potential_v', 0))
+            
+            # Update summary
+            if sorted_segments:
+                temporal_data['summary'].update({
+                    'total_duration_s': max(s.get('end_time_s', 0) for s in sorted_segments),
+                    'total_capacity_ah': running_capacity,
+                    'total_energy_wh': running_energy
+                })
+            
+            return temporal_data
+            
+        except Exception as e:
+            logger.error(f"Failed to get group temporal analytics: {e}")
+            return {'error': str(e)}
+
+    def get_group_fit_quality_statistics(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get fitting quality statistics across group techniques.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Dictionary with R² distributions and fit success rates
+        """
+        try:
+            import json
+            import numpy as np
+            from collections import defaultdict
+            
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Collect fit quality data
+            fit_quality = {
+                'exponential_fits': defaultdict(list),
+                'sqrt_fits': defaultdict(list),
+                'overall_stats': {},
+                'technique_breakdown': defaultdict(lambda: {
+                    'total_segments': 0,
+                    'successful_exp_fits': 0,
+                    'successful_sqrt_fits': 0,
+                    'exp_r2_values': [],
+                    'sqrt_r2_values': []
+                })
+            }
+            
+            for segment in all_segments:
+                technique = segment.get('fundamental_technique', 'Unknown')
+                analysis_results = segment.get('analysis_results')
+                
+                fit_quality['technique_breakdown'][technique]['total_segments'] += 1
+                
+                if analysis_results:
+                    try:
+                        # Parse JSON if it's a string
+                        if isinstance(analysis_results, str):
+                            results = json.loads(analysis_results)
+                        else:
+                            results = analysis_results
+                        
+                        # Extract fitting results
+                        all_coeffs = results.get('all_fit_coefficients', {})
+                        
+                        # Exponential fit data
+                        exp_fits = all_coeffs.get('exponential_fits', {})
+                        for variable, fit_data in exp_fits.items():
+                            r2 = fit_data.get('r_squared', 0.0)
+                            if r2 > 0:
+                                fit_quality['exponential_fits'][variable].append(r2)
+                                fit_quality['technique_breakdown'][technique]['exp_r2_values'].append(r2)
+                                fit_quality['technique_breakdown'][technique]['successful_exp_fits'] += 1
+                        
+                        # sqrt(t) fit data
+                        sqrt_fits = all_coeffs.get('sqrt_fits', {})
+                        for variable, fit_data in sqrt_fits.items():
+                            r2 = fit_data.get('r_squared', 0.0)
+                            if r2 > 0:
+                                fit_quality['sqrt_fits'][variable].append(r2)
+                                fit_quality['technique_breakdown'][technique]['sqrt_r2_values'].append(r2)
+                                fit_quality['technique_breakdown'][technique]['successful_sqrt_fits'] += 1
+                                
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(f"Failed to parse analysis results for segment {segment.get('id', 'unknown')}: {e}")
+            
+            # Calculate overall statistics
+            all_exp_r2 = []
+            all_sqrt_r2 = []
+            
+            for variable_r2_list in fit_quality['exponential_fits'].values():
+                all_exp_r2.extend(variable_r2_list)
+            
+            for variable_r2_list in fit_quality['sqrt_fits'].values():
+                all_sqrt_r2.extend(variable_r2_list)
+            
+            fit_quality['overall_stats'] = {
+                'exponential_fits': {
+                    'count': len(all_exp_r2),
+                    'mean_r2': float(np.mean(all_exp_r2)) if all_exp_r2 else 0.0,
+                    'std_r2': float(np.std(all_exp_r2)) if all_exp_r2 else 0.0,
+                    'min_r2': float(np.min(all_exp_r2)) if all_exp_r2 else 0.0,
+                    'max_r2': float(np.max(all_exp_r2)) if all_exp_r2 else 0.0
+                },
+                'sqrt_fits': {
+                    'count': len(all_sqrt_r2),
+                    'mean_r2': float(np.mean(all_sqrt_r2)) if all_sqrt_r2 else 0.0,
+                    'std_r2': float(np.std(all_sqrt_r2)) if all_sqrt_r2 else 0.0,
+                    'min_r2': float(np.min(all_sqrt_r2)) if all_sqrt_r2 else 0.0,
+                    'max_r2': float(np.max(all_sqrt_r2)) if all_sqrt_r2 else 0.0
+                },
+                'total_segments': len(all_segments),
+                'segments_with_fits': len([s for s in all_segments if s.get('analysis_results')])
+            }
+            
+            # Convert defaultdicts to regular dicts for JSON serialization
+            fit_quality['exponential_fits'] = dict(fit_quality['exponential_fits'])
+            fit_quality['sqrt_fits'] = dict(fit_quality['sqrt_fits'])
+            fit_quality['technique_breakdown'] = dict(fit_quality['technique_breakdown'])
+            
+            return fit_quality
+            
+        except Exception as e:
+            logger.error(f"Failed to get group fit quality statistics: {e}")
+            return {'error': str(e)}
+
+    def get_group_voltage_correlation_analytics(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get voltage correlation analytics for groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Dictionary with correlation analysis between metrics and voltages
+        """
+        try:
+            import numpy as np
+            from scipy.stats import pearsonr, spearmanr
+            
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Extract relevant metrics
+            metrics = {
+                'start_voltage': [],
+                'end_voltage': [],
+                'capacity': [],
+                'energy': [],
+                'duration': [],
+                'start_current': [],
+                'end_current': []
+            }
+            
+            for segment in all_segments:
+                metrics['start_voltage'].append(segment.get('start_potential_v', 0.0))
+                metrics['end_voltage'].append(segment.get('end_potential_v', 0.0))
+                metrics['capacity'].append(segment.get('capacity_ah', 0.0))
+                metrics['energy'].append(segment.get('energy_wh', 0.0))
+                metrics['duration'].append(segment.get('duration_s', 0.0))
+                metrics['start_current'].append(segment.get('start_current_a', 0.0))
+                metrics['end_current'].append(segment.get('end_current_a', 0.0))
+            
+            # Calculate correlations
+            correlations = {
+                'vs_start_voltage': {},
+                'vs_end_voltage': {},
+                'summary': {
+                    'segment_count': len(all_segments),
+                    'voltage_range_start': [float(np.min(metrics['start_voltage'])), float(np.max(metrics['start_voltage']))],
+                    'voltage_range_end': [float(np.min(metrics['end_voltage'])), float(np.max(metrics['end_voltage']))]
+                }
+            }
+            
+            # Correlations with start voltage
+            for metric_name in ['capacity', 'energy', 'duration', 'end_voltage']:
+                if len(metrics[metric_name]) > 2:  # Need at least 3 points for meaningful correlation
+                    try:
+                        pearson_r, pearson_p = pearsonr(metrics['start_voltage'], metrics[metric_name])
+                        spearman_r, spearman_p = spearmanr(metrics['start_voltage'], metrics[metric_name])
+                        
+                        correlations['vs_start_voltage'][metric_name] = {
+                            'pearson_r': float(pearson_r) if not np.isnan(pearson_r) else 0.0,
+                            'pearson_p': float(pearson_p) if not np.isnan(pearson_p) else 1.0,
+                            'spearman_r': float(spearman_r) if not np.isnan(spearman_r) else 0.0,
+                            'spearman_p': float(spearman_p) if not np.isnan(spearman_p) else 1.0,
+                            'data_points': len(metrics[metric_name])
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate correlation for {metric_name} vs start_voltage: {e}")
+                        correlations['vs_start_voltage'][metric_name] = {'error': str(e)}
+            
+            # Correlations with end voltage
+            for metric_name in ['capacity', 'energy', 'duration', 'start_voltage']:
+                if len(metrics[metric_name]) > 2:
+                    try:
+                        pearson_r, pearson_p = pearsonr(metrics['end_voltage'], metrics[metric_name])
+                        spearman_r, spearman_p = spearmanr(metrics['end_voltage'], metrics[metric_name])
+                        
+                        correlations['vs_end_voltage'][metric_name] = {
+                            'pearson_r': float(pearson_r) if not np.isnan(pearson_r) else 0.0,
+                            'pearson_p': float(pearson_p) if not np.isnan(pearson_p) else 1.0,
+                            'spearman_r': float(spearman_r) if not np.isnan(spearman_r) else 0.0,
+                            'spearman_p': float(spearman_p) if not np.isnan(spearman_p) else 1.0,
+                            'data_points': len(metrics[metric_name])
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate correlation for {metric_name} vs end_voltage: {e}")
+                        correlations['vs_end_voltage'][metric_name] = {'error': str(e)}
+            
+            return correlations
+            
+        except Exception as e:
+            logger.error(f"Failed to get group voltage correlation analytics: {e}")
+            return {'error': str(e)}
+
+    def _get_cell_name_from_segment(self, segment: Dict[str, Any]) -> str:
+        """Helper to get cell name from segment data."""
+        # This would typically require a database lookup
+        # For now, try to extract from existing data or return default
+        return segment.get('cell_name', 'unknown')
+
+    def get_cumulative_field_names(self) -> List[str]:
+        """
+        Get list of all cumulative field names from analytics config.
+        
+        Returns:
+            List of field names that contain 'cumulative'
+        """
+        try:
+            from src_clean.analysis.analytics_config import get_config as get_analytics_config
+            
+            config = get_analytics_config()
+            cumulative_fields = list(config.get('segment_cumulative_fields', {}).keys())
+            
+            # Also check base fields for any with 'cumulative' in name
+            base_fields = config.get('segment_base_fields', {})
+            for field_name in base_fields.keys():
+                if 'cumulative' in field_name.lower() and field_name not in cumulative_fields:
+                    cumulative_fields.append(field_name)
+            
+            return cumulative_fields
+            
+        except Exception as e:
+            logger.error(f"Failed to get cumulative field names: {e}")
+            return []
+
+    # =============================================================================
+    # TAB 3 ANALYTICS - LAZY DATA & ELECTROCHEMICAL INSIGHTS
+    # =============================================================================
+    
+    def create_lazy_data_query(self, file_infos: List[Dict[str, Any]]) -> str:
+        """
+        Create lazy data query for Tab 3 analysis.
+        
+        Args:
+            file_infos: List of file info dictionaries
+            
+        Returns:
+            Query ID for subsequent operations
+        """
+        try:
+            return self.lazy_data_service.create_multi_file_lazy_query(file_infos)
+        except Exception as e:
+            logger.error(f"Failed to create lazy data query: {e}")
+            raise
+    
+    def apply_data_filters(self, query_id: str, filters: Dict[str, Any]) -> str:
+        """
+        Apply filters to lazy data query.
+        
+        Args:
+            query_id: Existing query ID
+            filters: Filter conditions
+            
+        Returns:
+            New query ID with filters applied
+        """
+        try:
+            return self.lazy_data_service.apply_filters_to_query(query_id, filters)
+        except Exception as e:
+            logger.error(f"Failed to apply filters to query {query_id}: {e}")
+            raise
+    
+    def materialize_data_for_visualization(self, query_id: str, 
+                                         columns: Optional[List[str]] = None,
+                                         limit: Optional[int] = None) -> pl.DataFrame:
+        """
+        Materialize lazy query data for visualization.
+        
+        Args:
+            query_id: Query ID to materialize
+            columns: Specific columns to load
+            limit: Maximum rows to return
+            
+        Returns:
+            Materialized Polars DataFrame
+        """
+        try:
+            return self.lazy_data_service.materialize_query_for_viz(query_id, columns, limit)
+        except Exception as e:
+            logger.error(f"Failed to materialize query {query_id}: {e}")
+            raise
+    
+    def get_electrochemical_rest_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical REST analysis for groups using unified pattern.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            REST relaxation kinetics analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Extract relaxation kinetics using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_rest_relaxation_kinetics(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in REST analysis for groups {group_ids}: {e}")
+            return {'error': f'REST analysis error: {str(e)}'}
+    
+    def get_electrochemical_resistance_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical resistance analysis for GALVANOSTATIC groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Instantaneous resistance analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Calculate resistance using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_instantaneous_resistance_analysis(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in resistance analysis for groups {group_ids}: {e}")
+            return {'error': f'Resistance analysis error: {str(e)}'}
+    
+    def get_electrochemical_equilibrium_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical equilibrium voltage analysis for groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Equilibrium voltage tracking analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Analyze equilibrium voltage using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_equilibrium_voltage_analysis(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in equilibrium analysis for groups {group_ids}: {e}")
+            return {'error': f'Equilibrium analysis error: {str(e)}'}
+    
+    def get_electrochemical_current_decay_analysis(self, group_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get electrochemical current decay analysis for POTENTIOSTATIC groups.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            
+        Returns:
+            Current decay kinetics analysis
+        """
+        try:
+            # Get all segments for the groups
+            all_segments = []
+            for group_id in group_ids:
+                segments = self.get_group_segments(group_id)
+                all_segments.extend(segments)
+            
+            if not all_segments:
+                return {'error': 'No segments found for specified groups'}
+            
+            # Analyze current decay using electrochemical insights
+            analysis_result = self.electrochemical_insights.get_current_decay_kinetics(all_segments)
+            
+            # Add group context
+            analysis_result['group_ids'] = group_ids
+            analysis_result['analysis_timestamp'] = datetime.now().isoformat()
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Error in current decay analysis for groups {group_ids}: {e}")
+            return {'error': f'Current decay analysis error: {str(e)}'}
+    
+    def get_unified_electrochemical_analysis(self, group_ids: List[str], 
+                                           analysis_types: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Get unified electrochemical analysis across all techniques.
+        
+        Args:
+            group_ids: List of group IDs to analyze
+            analysis_types: Optional list of specific analysis types to run
+            
+        Returns:
+            Comprehensive electrochemical analysis
+        """
+        try:
+            # Default to all analysis types if not specified
+            if analysis_types is None:
+                analysis_types = ['rest', 'resistance', 'equilibrium', 'current_decay']
+            
+            results = {
+                'group_ids': group_ids,
+                'analysis_timestamp': datetime.now().isoformat(),
+                'analysis_types_requested': analysis_types,
+                'results': {}
+            }
+            
+            # Run each requested analysis type
+            if 'rest' in analysis_types:
+                results['results']['rest_relaxation'] = self.get_electrochemical_rest_analysis(group_ids)
+            
+            if 'resistance' in analysis_types:
+                results['results']['instantaneous_resistance'] = self.get_electrochemical_resistance_analysis(group_ids)
+            
+            if 'equilibrium' in analysis_types:
+                results['results']['equilibrium_voltage'] = self.get_electrochemical_equilibrium_analysis(group_ids)
+            
+            if 'current_decay' in analysis_types:
+                results['results']['current_decay'] = self.get_electrochemical_current_decay_analysis(group_ids)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in unified electrochemical analysis for groups {group_ids}: {e}")
+            return {'error': f'Unified analysis error: {str(e)}'}
+    
+    def get_lazy_query_info(self, query_id: str) -> Optional[Dict[str, Any]]:
+        """Get information about a cached lazy query."""
+        try:
+            return self.lazy_data_service.get_query_info(query_id)
+        except Exception as e:
+            logger.error(f"Failed to get query info for {query_id}: {e}")
+            return None
+    
+    def cleanup_lazy_query(self, query_id: str) -> bool:
+        """Remove specific lazy query from cache."""
+        try:
+            return self.lazy_data_service.cleanup_query(query_id)
+        except Exception as e:
+            logger.error(f"Failed to cleanup query {query_id}: {e}")
+            return False
 
 # =============================================================================
 # GLOBAL INSTANCE
