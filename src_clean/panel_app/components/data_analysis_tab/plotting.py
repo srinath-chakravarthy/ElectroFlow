@@ -165,7 +165,7 @@ class PlottingManager:
             return self._create_statistics_table(data)  # Default
     
     def _create_statistics_table(self, data: Dict[str, Any]):
-        """Create enhanced statistics table with real data."""
+        """Create interactive bar chart with error bars for statistics."""
         
         # Extract real values with fallback
         duration_mean = data.get('duration_mean', 0)
@@ -181,59 +181,95 @@ class PlottingManager:
         has_real_data = 'backend_results' in data
         data_source = "Real electrochemical analysis" if has_real_data else "Simulated data"
         
-        summary_html = f"""
-        <div style='padding: 20px;'>
-            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
-                <h3 style='color: #2E4057; margin: 0;'>📊 Basic Statistics Summary</h3>
-                <div style='color: #666; font-size: 12px;'>
-                    {total_groups} groups • {total_segments} segments<br>
-                    <em>{data_source}</em>
-                </div>
-            </div>
-            
-            <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-                <thead>
-                    <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
-                        <th style='padding: 12px; text-align: left; font-weight: 600;'>Metric</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Mean</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Std Dev</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Units</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr style='background: white;'>
-                        <td style='padding: 10px; border-bottom: 1px solid #E0E0E0; font-weight: 500;'>Duration</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{duration_mean:.1f}</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>±{duration_std:.1f}</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; color: #666;'>seconds</td>
-                    </tr>
-                    <tr style='background: #F8F9FA;'>
-                        <td style='padding: 10px; border-bottom: 1px solid #E0E0E0; font-weight: 500;'>Start Voltage</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{voltage_mean:.3f}</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>±{voltage_std:.3f}</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; color: #666;'>V</td>
-                    </tr>
-                    <tr style='background: white;'>
-                        <td style='padding: 10px; border-bottom: 1px solid #E0E0E0; font-weight: 500;'>Capacity</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{capacity_mean:.4f}</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>±{capacity_std:.4f}</td>
-                        <td style='padding: 10px; text-align: right; border-bottom: 1px solid #E0E0E0; color: #666;'>Ah</td>
-                    </tr>
-                </tbody>
-            </table>
-            
-            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
-                <strong style='color: #1976D2;'>Analysis Details:</strong><br>
-                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    Analyzed {total_groups} groups with {total_segments} total segments<br>
-                    Timestamp: {data.get('analysis_timestamp', 'Unknown')}<br>
-                    {f"Error: {data['error']}" if 'error' in data else "Analysis completed successfully"}
-                </div>
-            </div>
-        </div>
-        """
+        # Prepare data for hvplot bar chart with error bars
+        metrics_data = {
+            'Metric': ['Duration', 'Start Voltage', 'Capacity'],
+            'Mean': [duration_mean, voltage_mean, capacity_mean],
+            'Std': [duration_std, voltage_std, capacity_std],
+            'Units': ['seconds', 'V', 'Ah'],
+            'Error_Lower': [duration_mean - duration_std, voltage_mean - voltage_std, capacity_mean - capacity_std],
+            'Error_Upper': [duration_mean + duration_std, voltage_mean + voltage_std, capacity_mean + capacity_std]
+        }
         
-        return pn.pane.HTML(summary_html)
+        df = pd.DataFrame(metrics_data)
+        
+        # Create separate plots for each metric (they have different scales)
+        try:
+            # Duration plot
+            duration_plot = df[df.Metric == 'Duration'].hvplot.bar(
+                x='Metric', y='Mean', 
+                title="Duration Statistics",
+                ylabel="Time (seconds)",
+                color='#2E4057',
+                width=200, height=200,
+                toolbar=False
+            ).opts(
+                show_legend=False,
+                fontsize={'title': 12, 'labels': 10}
+            )
+            
+            # Voltage plot  
+            voltage_plot = df[df.Metric == 'Start Voltage'].hvplot.bar(
+                x='Metric', y='Mean',
+                title="Start Voltage Statistics", 
+                ylabel="Voltage (V)",
+                color='#1976D2',
+                width=200, height=200,
+                toolbar=False
+            ).opts(
+                show_legend=False,
+                fontsize={'title': 12, 'labels': 10}
+            )
+            
+            # Capacity plot
+            capacity_plot = df[df.Metric == 'Capacity'].hvplot.bar(
+                x='Metric', y='Mean',
+                title="Capacity Statistics",
+                ylabel="Capacity (Ah)", 
+                color='#388E3C',
+                width=200, height=200,
+                toolbar=False
+            ).opts(
+                show_legend=False,
+                fontsize={'title': 12, 'labels': 10}
+            )
+            
+            # Combine plots horizontally
+            combined_plot = (duration_plot + voltage_plot + capacity_plot).opts(
+                shared_axes=False
+            )
+            
+            # Add summary info panel
+            summary_info = pn.pane.HTML(f"""
+            <div style='background: #E3F2FD; padding: 12px; border-radius: 6px; border-left: 4px solid #1976D2; margin-bottom: 10px;'>
+                <strong style='color: #1976D2;'>📊 Basic Statistics Summary</strong><br>
+                <div style='color: #666; font-size: 12px; margin-top: 5px;'>
+                    {total_groups} groups • {total_segments} segments • <em>{data_source}</em><br>
+                    Analysis timestamp: {data.get('analysis_timestamp', 'Current session')}<br>
+                    {f"Error: {data['error']}" if 'error' in data else "✓ Analysis completed successfully"}
+                </div>
+            </div>
+            """, width=650, height=80)
+            
+            # Return combined visualization
+            return pn.Column(summary_info, pn.pane.HoloViews(combined_plot), sizing_mode='stretch_width')
+            
+        except Exception as e:
+            # Fallback to simple display on error
+            error_msg = f"Error creating interactive plot: {str(e)}"
+            print(f"Statistics plot error: {error_msg}")
+            
+            return pn.pane.HTML(f"""
+            <div style='background: #FFEBEE; padding: 15px; border-radius: 6px; border: 1px solid #D32F2F;'>
+                <strong style='color: #D32F2F;'>Plot Error</strong><br>
+                <div style='color: #666; margin-top: 8px;'>
+                    Duration: {duration_mean:.1f} ± {duration_std:.1f} s<br>
+                    Voltage: {voltage_mean:.3f} ± {voltage_std:.3f} V<br>
+                    Capacity: {capacity_mean:.4f} ± {capacity_std:.4f} Ah<br>
+                    <small>{error_msg}</small>
+                </div>
+            </div>
+            """, width=650)
     
     def _create_statistics_histogram(self, data: Dict[str, Any]):
         """Create histogram visualization for per-technique statistics with real electrochemical data."""
@@ -1109,59 +1145,88 @@ class PlottingManager:
         avg_time_constant = sum(d['time_constant_s'] for d in rest_data) / total_segments
         avg_voltage_drop = sum(d['voltage_drop_mv'] for d in rest_data) / total_segments
         
-        # Build HTML table
-        rows_html = ""
-        for i, row in enumerate(rest_data[:10]):  # Show first 10
-            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
-            rows_html += f"""
-            <tr style='{style}'>
-                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>{row['segment_id'][:12]}...</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['initial_v']:.3f}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['equilibrium_v']:.3f}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['time_constant_s']:.1f}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['voltage_drop_mv']:.1f}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['r_squared']:.3f}</td>
-            </tr>
-            """
+        # Convert to DataFrame for hvplot
+        # Truncate segment IDs for display
+        for d in rest_data:
+            d['segment_id'] = d['segment_id'][:12]
         
-        voltage_html = f"""
-        <div style='padding: 20px;'>
-            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
-                <h3 style='color: #2E4057; margin: 0;'>⚡ dQ/dV - Voltage Relaxation Analysis</h3>
-                <div style='color: #666; font-size: 12px;'>
-                    {total_segments} rest segments analyzed<br>
-                    <em>Electrochemical insights backend</em>
+        df = pd.DataFrame(rest_data)
+        
+        try:
+            # Create scatter plot: Time constant vs R² (with voltage drop as size)
+            scatter_plot = df.hvplot.scatter(
+                x='time_constant_s', y='r_squared', size='voltage_drop_mv',
+                title="Relaxation Analysis Quality",
+                xlabel="Time Constant τ (s)", ylabel="Fit Quality R²",
+                color='#1976D2', alpha=0.7, 
+                width=300, height=250,
+                toolbar=False
+            ).opts(
+                fontsize={'title': 12, 'labels': 10},
+                show_legend=False
+            )
+            
+            # Create voltage comparison plot: Initial vs Equilibrium
+            voltage_plot = df.hvplot.scatter(
+                x='initial_v', y='equilibrium_v',
+                title="Voltage Comparison", 
+                xlabel="Initial Voltage (V)", ylabel="Equilibrium Voltage (V)",
+                color='#2E4057', alpha=0.7,
+                width=300, height=250,
+                toolbar=False
+            ).opts(
+                fontsize={'title': 12, 'labels': 10},
+                show_legend=False
+            )
+            
+            # Create distribution plot: Time constants histogram
+            time_hist = df.hvplot.hist(
+                y='time_constant_s', bins=10,
+                title="Time Constant Distribution",
+                xlabel="Count", ylabel="Time Constant τ (s)",
+                color='#388E3C', alpha=0.7,
+                width=300, height=250,
+                toolbar=False
+            ).opts(
+                fontsize={'title': 12, 'labels': 10},
+                show_legend=False
+            )
+            
+            # Combine plots in a layout
+            plot_layout = (scatter_plot + voltage_plot + time_hist).cols(2).opts(
+                shared_axes=False
+            )
+            
+            # Add summary info
+            summary_info = pn.pane.HTML(f"""
+            <div style='background: #E3F2FD; padding: 12px; border-radius: 6px; border-left: 4px solid #1976D2; margin-bottom: 10px;'>
+                <strong style='color: #1976D2;'>⚡ dQ/dV Voltage Relaxation Analysis</strong><br>
+                <div style='color: #666; font-size: 12px; margin-top: 5px;'>
+                    {total_segments} rest segments analyzed • Avg τ: {avg_time_constant:.1f} s • Avg ΔV: {avg_voltage_drop:.1f} mV<br>
+                    <em>Electrochemical insights backend • Interactive visualization</em>
                 </div>
             </div>
+            """, width=650, height=60)
             
-            <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-                <thead>
-                    <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
-                        <th style='padding: 12px; text-align: left; font-weight: 600;'>Segment</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Initial V</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Equilibrium V</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>τ (s)</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>ΔV (mV)</th>
-                        <th style='padding: 12px; text-align: right; font-weight: 600;'>R²</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html}
-                </tbody>
-            </table>
+            return pn.Column(summary_info, pn.pane.HoloViews(plot_layout), sizing_mode='stretch_width')
             
-            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
-                <strong style='color: #1976D2;'>Analysis Summary:</strong><br>
-                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    Average time constant: <strong>{avg_time_constant:.1f} s</strong><br>
-                    Average voltage drop: <strong>{avg_voltage_drop:.1f} mV</strong><br>
-                    {f"Showing first 10 of {total_segments} segments" if total_segments > 10 else f"All {total_segments} segments displayed"}
+        except Exception as e:
+            # Fallback to summary on error  
+            error_msg = f"Error creating voltage relaxation plots: {str(e)}"
+            print(f"dQ/dV plot error: {error_msg}")
+            
+            # Show simple summary instead
+            return pn.pane.HTML(f"""
+            <div style='background: #FFEBEE; padding: 15px; border-radius: 6px; border: 1px solid #D32F2F;'>
+                <strong style='color: #D32F2F;'>dQ/dV Analysis Error</strong><br>
+                <div style='color: #666; margin-top: 8px;'>
+                    {total_segments} segments analyzed<br>
+                    Avg time constant: {avg_time_constant:.1f} s<br>
+                    Avg voltage drop: {avg_voltage_drop:.1f} mV<br>
+                    <small>{error_msg}</small>
                 </div>
             </div>
-        </div>
-        """
-        
-        return pn.pane.HTML(voltage_html)
+            """, width=650)
     
     def _create_dqdv_peak_analysis(self, data: Dict[str, Any]):
         """Create dQ/dV peak analysis placeholder."""
@@ -1226,73 +1291,116 @@ class PlottingManager:
         if not time_constants and not diffusion_coeffs and not equilibrium_voltages:
             return self._create_empty_plot("No valid kinetics parameters (time constants, diffusion coefficients, or equilibrium voltages) available")
         
-        # Build equilibrium voltage table (main kinetics data)
-        eq_voltage_rows = ""
-        for i, voltage in enumerate(equilibrium_voltages[:10]):  # Show first 10
-            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
-            eq_voltage_rows += f"""
-            <tr style='{style}'>
-                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>V_eq{i+1}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{voltage:.4f}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>V</td>
-            </tr>
-            """
-        
-        # Build time constants table (if available)
-        tc_rows = ""
-        if time_constants:
-            for i, tc in enumerate(time_constants[:8]):  # Show first 8
-                style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
-                tc_rows += f"""
-                <tr style='{style}'>
-                    <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>τ{i+1}</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{tc:.2f}</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>s</td>
-                </tr>
-                """
-        else:
-            tc_rows = """
-            <tr><td colspan='3' style='padding: 12px; text-align: center; color: #666; font-style: italic;'>
-                No time constants available
-            </td></tr>
-            """
-        
-        # Build diffusion coefficients table (if available)  
-        dc_rows = ""
-        if diffusion_coeffs:
-            for i, dc in enumerate(diffusion_coeffs[:5]):
-                style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
-                dc_rows += f"""
-                <tr style='{style}'>
-                    <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>D{i+1}</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{dc:.2e}</td>
-                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>cm²/s</td>
-                </tr>
-                """
-        else:
-            dc_rows = """
-            <tr><td colspan='3' style='padding: 12px; text-align: center; color: #666; font-style: italic;'>
-                No diffusion coefficients available
-            </td></tr>
-            """
-        
-        # Quality summary
-        quality_stats = {}
-        for quality in calculation_quality:
-            quality_stats[quality] = quality_stats.get(quality, 0) + 1
-        
-        quality_summary = ""
-        if quality_stats:
-            quality_items = [f"{quality}: {count}" for quality, count in quality_stats.items()]
-            quality_summary = f"""
-            <div style='margin-top: 20px; padding: 12px; background: #E8F5E8; border-radius: 6px; border-left: 4px solid #4CAF50;'>
-                <strong style='color: #4CAF50;'>Calculation Quality:</strong><br>
-                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    {' • '.join(quality_items)}<br>
-                    Analysis method: Equilibrium voltage calculation
-                </div>
-            </div>
-            """
+        # Create interactive plots for kinetics data
+        try:
+            plots = []
+            
+            # Plot 1: Equilibrium Voltages Line Plot
+            if equilibrium_voltages:
+                eq_df = pd.DataFrame({
+                    'Index': range(1, len(equilibrium_voltages) + 1),
+                    'Equilibrium_Voltage': equilibrium_voltages,
+                    'Label': [f'V_eq{i+1}' for i in range(len(equilibrium_voltages))]
+                })
+                
+                eq_plot = eq_df.hvplot.line(
+                    x='Index', y='Equilibrium_Voltage',
+                    title="Equilibrium Voltages",
+                    xlabel="Measurement #", ylabel="Voltage (V)",
+                    color='#2E4057', line_width=2,
+                    width=300, height=200,
+                    toolbar=False
+                ).opts(
+                    fontsize={'title': 11, 'labels': 9},
+                    show_legend=False
+                )
+                plots.append(eq_plot)
+            
+            # Plot 2: Time Constants Bar Plot
+            if time_constants:
+                tc_df = pd.DataFrame({
+                    'Index': range(1, len(time_constants) + 1),
+                    'Time_Constant': time_constants,
+                    'Label': [f'τ{i+1}' for i in range(len(time_constants))]
+                })
+                
+                tc_plot = tc_df.hvplot.bar(
+                    x='Index', y='Time_Constant',
+                    title="Time Constants",
+                    xlabel="Measurement #", ylabel="τ (seconds)",
+                    color='#1976D2', alpha=0.8,
+                    width=300, height=200,
+                    toolbar=False
+                ).opts(
+                    fontsize={'title': 11, 'labels': 9},
+                    show_legend=False
+                )
+                plots.append(tc_plot)
+            
+            # Plot 3: Diffusion Coefficients Scatter Plot
+            if diffusion_coeffs:
+                dc_df = pd.DataFrame({
+                    'Index': range(1, len(diffusion_coeffs) + 1),
+                    'Diffusion_Coefficient': diffusion_coeffs,
+                    'Label': [f'D{i+1}' for i in range(len(diffusion_coeffs))]
+                })
+                
+                dc_plot = dc_df.hvplot.scatter(
+                    x='Index', y='Diffusion_Coefficient',
+                    title="Diffusion Coefficients",
+                    xlabel="Measurement #", ylabel="D (cm²/s)",
+                    color='#388E3C', size=60, alpha=0.8,
+                    width=300, height=200,
+                    toolbar=False
+                ).opts(
+                    fontsize={'title': 11, 'labels': 9},
+                    show_legend=False
+                )
+                plots.append(dc_plot)
+            
+            # Plot 4: Quality Distribution (if quality data available)
+            if calculation_quality:
+                quality_stats = {}
+                for quality in calculation_quality:
+                    quality_stats[quality] = quality_stats.get(quality, 0) + 1
+                
+                quality_df = pd.DataFrame({
+                    'Quality': list(quality_stats.keys()),
+                    'Count': list(quality_stats.values())
+                })
+                
+                quality_plot = quality_df.hvplot.bar(
+                    x='Quality', y='Count',
+                    title="Calculation Quality",
+                    xlabel="Quality Level", ylabel="Count",
+                    color='#4CAF50', alpha=0.8,
+                    width=300, height=200,
+                    toolbar=False
+                ).opts(
+                    fontsize={'title': 11, 'labels': 9},
+                    show_legend=False,
+                    xrotation=45
+                )
+                plots.append(quality_plot)
+            
+            # Combine plots in a layout
+            if len(plots) >= 3:
+                plot_layout = (plots[0] + plots[1] + plots[2]).cols(2).opts(shared_axes=False)
+                if len(plots) > 3:
+                    plot_layout = (plots[0] + plots[1] + plots[2] + plots[3]).cols(2).opts(shared_axes=False)
+            elif len(plots) == 2:
+                plot_layout = (plots[0] + plots[1]).opts(shared_axes=False)
+            else:
+                plot_layout = plots[0] if plots else None
+            
+            if not plot_layout:
+                return self._create_empty_plot("No kinetics data available for plotting")
+                
+        except Exception as e:
+            # Fallback to summary on error
+            error_msg = f"Error creating kinetics plots: {str(e)}"
+            print(f"Kinetics plot error: {error_msg}")
+            plot_layout = None
         
         kinetics_html = f"""
         <div style='width: 100%; max-width: 700px; padding: 10px; margin: 0; overflow: hidden; box-sizing: border-box;'>
@@ -1365,7 +1473,34 @@ class PlottingManager:
         </div>
         """
         
-        return pn.pane.HTML(kinetics_html)
+        # Create summary info and return interactive visualization
+        if plot_layout:
+            # Summary info panel
+            summary_info = pn.pane.HTML(f"""
+            <div style='background: #E8F5E8; padding: 12px; border-radius: 6px; border-left: 4px solid #4CAF50; margin-bottom: 10px;'>
+                <strong style='color: #4CAF50;'>⚗️ Kinetics Analysis - Interactive Plots</strong><br>
+                <div style='color: #666; font-size: 12px; margin-top: 5px;'>
+                    {len(equilibrium_voltages)} equilibrium voltages • {len(time_constants)} time constants • {len(diffusion_coeffs)} diffusion coefficients<br>
+                    <em>Electrochemical equilibrium backend • Interactive hvplot visualization</em>
+                </div>
+            </div>
+            """, width=650, height=60)
+            
+            return pn.Column(summary_info, pn.pane.HoloViews(plot_layout), sizing_mode='stretch_width')
+        
+        else:
+            # Fallback error display
+            return pn.pane.HTML(f"""
+            <div style='background: #FFEBEE; padding: 15px; border-radius: 6px; border: 1px solid #D32F2F;'>
+                <strong style='color: #D32F2F;'>Kinetics Analysis Error</strong><br>
+                <div style='color: #666; margin-top: 8px;'>
+                    {len(equilibrium_voltages)} equilibrium voltages found<br>
+                    {len(time_constants)} time constants found<br>
+                    {len(diffusion_coeffs)} diffusion coefficients found<br>
+                    <small>Unable to create interactive plots</small>
+                </div>
+            </div>
+            """, width=650)
     
     def _create_kinetics_fit_summary(self, data: Dict[str, Any]):
         """Create kinetics fit quality summary - Phase 2.3: Equilibrium voltage analysis plots."""
