@@ -247,6 +247,8 @@ class PlottingManager:
         
         # Extract data for histogram visualization
         metrics_data = []
+        backend_results = technique_breakdown.get('backend_results', data.get('backend_results', {}))
+        
         for metric_name, metric_stats in backend_results.items():
             if isinstance(metric_stats, dict) and 'count' in metric_stats:
                 count = metric_stats.get('count', 0)

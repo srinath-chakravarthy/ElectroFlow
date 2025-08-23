@@ -73,6 +73,8 @@ class ResultsDisplay:
         try:
             if analysis_type == "basic_statistics":
                 return self._format_basic_statistics_results(results)
+            elif analysis_type == "resistance_analysis":
+                return self._format_resistance_results(results)
             elif analysis_type == "dqdv_analysis":
                 return self._format_dqdv_results(results)
             elif analysis_type == "kinetics_analysis":
@@ -132,6 +134,69 @@ class ResultsDisplay:
             
             <div style='color: #666; font-size: 12px; margin-top: 8px;'>
                 <em>{data_source} • {results.get('analysis_timestamp', 'Current session')}</em>
+            </div>
+        </div>
+        """
+        
+        return html_content
+    
+    def _format_resistance_results(self, results: Dict[str, Any]):
+        """Format resistance analysis results with IR resistance data."""
+        
+        resistance_analysis = results.get('resistance_analysis', {})
+        
+        if not resistance_analysis:
+            html_content = """
+            <div style='background: #FFF3E0; padding: 15px; border-radius: 6px; border: 1px solid #F57C00;'>
+                <div style='color: #F57C00; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+                    ⚡ Resistance Analysis Results
+                </div>
+                <div style='color: #666; font-style: italic;'>
+                    No resistance analysis data available
+                </div>
+            </div>
+            """
+            return html_content
+        
+        # Extract resistance summary data
+        total_measurements = resistance_analysis.get('total_measurements', 0)
+        valid_measurements = resistance_analysis.get('valid_measurements', 0)
+        average_resistance = resistance_analysis.get('average_resistance_ohm', 0.0)
+        resistance_std = resistance_analysis.get('resistance_std_ohm', 0.0)
+        measurement_types = list(resistance_analysis.get('measurement_types', []))
+        
+        # Determine data quality
+        quality_score = (valid_measurements / total_measurements) * 100 if total_measurements > 0 else 0
+        quality_indicator = (
+            "🟢 Excellent" if quality_score >= 90 else
+            "🟡 Good" if quality_score >= 70 else
+            "🔴 Poor" if quality_score >= 50 else
+            "❌ Failed"
+        )
+        
+        html_content = f"""
+        <div style='background: #FFF3E0; padding: 15px; border-radius: 6px; border: 1px solid #F57C00;'>
+            <div style='color: #F57C00; font-weight: 600; font-size: 16px; margin-bottom: 12px;'>
+                ⚡ Resistance Analysis Results
+            </div>
+            
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;'>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Measurements:</strong> {valid_measurements} of {total_measurements}
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Data Quality:</strong> {quality_indicator} ({quality_score:.0f}%)
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Avg Resistance:</strong> {average_resistance:.4f} Ω
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Std Deviation:</strong> ±{resistance_std:.4f} Ω
+                </div>
+            </div>
+            
+            <div style='color: #666; font-size: 12px; margin-top: 8px;'>
+                <em>IR resistance analysis • Types measured: {', '.join(measurement_types)}</em>
             </div>
         </div>
         """
@@ -228,23 +293,24 @@ class ResultsDisplay:
             """
             return html_content
         
-        # Extract analysis components
+        # Extract analysis components (using correct field names from main_tab.py)
         time_constants = kinetics_data.get('time_constants', [])
         diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
-        resistance_data = kinetics_data.get('resistance_analysis', {})
-        equilibrium_data = kinetics_data.get('equilibrium_analysis', {})
+        equilibrium_voltages = kinetics_data.get('equilibrium_voltages', [])
         
         # Calculate summary statistics
         num_time_constants = len(time_constants)
         num_diffusion_coeffs = len(diffusion_coeffs)
-        num_equilibrium_points = len(equilibrium_data)
+        num_equilibrium_points = len(equilibrium_voltages)
         
-        avg_resistance = resistance_data.get('average_resistance_ohm', 0.0)
+        # Calculate average values
+        avg_time_constant = sum(time_constants) / len(time_constants) if time_constants else 0.0
+        avg_diffusion_coeff = sum(diffusion_coeffs) / len(diffusion_coeffs) if diffusion_coeffs else 0.0
+        avg_equilibrium_voltage = sum(equilibrium_voltages) / len(equilibrium_voltages) if equilibrium_voltages else 0.0
         
-        # Calculate equilibrium voltage statistics from kinetics_data instead of equilibrium_data  
-        eq_voltages = kinetics_data.get('equilibrium_voltages', [])
-        
-        avg_eq_voltage = sum(eq_voltages) / len(eq_voltages) if eq_voltages else 0.0
+        # Get average resistance from results (if available)
+        resistance_analysis = results.get('resistance_analysis', {})
+        avg_resistance = resistance_analysis.get('average_resistance_ohm', 0.0)
         
         # Determine analysis completeness
         completeness_score = 0
@@ -267,7 +333,7 @@ class ResultsDisplay:
             
             <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;'>
                 <div style='background: white; padding: 5px; border-radius: 3px; border: 1px solid #E8E8E8; font-size: 11px;'>
-                    <strong>Equilibrium V:</strong> {avg_eq_voltage:.4f} V ({len(eq_voltages)} points)
+                    <strong>Equilibrium V:</strong> {avg_equilibrium_voltage:.4f} V ({len(equilibrium_voltages)} points)
                 </div>
                 <div style='background: white; padding: 5px; border-radius: 3px; border: 1px solid #E8E8E8; font-size: 11px;'>
                     <strong>Status:</strong> {completeness_indicator} ({completeness_score}%)
