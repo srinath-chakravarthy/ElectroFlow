@@ -94,8 +94,9 @@ class DataAnalysisTab(param.Parameterized):
             name="Analysis Type",
             options=[
                 ("Basic Statistics", "basic_statistics"),
-                ("dQ/dV Analysis", "dqdv_analysis"), 
-                ("Kinetics Analysis", "kinetics_analysis")
+                ("Resistance Analysis", "resistance_analysis"),
+                ("Kinetics Analysis", "kinetics_analysis"),
+                ("dQ/dV Analysis", "dqdv_analysis")
             ],
             value="basic_statistics",
             width=200
@@ -393,10 +394,12 @@ class DataAnalysisTab(param.Parameterized):
         
         if analysis_type == "basic_statistics":
             return self._run_basic_statistics_analysis(selected_groups, settings)
-        elif analysis_type == "dqdv_analysis":
-            return self._run_dqdv_analysis(selected_groups, settings)
+        elif analysis_type == "resistance_analysis":
+            return self._run_resistance_analysis(selected_groups, settings)
         elif analysis_type == "kinetics_analysis":
             return self._run_kinetics_analysis(selected_groups, settings)
+        elif analysis_type == "dqdv_analysis":
+            return self._run_dqdv_analysis(selected_groups, settings)
         else:
             return {"error": f"Unknown analysis type: {analysis_type}"}
     
@@ -475,6 +478,117 @@ class DataAnalysisTab(param.Parameterized):
                 'analysis_timestamp': pd.Timestamp.now().isoformat(),
                 'error': f"Backend analysis failed: {str(e)}",
                 'note': 'Using fallback data'
+            }
+    
+    def _run_resistance_analysis(self, selected_groups: List[str], settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Run resistance analysis using electrochemical resistance backend - Phase 1: New implementation."""
+        
+        try:
+            # Phase 1: Connect to get_electrochemical_resistance_analysis() API
+            print(f"Running resistance analysis for groups: {selected_groups}")
+            
+            # Use existing get_electrochemical_resistance_analysis method
+            resistance_results = self.api.get_electrochemical_resistance_analysis(selected_groups)
+            
+            # Format results for UI display
+            results = {
+                'analysis_type': 'resistance_analysis',
+                'selected_groups': selected_groups,
+                'total_groups': len(selected_groups),
+                'settings': settings,
+                'analysis_timestamp': pd.Timestamp.now().isoformat(),
+                'backend_results': resistance_results
+            }
+            
+            # Process resistance data for visualization
+            if resistance_results and isinstance(resistance_results, dict):
+                
+                # Initialize resistance analysis summary
+                resistance_summary = {
+                    'total_measurements': 0,
+                    'resistance_values_ohm': [],
+                    'time_points_s': [],
+                    'average_resistance_ohm': 0.0,
+                    'resistance_std_ohm': 0.0,
+                    'measurement_types': set()
+                }
+                
+                # Extract resistance measurements from results
+                for group_id, group_data in resistance_results.items():
+                    if isinstance(group_data, dict):
+                        # Look for resistance analysis data structure
+                        for segment_id, segment_data in group_data.items():
+                            if isinstance(segment_data, dict):
+                                
+                                # Current pulse resistance (immediate IR)
+                                if 'current_pulse' in segment_data:
+                                    pulse_data = segment_data['current_pulse']
+                                    if isinstance(pulse_data, dict):
+                                        # Immediate resistance
+                                        if 'immediate_resistance_ohm' in pulse_data:
+                                            resistance_summary['resistance_values_ohm'].append(pulse_data['immediate_resistance_ohm'])
+                                            resistance_summary['time_points_s'].append(0)  # Immediate
+                                            resistance_summary['measurement_types'].add('immediate')
+                                        
+                                        # 10s resistance 
+                                        if 'resistance_10s_ohm' in pulse_data:
+                                            resistance_summary['resistance_values_ohm'].append(pulse_data['resistance_10s_ohm'])
+                                            resistance_summary['time_points_s'].append(10)
+                                            resistance_summary['measurement_types'].add('10s')
+                                        
+                                        # 30s resistance
+                                        if 'resistance_30s_ohm' in pulse_data:
+                                            resistance_summary['resistance_values_ohm'].append(pulse_data['resistance_30s_ohm'])
+                                            resistance_summary['time_points_s'].append(30)
+                                            resistance_summary['measurement_types'].add('30s')
+                
+                # Calculate resistance statistics
+                if resistance_summary['resistance_values_ohm']:
+                    resistance_values = resistance_summary['resistance_values_ohm']
+                    resistance_summary['total_measurements'] = len(resistance_values)
+                    resistance_summary['average_resistance_ohm'] = sum(resistance_values) / len(resistance_values)
+                    
+                    if len(resistance_values) > 1:
+                        resistance_summary['resistance_std_ohm'] = pd.Series(resistance_values).std()
+                    
+                    resistance_summary['min_resistance_ohm'] = min(resistance_values)
+                    resistance_summary['max_resistance_ohm'] = max(resistance_values)
+                
+                # Add summary to results
+                results['resistance_analysis'] = resistance_summary
+                
+                # Add convenient access fields
+                results['avg_resistance'] = resistance_summary['average_resistance_ohm']
+                results['resistance_std'] = resistance_summary['resistance_std_ohm'] 
+                results['total_measurements'] = resistance_summary['total_measurements']
+                results['measurement_types'] = list(resistance_summary['measurement_types'])
+                
+                print(f"Resistance analysis complete: {results['total_measurements']} measurements, avg={results['avg_resistance']:.4f}Ω")
+                
+            else:
+                print("No resistance analysis data returned from backend")
+                
+            return results
+            
+        except Exception as e:
+            print(f"Error in resistance analysis: {e}")
+            # Return fallback data structure
+            return {
+                'analysis_type': 'resistance_analysis',
+                'selected_groups': selected_groups,
+                'total_groups': len(selected_groups),
+                'settings': settings,
+                'analysis_timestamp': pd.Timestamp.now().isoformat(),
+                'error': str(e),
+                'resistance_analysis': {
+                    'total_measurements': 0,
+                    'average_resistance_ohm': 0.0,
+                    'resistance_std_ohm': 0.0
+                },
+                'avg_resistance': 0.0,
+                'resistance_std': 0.0,
+                'total_measurements': 0,
+                'note': 'Resistance analysis error - using fallback'
             }
     
     def _run_dqdv_analysis(self, selected_groups: List[str], settings: Dict[str, Any]) -> Dict[str, Any]:
