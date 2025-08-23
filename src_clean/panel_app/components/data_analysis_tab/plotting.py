@@ -1162,52 +1162,122 @@ class PlottingManager:
     # ===== KINETICS VISUALIZATION METHODS =====
     
     def _create_kinetics_voltage_table(self, data: Dict[str, Any]):
-        """Create kinetics voltage analysis table."""
+        """Create kinetics voltage analysis table - Phase 2.2: Voltage vs time kinetics plots."""
         
         kinetics_data = data.get('kinetics_analysis', {})
         
-        # Extract time constants data
-        time_constants = kinetics_data.get('time_constants', [])
-        diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
-        resistance_data = kinetics_data.get('resistance_analysis', {})
-        
-        if not time_constants and not diffusion_coeffs:
+        # Check if we have any data structure to work with
+        if not kinetics_data:
             return self._create_empty_plot("No kinetics analysis data available")
         
-        # Build time constants table
+        # Handle case where we have measurements but no valid kinetics values
+        valid_measurements = kinetics_data.get('valid_measurements', 0)
+        total_measurements = kinetics_data.get('total_measurements', 0)
+        null_measurements = kinetics_data.get('null_measurements', 0)
+        invalid_measurements = kinetics_data.get('invalid_measurements', 0)
+        
+        if total_measurements == 0:
+            return self._create_empty_plot("No kinetics measurements found in backend data")
+        
+        if valid_measurements == 0:
+            # We have measurements but they're all null/invalid - show diagnostic info
+            diagnostic_html = f"""
+            <div style='padding: 20px;'>
+                <div style='background: #FFF3CD; border: 1px solid #F0AD4E; border-radius: 8px; padding: 20px;'>
+                    <h3 style='color: #8A6D3B; margin: 0 0 15px 0;'>⚗️ Kinetics Analysis Diagnostic</h3>
+                    <div style='color: #8A6D3B; font-size: 14px; line-height: 1.5;'>
+                        <strong>Data Status:</strong><br>
+                        • Total measurements found: {total_measurements}<br>
+                        • Valid measurements: {valid_measurements}<br>
+                        • Null measurements: {null_measurements}<br>
+                        • Invalid measurements: {invalid_measurements}<br><br>
+                        
+                        <strong>Possible causes:</strong><br>
+                        • No equilibrium segments available for kinetics analysis<br>
+                        • Voltage relaxation data quality insufficient for curve fitting<br>
+                        • Equilibrium calculation algorithm unable to determine valid parameters<br><br>
+                        
+                        <em>Try selecting groups with rest/relaxation segments or check data quality in the original files.</em>
+                    </div>
+                </div>
+            </div>
+            """
+            return pn.pane.HTML(diagnostic_html)
+        
+        # Extract kinetics data
+        time_constants = kinetics_data.get('time_constants', [])
+        diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
+        equilibrium_voltages = kinetics_data.get('equilibrium_voltages', [])
+        calculation_quality = kinetics_data.get('calculation_quality', [])
+        
+        # Show meaningful diagnostic even with some valid data
+        if not time_constants and not diffusion_coeffs and not equilibrium_voltages:
+            return self._create_empty_plot("No valid kinetics parameters (time constants, diffusion coefficients, or equilibrium voltages) available")
+        
+        # Build equilibrium voltage table (main kinetics data)
+        eq_voltage_rows = ""
+        for i, voltage in enumerate(equilibrium_voltages[:10]):  # Show first 10
+            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
+            eq_voltage_rows += f"""
+            <tr style='{style}'>
+                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>V_eq{i+1}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{voltage:.4f}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>V</td>
+            </tr>
+            """
+        
+        # Build time constants table (if available)
         tc_rows = ""
-        for i, tc in enumerate(time_constants[:8]):  # Show first 8
-            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
-            tc_rows += f"""
-            <tr style='{style}'>
-                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>τ{i+1}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{tc:.2f}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>Voltage relaxation</td>
-            </tr>
+        if time_constants:
+            for i, tc in enumerate(time_constants[:8]):  # Show first 8
+                style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
+                tc_rows += f"""
+                <tr style='{style}'>
+                    <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>τ{i+1}</td>
+                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{tc:.2f}</td>
+                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>s</td>
+                </tr>
+                """
+        else:
+            tc_rows = """
+            <tr><td colspan='3' style='padding: 12px; text-align: center; color: #666; font-style: italic;'>
+                No time constants available
+            </td></tr>
             """
         
-        # Build diffusion coefficients table  
+        # Build diffusion coefficients table (if available)  
         dc_rows = ""
-        for i, dc in enumerate(diffusion_coeffs[:5]):
-            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
-            dc_rows += f"""
-            <tr style='{style}'>
-                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>D{i+1}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{dc:.2e}</td>
-                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>cm²/s</td>
-            </tr>
+        if diffusion_coeffs:
+            for i, dc in enumerate(diffusion_coeffs[:5]):
+                style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
+                dc_rows += f"""
+                <tr style='{style}'>
+                    <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>D{i+1}</td>
+                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{dc:.2e}</td>
+                    <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>cm²/s</td>
+                </tr>
+                """
+        else:
+            dc_rows = """
+            <tr><td colspan='3' style='padding: 12px; text-align: center; color: #666; font-style: italic;'>
+                No diffusion coefficients available
+            </td></tr>
             """
         
-        # Resistance summary
-        resistance_summary = ""
-        if resistance_data:
-            avg_resistance = resistance_data.get('average_resistance_ohm', 0.0)
-            resistance_summary = f"""
-            <div style='margin-top: 20px; padding: 12px; background: #FFF3E0; border-radius: 6px; border-left: 4px solid #FF9800;'>
-                <strong style='color: #FF9800;'>Resistance Analysis:</strong><br>
+        # Quality summary
+        quality_stats = {}
+        for quality in calculation_quality:
+            quality_stats[quality] = quality_stats.get(quality, 0) + 1
+        
+        quality_summary = ""
+        if quality_stats:
+            quality_items = [f"{quality}: {count}" for quality, count in quality_stats.items()]
+            quality_summary = f"""
+            <div style='margin-top: 20px; padding: 12px; background: #E8F5E8; border-radius: 6px; border-left: 4px solid #4CAF50;'>
+                <strong style='color: #4CAF50;'>Calculation Quality:</strong><br>
                 <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    Average IR resistance: <strong>{avg_resistance:.4f} Ω</strong><br>
-                    Analysis method: Current pulse response
+                    {' • '.join(quality_items)}<br>
+                    Analysis method: Equilibrium voltage calculation
                 </div>
             </div>
             """
@@ -1215,11 +1285,28 @@ class PlottingManager:
         kinetics_html = f"""
         <div style='padding: 20px;'>
             <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
-                <h3 style='color: #2E4057; margin: 0;'>⚗️ Kinetics - Voltage & Time Analysis</h3>
+                <h3 style='color: #2E4057; margin: 0;'>⚗️ Kinetics Analysis - Voltage & Time</h3>
                 <div style='color: #666; font-size: 12px;'>
-                    {len(time_constants)} time constants<br>
-                    <em>Electrochemical kinetics backend</em>
+                    {len(equilibrium_voltages)} equilibrium voltages<br>
+                    <em>Electrochemical equilibrium backend</em>
                 </div>
+            </div>
+            
+            <!-- Primary equilibrium voltage data -->
+            <div style='margin-bottom: 20px;'>
+                <h4 style='color: #1976D2; margin-bottom: 10px;'>Equilibrium Voltages</h4>
+                <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                    <thead>
+                        <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
+                            <th style='padding: 10px; text-align: left; font-weight: 600;'>Parameter</th>
+                            <th style='padding: 10px; text-align: right; font-weight: 600;'>Value</th>
+                            <th style='padding: 10px; text-align: right; font-weight: 600;'>Unit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {eq_voltage_rows}
+                    </tbody>
+                </table>
             </div>
             
             <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px;'>
@@ -1229,8 +1316,8 @@ class PlottingManager:
                         <thead>
                             <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
                                 <th style='padding: 10px; text-align: left; font-weight: 600;'>Parameter</th>
-                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Value (s)</th>
-                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Process</th>
+                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Value</th>
+                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Unit</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1256,47 +1343,60 @@ class PlottingManager:
                 </div>
             </div>
             
-            {resistance_summary}
+            {quality_summary}
         </div>
         """
         
         return pn.pane.HTML(kinetics_html)
     
     def _create_kinetics_fit_summary(self, data: Dict[str, Any]):
-        """Create kinetics fit quality summary."""
+        """Create kinetics fit quality summary - Phase 2.3: Equilibrium voltage analysis plots."""
         
         kinetics_data = data.get('kinetics_analysis', {})
-        equilibrium_data = kinetics_data.get('equilibrium_analysis', {})
         
-        if not equilibrium_data:
-            return self._create_empty_plot("No equilibrium analysis data available for fit summary")
+        # Check if we have any data structure to work with
+        if not kinetics_data:
+            return self._create_empty_plot("No kinetics analysis data available")
         
-        # Extract equilibrium voltages
-        eq_voltages = []
-        for segment_id, eq_data in equilibrium_data.items():
-            if eq_data and 'equilibrium_voltage_v' in eq_data:
-                eq_voltages.append({
-                    'segment_id': segment_id,
-                    'equilibrium_v': eq_data['equilibrium_voltage_v'],
-                    'confidence': eq_data.get('confidence_level', 0.0),
-                    'method': eq_data.get('analysis_method', 'Unknown')
-                })
+        # Handle case where we have measurements but no valid kinetics values
+        valid_measurements = kinetics_data.get('valid_measurements', 0)
+        total_measurements = kinetics_data.get('total_measurements', 0)
         
-        if not eq_voltages:
-            return self._create_empty_plot("No equilibrium voltage data available")
+        if total_measurements == 0:
+            return self._create_empty_plot("No kinetics measurements found in backend data")
+        
+        if valid_measurements == 0:
+            return self._create_empty_plot("No valid equilibrium measurements available for fit analysis")
+        
+        # Extract kinetics data
+        equilibrium_voltages = kinetics_data.get('equilibrium_voltages', [])
+        calculation_quality = kinetics_data.get('calculation_quality', [])
+        time_constants = kinetics_data.get('time_constants', [])
+        diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
+        
+        if not equilibrium_voltages:
+            return self._create_empty_plot("No equilibrium voltage data available for fit summary")
         
         # Summary statistics
-        avg_voltage = sum(d['equilibrium_v'] for d in eq_voltages) / len(eq_voltages)
-        voltage_std = (sum((d['equilibrium_v'] - avg_voltage)**2 for d in eq_voltages) / len(eq_voltages))**0.5
-        avg_confidence = sum(d['confidence'] for d in eq_voltages) / len(eq_voltages)
+        avg_voltage = sum(equilibrium_voltages) / len(equilibrium_voltages)
+        voltage_std = (sum((v - avg_voltage)**2 for v in equilibrium_voltages) / len(equilibrium_voltages))**0.5 if len(equilibrium_voltages) > 1 else 0.0
+        
+        # Quality statistics
+        quality_stats = {}
+        for quality in calculation_quality:
+            quality_stats[quality] = quality_stats.get(quality, 0) + 1
+        
+        valid_count = quality_stats.get('valid', 0)
+        invalid_count = quality_stats.get('invalid', 0)
+        quality_percentage = (valid_count / len(calculation_quality) * 100) if calculation_quality else 0
         
         fit_html = f"""
         <div style='padding: 20px;'>
             <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
                 <h3 style='color: #2E4057; margin: 0;'>🎯 Kinetics Fit - Equilibrium Analysis</h3>
                 <div style='color: #666; font-size: 12px;'>
-                    {len(eq_voltages)} equilibrium points<br>
-                    <em>High confidence kinetics fitting</em>
+                    {len(equilibrium_voltages)} equilibrium points<br>
+                    <em>Quality: {quality_percentage:.0f}% valid</em>
                 </div>
             </div>
             
@@ -1308,26 +1408,26 @@ class PlottingManager:
                         <div style='color: #666; font-size: 14px;'>Mean equilibrium voltage</div>
                     </div>
                     <div style='margin-bottom: 15px;'>
-                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{avg_confidence:.1%}</div>
-                        <div style='color: #666; font-size: 14px;'>Average confidence level</div>
+                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{valid_count}/{total_measurements}</div>
+                        <div style='color: #666; font-size: 14px;'>Valid measurements</div>
                     </div>
                     <div>
-                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{len(eq_voltages)}</div>
-                        <div style='color: #666; font-size: 14px;'>Segments analyzed</div>
+                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{len(time_constants + diffusion_coeffs)}</div>
+                        <div style='color: #666; font-size: 14px;'>Kinetic parameters</div>
                     </div>
                 </div>
                 
                 <div style='padding: 20px; background: #E8F5E8; border-radius: 8px;'>
-                    <h4 style='color: #4CAF50; margin-top: 0;'>Fit Quality</h4>
+                    <h4 style='color: #4CAF50; margin-top: 0;'>Data Quality</h4>
                     <div style='text-align: center;'>
                         <div style='font-size: 36px; color: #4CAF50; margin: 10px 0;'>
-                            {"✓" if avg_confidence > 0.8 else "⚠" if avg_confidence > 0.6 else "✗"}
+                            {"✓" if quality_percentage > 80 else "⚠" if quality_percentage > 60 else "✗"}
                         </div>
                         <div style='font-weight: 600; color: #2E4057;'>
-                            {"Excellent" if avg_confidence > 0.8 else "Good" if avg_confidence > 0.6 else "Poor"} Fit
+                            {"Excellent" if quality_percentage > 80 else "Good" if quality_percentage > 60 else "Poor"} Quality
                         </div>
                         <div style='color: #666; font-size: 12px; margin-top: 5px;'>
-                            Based on confidence metrics
+                            {quality_percentage:.0f}% valid calculations
                         </div>
                     </div>
                 </div>
@@ -1336,9 +1436,9 @@ class PlottingManager:
             <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
                 <strong style='color: #1976D2;'>Kinetics Analysis Notes:</strong><br>
                 <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    Equilibrium voltages extracted from voltage relaxation curves<br>
-                    High confidence indicates stable electrochemical equilibrium<br>
-                    Voltage variation: {(voltage_std/avg_voltage*100):.2f}% relative standard deviation
+                    Equilibrium voltages extracted from electrochemical equilibrium analysis<br>
+                    High quality indicates stable measurements suitable for kinetics modeling<br>
+                    Voltage variation: {(voltage_std/avg_voltage*100 if avg_voltage > 0 else 0):.2f}% coefficient of variation
                 </div>
             </div>
         </div>

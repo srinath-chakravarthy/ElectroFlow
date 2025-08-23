@@ -736,111 +736,107 @@ class DataAnalysisTab(param.Parameterized):
             }
     
     def _run_kinetics_analysis(self, selected_groups: List[str], settings: Dict[str, Any]) -> Dict[str, Any]:
-        """Run kinetics analysis using existing backend - Phase 4: Real implementation."""
+        """Run kinetics analysis using electrochemical equilibrium backend - Phase 2: Real implementation."""
         
         try:
-            # Phase 4: Use existing electrochemical insights for comprehensive kinetics
+            # Phase 2.1: Connect to get_electrochemical_equilibrium_analysis() API
             print(f"Running kinetics analysis for groups: {selected_groups}")
             
-            # Get multiple types of analysis for comprehensive kinetics
-            rest_analysis = self.api.get_electrochemical_rest_analysis(selected_groups)
-            resistance_analysis = self.api.get_electrochemical_resistance_analysis(selected_groups)
-            equilibrium_analysis = self.api.get_electrochemical_equilibrium_analysis(selected_groups)
+            # Use existing get_electrochemical_equilibrium_analysis method
+            equilibrium_results = self.api.get_electrochemical_equilibrium_analysis(selected_groups)
             
+            # Debug: Print actual backend structure to understand data format
+            print(f"DEBUG: Equilibrium backend structure keys: {list(equilibrium_results.keys()) if isinstance(equilibrium_results, dict) else 'Not a dict'}")
+            if isinstance(equilibrium_results, dict):
+                for key, value in equilibrium_results.items():
+                    print(f"DEBUG: {key}: {type(value)} = {value if not isinstance(value, (dict, list)) else f'{type(value)} with {len(value)} items'}")
+                    if isinstance(value, dict) and len(value) < 5:  # Print small dicts
+                        for sub_key, sub_value in value.items():
+                            print(f"DEBUG:   {sub_key}: {type(sub_value)} = {sub_value}")
+                    elif isinstance(value, list) and len(value) > 0:  # Print first list item
+                        print(f"DEBUG:   First item: {type(value[0])} = {value[0]}")
+            
+            # Format results for UI display
             results = {
                 'analysis_type': 'kinetics_analysis',
                 'selected_groups': selected_groups,
                 'total_groups': len(selected_groups),
                 'settings': settings,
                 'analysis_timestamp': pd.Timestamp.now().isoformat(),
-                'rest_analysis': rest_analysis,
-                'resistance_analysis': resistance_analysis,
-                'equilibrium_analysis': equilibrium_analysis
+                'backend_results': equilibrium_results
             }
             
-            # Process kinetics data
-            kinetics_summary = {}
-            
-            # Extract relaxation kinetics
-            if rest_analysis and 'relaxation_kinetics' in rest_analysis:
-                kinetics = rest_analysis['relaxation_kinetics']
-                if isinstance(kinetics, list) and len(kinetics) > 0:
-                    
-                    # Collect time constants and fit quality
-                    time_constants = []
-                    r_squared_values = []
-                    diffusion_coefficients = []
-                    
-                    for segment in kinetics:
-                        if isinstance(segment, dict):
-                            # Exponential fit data
-                            if 'exponential_fit' in segment:
-                                exp_fit = segment['exponential_fit']
-                                if isinstance(exp_fit, dict):
-                                    if 'tau_s' in exp_fit:
-                                        time_constants.append(exp_fit['tau_s'])
-                                    if 'r_squared' in exp_fit:
-                                        r_squared_values.append(exp_fit['r_squared'])
-                            
-                            # Square root fit data (GITT analysis)
-                            if 'sqrt_fit' in segment:
-                                sqrt_fit = segment['sqrt_fit']
-                                if isinstance(sqrt_fit, dict) and 'diffusion_coeff_cm2_s' in sqrt_fit:
-                                    diffusion_coefficients.append(sqrt_fit['diffusion_coeff_cm2_s'])
-                    
-                    # Summarize kinetics
-                    if time_constants:
-                        kinetics_summary['mean_time_constant_s'] = sum(time_constants) / len(time_constants)
-                        kinetics_summary['std_time_constant_s'] = pd.Series(time_constants).std()
-                        kinetics_summary['time_constants'] = time_constants
-                    
-                    if r_squared_values:
-                        kinetics_summary['mean_fit_quality'] = sum(r_squared_values) / len(r_squared_values)
-                        kinetics_summary['fit_quality_distribution'] = r_squared_values
-                    
-                    if diffusion_coefficients:
-                        kinetics_summary['mean_diffusion_coeff'] = sum(diffusion_coefficients) / len(diffusion_coefficients)
-                        kinetics_summary['diffusion_coefficients'] = diffusion_coefficients
-                    
-                    kinetics_summary['total_kinetic_segments'] = len(kinetics)
-            
-            # Extract resistance data
-            if resistance_analysis and 'resistance_data' in resistance_analysis:
-                resistance_data = resistance_analysis['resistance_data']
-                if isinstance(resistance_data, list) and len(resistance_data) > 0:
-                    resistances = []
-                    for segment in resistance_data:
-                        if isinstance(segment, dict) and 'instantaneous_resistance_ohm' in segment:
-                            resistances.append(segment['instantaneous_resistance_ohm'])
-                    
-                    if resistances:
-                        kinetics_summary['mean_resistance_ohm'] = sum(resistances) / len(resistances)
-                        kinetics_summary['std_resistance_ohm'] = pd.Series(resistances).std()
-                        kinetics_summary['resistances'] = resistances
-            
-            # Extract equilibrium data
-            if equilibrium_analysis and 'equilibrium_data' in equilibrium_analysis:
-                eq_data = equilibrium_analysis['equilibrium_data']
-                if isinstance(eq_data, list) and len(eq_data) > 0:
-                    equilibrium_voltages = []
-                    for segment in eq_data:
-                        if isinstance(segment, dict) and 'equilibrium_voltage_v' in segment:
-                            equilibrium_voltages.append(segment['equilibrium_voltage_v'])
-                    
-                    if equilibrium_voltages:
-                        kinetics_summary['mean_equilibrium_v'] = sum(equilibrium_voltages) / len(equilibrium_voltages)
-                        kinetics_summary['equilibrium_voltages'] = equilibrium_voltages
-            
-            # Add summary to results
-            results['kinetics_summary'] = kinetics_summary
-            
-            # Overall analysis success
-            if kinetics_summary:
-                results['analysis_success'] = True
-                results['message'] = f"Kinetics analysis complete for {len(selected_groups)} groups"
+            # Process kinetics data for visualization
+            if equilibrium_results and isinstance(equilibrium_results, dict):
+                
+                # Initialize kinetics analysis summary
+                kinetics_summary = {
+                    'total_measurements': 0,
+                    'valid_measurements': 0,
+                    'null_measurements': 0,
+                    'invalid_measurements': 0,
+                    'time_constants': [],
+                    'diffusion_coefficients': [],
+                    'equilibrium_voltages': [],
+                    'voltage_time_data': [],  # For voltage vs time plots
+                    'resistance_analysis': {},
+                    'calculation_quality': []
+                }
+                
+                # Process actual backend structure (will be adjusted based on debug output)
+                # This is a template that will be refined once we see the actual data structure
+                for key, value in equilibrium_results.items():
+                    if isinstance(value, dict):
+                        kinetics_summary['total_measurements'] += 1
+                        
+                        # Look for equilibrium voltage data
+                        if 'equilibrium_voltage_v' in value and value['equilibrium_voltage_v'] is not None:
+                            kinetics_summary['equilibrium_voltages'].append(value['equilibrium_voltage_v'])
+                            kinetics_summary['valid_measurements'] += 1
+                        else:
+                            kinetics_summary['null_measurements'] += 1
+                        
+                        # Look for time constant data
+                        if 'time_constant_s' in value and value['time_constant_s'] is not None:
+                            kinetics_summary['time_constants'].append(value['time_constant_s'])
+                        
+                        # Look for diffusion coefficient data
+                        if 'diffusion_coefficient_cm2_s' in value and value['diffusion_coefficient_cm2_s'] is not None:
+                            kinetics_summary['diffusion_coefficients'].append(value['diffusion_coefficient_cm2_s'])
+                        
+                        # Track calculation quality
+                        quality = value.get('calculation_quality', 'unknown')
+                        kinetics_summary['calculation_quality'].append(quality)
+                        if quality == 'invalid':
+                            kinetics_summary['invalid_measurements'] += 1
+                
+                # Add summary to results
+                results['kinetics_analysis'] = kinetics_summary
+                
+                # Add convenient access fields
+                results['total_measurements'] = kinetics_summary['total_measurements']
+                results['valid_measurements'] = kinetics_summary['valid_measurements']
+                results['null_measurements'] = kinetics_summary['null_measurements']
+                results['invalid_measurements'] = kinetics_summary['invalid_measurements']
+                results['avg_equilibrium_voltage'] = (
+                    sum(kinetics_summary['equilibrium_voltages']) / len(kinetics_summary['equilibrium_voltages'])
+                    if kinetics_summary['equilibrium_voltages'] else 0.0
+                )
+                results['equilibrium_voltage_std'] = (
+                    pd.Series(kinetics_summary['equilibrium_voltages']).std()
+                    if len(kinetics_summary['equilibrium_voltages']) > 1 else 0.0
+                )
+                
+                # Enhanced logging with quality information
+                eq_voltages = len(kinetics_summary['equilibrium_voltages'])
+                time_constants = len(kinetics_summary['time_constants'])
+                diffusion_coeffs = len(kinetics_summary['diffusion_coefficients'])
+                quality_info = f"valid:{results['valid_measurements']}, null:{results['null_measurements']}, invalid:{results['invalid_measurements']}"
+                print(f"Kinetics analysis complete: {results['total_measurements']} total measurements ({quality_info})")
+                print(f"  - Equilibrium voltages: {eq_voltages}, Time constants: {time_constants}, Diffusion coeffs: {diffusion_coeffs}")
+                
             else:
-                results['analysis_success'] = False
-                results['message'] = "No suitable kinetics data found in selected groups"
+                print("No equilibrium analysis data returned from backend")
             
             return results
             
