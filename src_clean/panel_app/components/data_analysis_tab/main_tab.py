@@ -490,6 +490,20 @@ class DataAnalysisTab(param.Parameterized):
             # Use existing get_electrochemical_resistance_analysis method
             resistance_results = self.api.get_electrochemical_resistance_analysis(selected_groups)
             
+            # Debug: Print actual backend structure to understand data format
+            print(f"DEBUG: Resistance backend structure keys: {list(resistance_results.keys()) if isinstance(resistance_results, dict) else 'Not a dict'}")
+            if isinstance(resistance_results, dict) and 'individual_resistances' in resistance_results:
+                individual_count = len(resistance_results['individual_resistances'])
+                print(f"DEBUG: Found {individual_count} individual resistance measurements")
+                if individual_count > 0:
+                    first_item = resistance_results['individual_resistances'][0]
+                    print(f"DEBUG: First resistance item keys: {list(first_item.keys()) if isinstance(first_item, dict) else 'Not a dict'}")
+                    if isinstance(first_item, dict):
+                        for key, value in first_item.items():
+                            print(f"DEBUG: {key}: {value} (type: {type(value)})")
+            else:
+                print(f"DEBUG: No 'individual_resistances' key found. Available keys: {list(resistance_results.keys()) if isinstance(resistance_results, dict) else 'None'}")
+            
             # Format results for UI display
             results = {
                 'analysis_type': 'resistance_analysis',
@@ -506,41 +520,68 @@ class DataAnalysisTab(param.Parameterized):
                 # Initialize resistance analysis summary
                 resistance_summary = {
                     'total_measurements': 0,
+                    'valid_measurements': 0,
+                    'null_measurements': 0,
+                    'invalid_measurements': 0,
                     'resistance_values_ohm': [],
                     'time_points_s': [],
                     'average_resistance_ohm': 0.0,
                     'resistance_std_ohm': 0.0,
-                    'measurement_types': set()
+                    'measurement_types': set(),
+                    'calculation_quality': []
                 }
                 
-                # Extract resistance measurements from results
-                for group_id, group_data in resistance_results.items():
-                    if isinstance(group_data, dict):
-                        # Look for resistance analysis data structure
-                        for segment_id, segment_data in group_data.items():
-                            if isinstance(segment_data, dict):
-                                
-                                # Current pulse resistance (immediate IR)
-                                if 'current_pulse' in segment_data:
+                # Extract resistance measurements from actual backend structure
+                # Backend returns: {'individual_resistances': [{'segment_id': X, 'instantaneous_resistance_ohm': Y, ...}]}
+                if 'individual_resistances' in resistance_results:
+                    individual_resistances = resistance_results['individual_resistances']
+                    
+                    for resistance_data in individual_resistances:
+                        if isinstance(resistance_data, dict):
+                            segment_id = resistance_data.get('segment_id', 'unknown')
+                            quality = resistance_data.get('calculation_quality', 'unknown')
+                            resistance_summary['calculation_quality'].append(quality)
+                            
+                            # Count all measurements first
+                            resistance_summary['total_measurements'] += 1
+                            
+                            # Track quality
+                            if quality == 'invalid':
+                                resistance_summary['invalid_measurements'] += 1
+                            
+                            # Process each resistance type
+                            for key, time_point, type_name in [
+                                ('instantaneous_resistance_ohm', 0, 'instantaneous'),
+                                ('resistance_10s_ohm', 10, '10s'),
+                                ('resistance_30s_ohm', 30, '30s')
+                            ]:
+                                if key in resistance_data:
+                                    value = resistance_data[key]
+                                    if value is None:
+                                        resistance_summary['null_measurements'] += 1
+                                    elif isinstance(value, (int, float)) and value > 0:
+                                        resistance_summary['resistance_values_ohm'].append(value)
+                                        resistance_summary['time_points_s'].append(time_point)
+                                        resistance_summary['measurement_types'].add(type_name)
+                                        resistance_summary['valid_measurements'] += 1
+                                    else:
+                                        # Invalid numeric value (negative, zero, etc.)
+                                        resistance_summary['invalid_measurements'] += 1
+                
+                # Also handle legacy nested structure if present (fallback)
+                else:
+                    for group_id, group_data in resistance_results.items():
+                        if isinstance(group_data, dict):
+                            for segment_id, segment_data in group_data.items():
+                                if isinstance(segment_data, dict) and 'current_pulse' in segment_data:
                                     pulse_data = segment_data['current_pulse']
                                     if isinstance(pulse_data, dict):
-                                        # Immediate resistance
-                                        if 'immediate_resistance_ohm' in pulse_data:
-                                            resistance_summary['resistance_values_ohm'].append(pulse_data['immediate_resistance_ohm'])
-                                            resistance_summary['time_points_s'].append(0)  # Immediate
-                                            resistance_summary['measurement_types'].add('immediate')
-                                        
-                                        # 10s resistance 
-                                        if 'resistance_10s_ohm' in pulse_data:
-                                            resistance_summary['resistance_values_ohm'].append(pulse_data['resistance_10s_ohm'])
-                                            resistance_summary['time_points_s'].append(10)
-                                            resistance_summary['measurement_types'].add('10s')
-                                        
-                                        # 30s resistance
-                                        if 'resistance_30s_ohm' in pulse_data:
-                                            resistance_summary['resistance_values_ohm'].append(pulse_data['resistance_30s_ohm'])
-                                            resistance_summary['time_points_s'].append(30)
-                                            resistance_summary['measurement_types'].add('30s')
+                                        # Legacy structure support
+                                        for key, time_point in [('immediate_resistance_ohm', 0), ('resistance_10s_ohm', 10), ('resistance_30s_ohm', 30)]:
+                                            if key in pulse_data and pulse_data[key] is not None and pulse_data[key] > 0:
+                                                resistance_summary['resistance_values_ohm'].append(pulse_data[key])
+                                                resistance_summary['time_points_s'].append(time_point)
+                                                resistance_summary['measurement_types'].add(key.replace('_resistance_ohm', '').replace('_ohm', ''))
                 
                 # Calculate resistance statistics
                 if resistance_summary['resistance_values_ohm']:
@@ -561,9 +602,15 @@ class DataAnalysisTab(param.Parameterized):
                 results['avg_resistance'] = resistance_summary['average_resistance_ohm']
                 results['resistance_std'] = resistance_summary['resistance_std_ohm'] 
                 results['total_measurements'] = resistance_summary['total_measurements']
+                results['valid_measurements'] = resistance_summary['valid_measurements']
+                results['null_measurements'] = resistance_summary['null_measurements']
+                results['invalid_measurements'] = resistance_summary['invalid_measurements']
                 results['measurement_types'] = list(resistance_summary['measurement_types'])
+                results['calculation_quality'] = resistance_summary['calculation_quality']
                 
-                print(f"Resistance analysis complete: {results['total_measurements']} measurements, avg={results['avg_resistance']:.4f}Ω")
+                # Enhanced logging with quality information
+                quality_info = f"valid:{results['valid_measurements']}, null:{results['null_measurements']}, invalid:{results['invalid_measurements']}"
+                print(f"Resistance analysis complete: {results['total_measurements']} total measurements ({quality_info}), avg={results['avg_resistance']:.4f}Ω")
                 
             else:
                 print("No resistance analysis data returned from backend")

@@ -478,8 +478,48 @@ class PlottingManager:
         
         resistance_analysis = data.get('resistance_analysis', {})
         
-        if not resistance_analysis or not resistance_analysis.get('resistance_values_ohm'):
-            return self._create_empty_plot("No resistance measurements available for time plot")
+        # Check if we have any data structure to work with
+        if not resistance_analysis:
+            return self._create_empty_plot("No resistance analysis data available")
+        
+        # Handle case where we have measurements but no valid resistance values
+        valid_measurements = resistance_analysis.get('valid_measurements', 0)
+        total_measurements = resistance_analysis.get('total_measurements', 0)
+        null_measurements = resistance_analysis.get('null_measurements', 0)
+        invalid_measurements = resistance_analysis.get('invalid_measurements', 0)
+        
+        if total_measurements == 0:
+            return self._create_empty_plot("No resistance measurements found in backend data")
+        
+        if valid_measurements == 0:
+            # We have measurements but they're all null/invalid - show diagnostic info
+            diagnostic_html = f"""
+            <div style='padding: 20px;'>
+                <div style='background: #FFF3CD; border: 1px solid #F0AD4E; border-radius: 8px; padding: 20px;'>
+                    <h3 style='color: #8A6D3B; margin: 0 0 15px 0;'>📊 Resistance Analysis Diagnostic</h3>
+                    <div style='color: #8A6D3B; font-size: 14px; line-height: 1.5;'>
+                        <strong>Data Status:</strong><br>
+                        • Total measurements found: {total_measurements}<br>
+                        • Valid measurements: {valid_measurements}<br>
+                        • Null measurements: {null_measurements}<br>
+                        • Invalid measurements: {invalid_measurements}<br><br>
+                        
+                        <strong>Possible causes:</strong><br>
+                        • Insufficient current pulse data for resistance calculation<br>
+                        • Data quality issues in source files<br>
+                        • Calculation algorithm unable to determine valid IR values<br><br>
+                        
+                        <em>Try selecting different groups with current pulse segments or check data quality in the original files.</em>
+                    </div>
+                </div>
+            </div>
+            """
+            return pn.pane.HTML(diagnostic_html)
+        
+        # We have valid measurements, proceed with normal plotting
+        resistance_values = resistance_analysis.get('resistance_values_ohm', [])
+        if not resistance_values:
+            return self._create_empty_plot("No valid resistance values available for time plot")
         
         # Extract resistance and time data
         resistance_values = resistance_analysis['resistance_values_ohm']
@@ -618,8 +658,43 @@ class PlottingManager:
         
         resistance_analysis = data.get('resistance_analysis', {})
         
-        if not resistance_analysis or not resistance_analysis.get('resistance_values_ohm'):
-            return self._create_empty_plot("No resistance measurements available for distribution analysis")
+        # Check if we have any data structure to work with
+        if not resistance_analysis:
+            return self._create_empty_plot("No resistance analysis data available")
+        
+        # Handle case where we have measurements but no valid resistance values
+        valid_measurements = resistance_analysis.get('valid_measurements', 0)
+        total_measurements = resistance_analysis.get('total_measurements', 0)
+        
+        if total_measurements == 0:
+            return self._create_empty_plot("No resistance measurements found in backend data")
+        
+        if valid_measurements == 0:
+            null_measurements = resistance_analysis.get('null_measurements', 0)
+            invalid_measurements = resistance_analysis.get('invalid_measurements', 0)
+            
+            diagnostic_html = f"""
+            <div style='padding: 20px;'>
+                <div style='background: #FFF3CD; border: 1px solid #F0AD4E; border-radius: 8px; padding: 20px;'>
+                    <h3 style='color: #8A6D3B; margin: 0 0 15px 0;'>📊 Resistance Distribution Diagnostic</h3>
+                    <div style='color: #8A6D3B; font-size: 14px; line-height: 1.5;'>
+                        <strong>Data Status:</strong><br>
+                        • Total measurements: {total_measurements}<br>
+                        • Valid measurements: {valid_measurements}<br>
+                        • Null measurements: {null_measurements}<br>
+                        • Invalid measurements: {invalid_measurements}<br><br>
+                        
+                        <em>No valid resistance values available for distribution analysis. See time plot for detailed diagnostic information.</em>
+                    </div>
+                </div>
+            </div>
+            """
+            return pn.pane.HTML(diagnostic_html)
+        
+        # We have valid measurements, proceed with normal plotting
+        resistance_values = resistance_analysis.get('resistance_values_ohm', [])
+        if not resistance_values:
+            return self._create_empty_plot("No valid resistance values available for distribution plot")
         
         # Extract resistance data
         resistance_values = resistance_analysis['resistance_values_ohm']
@@ -768,16 +843,63 @@ class PlottingManager:
         if not resistance_analysis:
             return self._create_empty_plot("No resistance analysis data available for summary")
         
-        # Extract comprehensive data
+        # Extract comprehensive data including quality metrics
         total_measurements = resistance_analysis.get('total_measurements', 0)
+        valid_measurements = resistance_analysis.get('valid_measurements', 0)
+        null_measurements = resistance_analysis.get('null_measurements', 0)
+        invalid_measurements = resistance_analysis.get('invalid_measurements', 0)
+        
         avg_resistance = resistance_analysis.get('average_resistance_ohm', 0)
         resistance_std = resistance_analysis.get('resistance_std_ohm', 0)
         measurement_types = resistance_analysis.get('measurement_types', set())
+        calculation_quality = resistance_analysis.get('calculation_quality', [])
         
         resistance_values = resistance_analysis.get('resistance_values_ohm', [])
         time_points = resistance_analysis.get('time_points_s', [])
         
-        # Calculate additional statistics
+        # Handle case where we have no valid measurements but show comprehensive diagnostic
+        if valid_measurements == 0 and total_measurements > 0:
+            diagnostic_html = f"""
+            <div style='padding: 20px;'>
+                <div style='background: #FFF3CD; border: 1px solid #F0AD4E; border-radius: 8px; padding: 20px;'>
+                    <h3 style='color: #8A6D3B; margin: 0 0 15px 0;'>🔍 Comprehensive Resistance Analysis Summary</h3>
+                    
+                    <div style='display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;'>
+                        <div style='text-align: center; padding: 15px; background: white; border-radius: 8px; border: 2px solid #F0AD4E;'>
+                            <div style='font-size: 24px; font-weight: bold; color: #8A6D3B;'>{total_measurements}</div>
+                            <div style='font-size: 12px; color: #8A6D3B;'>Total Measurements</div>
+                        </div>
+                        <div style='text-align: center; padding: 15px; background: white; border-radius: 8px; border: 2px solid #D32F2F;'>
+                            <div style='font-size: 24px; font-weight: bold; color: #D32F2F;'>{valid_measurements}</div>
+                            <div style='font-size: 12px; color: #D32F2F;'>Valid Values</div>
+                        </div>
+                        <div style='text-align: center; padding: 15px; background: white; border-radius: 8px; border: 2px solid #9E9E9E;'>
+                            <div style='font-size: 24px; font-weight: bold; color: #9E9E9E;'>{null_measurements}</div>
+                            <div style='font-size: 12px; color: #9E9E9E;'>Null Values</div>
+                        </div>
+                        <div style='text-align: center; padding: 15px; background: white; border-radius: 8px; border: 2px solid #FF5722;'>
+                            <div style='font-size: 24px; font-weight: bold; color: #FF5722;'>{invalid_measurements}</div>
+                            <div style='font-size: 12px; color: #FF5722;'>Invalid Values</div>
+                        </div>
+                    </div>
+                    
+                    <div style='color: #8A6D3B; font-size: 14px; line-height: 1.6;'>
+                        <strong>Calculation Quality Status:</strong><br>
+                        • Quality indicators: {', '.join(set(calculation_quality)) if calculation_quality else 'None available'}<br>
+                        • Measurement types attempted: {', '.join(measurement_types) if measurement_types else 'None detected'}<br><br>
+                        
+                        <strong>Recommendations:</strong><br>
+                        • Verify current pulse segments are present in selected groups<br>
+                        • Check data quality and ensure sufficient sampling rate<br>
+                        • Consider using groups with galvanostatic charge/discharge segments<br>
+                        • Validate that original data files contain current step changes for IR calculation
+                    </div>
+                </div>
+            </div>
+            """
+            return pn.pane.HTML(diagnostic_html)
+        
+        # Calculate additional statistics for valid measurements
         min_resistance = min(resistance_values) if resistance_values else 0
         max_resistance = max(resistance_values) if resistance_values else 0
         resistance_range = max_resistance - min_resistance
