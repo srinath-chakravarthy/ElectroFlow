@@ -47,10 +47,10 @@ class ResistanceAnalysis:
     segment_id: str
     technique: str
     
-    # Resistance calculations
-    instantaneous_resistance_ohm: Optional[float] = None
-    resistance_10s_ohm: Optional[float] = None
-    resistance_30s_ohm: Optional[float] = None
+    # Resistance calculations (using analytics_config current_pulse schema)
+    ir_immediate_ohm: Optional[float] = None
+    ir_10s_ohm: Optional[float] = None
+    ir_30s_ohm: Optional[float] = None
     
     # Context data
     current_pulse_a: Optional[float] = None
@@ -352,9 +352,9 @@ class ElectrochemicalInsights:
             
             # Calculate instantaneous resistance (ΔV/ΔI)
             if abs(current_change) > 1e-6:  # Avoid division by zero
-                resistance_analysis.instantaneous_resistance_ohm = voltage_change / current_change
+                resistance_analysis.ir_immediate_ohm = voltage_change / current_change
                 resistance_analysis.calculation_quality = self._assess_resistance_quality(
-                    resistance_analysis.instantaneous_resistance_ohm, current_change
+                    resistance_analysis.ir_immediate_ohm, current_change
                 )
             else:
                 resistance_analysis.calculation_quality = "invalid"
@@ -501,11 +501,11 @@ class ElectrochemicalInsights:
         if not resistances:
             return {}
         
-        valid_resistances = [r for r in resistances if r.instantaneous_resistance_ohm is not None]
+        valid_resistances = [r for r in resistances if r.ir_immediate_ohm is not None]
         if not valid_resistances:
             return {'valid_calculations': 0}
         
-        resistance_values = [r.instantaneous_resistance_ohm for r in valid_resistances]
+        resistance_values = [r.ir_immediate_ohm for r in valid_resistances]
         
         return {
             'valid_calculations': len(valid_resistances),
@@ -577,7 +577,7 @@ class ElectrochemicalInsights:
         if not valid_resistances:
             return {'interpretation': 'No reliable resistance calculations'}
         
-        resistance_values = [r.instantaneous_resistance_ohm for r in valid_resistances]
+        resistance_values = [r.ir_immediate_ohm for r in valid_resistances]
         mean_resistance = np.mean(resistance_values)
         
         interpretations = {}
@@ -671,13 +671,13 @@ class ElectrochemicalInsights:
         return interpretations
     
     def _resistance_to_dict(self, resistance: ResistanceAnalysis) -> Dict[str, Any]:
-        """Convert ResistanceAnalysis to dictionary."""
+        """Convert ResistanceAnalysis to dictionary using analytics_config field names."""
         return {
             'segment_id': resistance.segment_id,
             'technique': resistance.technique,
-            'instantaneous_resistance_ohm': resistance.instantaneous_resistance_ohm,
-            'resistance_10s_ohm': resistance.resistance_10s_ohm,
-            'resistance_30s_ohm': resistance.resistance_30s_ohm,
+            'ir_immediate_ohm': resistance.ir_immediate_ohm,
+            'ir_10s_ohm': resistance.ir_10s_ohm,
+            'ir_30s_ohm': resistance.ir_30s_ohm,
             'current_pulse_a': resistance.current_pulse_a,
             'voltage_change_v': resistance.voltage_change_v,
             'pulse_duration_s': resistance.pulse_duration_s,
