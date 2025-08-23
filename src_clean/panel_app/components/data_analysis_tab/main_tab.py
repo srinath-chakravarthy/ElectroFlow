@@ -531,8 +531,8 @@ class DataAnalysisTab(param.Parameterized):
                     'calculation_quality': []
                 }
                 
-                # Extract resistance measurements from actual backend structure
-                # Backend returns: {'individual_resistances': [{'segment_id': X, 'instantaneous_resistance_ohm': Y, ...}]}
+                # Extract resistance measurements from backend structure
+                # Backend should return individual segments with analysis_results containing current_pulse data
                 if 'individual_resistances' in resistance_results:
                     individual_resistances = resistance_results['individual_resistances']
                     
@@ -549,11 +549,11 @@ class DataAnalysisTab(param.Parameterized):
                             if quality == 'invalid':
                                 resistance_summary['invalid_measurements'] += 1
                             
-                            # Process each resistance type
+                            # Process each resistance type using analytics config schema (current_pulse)
                             for key, time_point, type_name in [
-                                ('instantaneous_resistance_ohm', 0, 'instantaneous'),
-                                ('resistance_10s_ohm', 10, '10s'),
-                                ('resistance_30s_ohm', 30, '30s')
+                                ('ir_immediate_ohm', 0, 'immediate'),
+                                ('ir_10s_ohm', 10, '10s'), 
+                                ('ir_30s_ohm', 30, '30s')
                             ]:
                                 if key in resistance_data:
                                     value = resistance_data[key]
@@ -567,6 +567,34 @@ class DataAnalysisTab(param.Parameterized):
                                     else:
                                         # Invalid numeric value (negative, zero, etc.)
                                         resistance_summary['invalid_measurements'] += 1
+                
+                # Also check if backend returns analysis_results with current_pulse schema
+                elif hasattr(resistance_results, '__iter__'):
+                    # If backend returns segments with analysis_results field
+                    for segment_data in resistance_results:
+                        if isinstance(segment_data, dict) and 'analysis_results' in segment_data:
+                            analysis_results = segment_data.get('analysis_results', {})
+                            if isinstance(analysis_results, dict) and 'current_pulse' in analysis_results:
+                                current_pulse = analysis_results['current_pulse']
+                                resistance_summary['total_measurements'] += 1
+                                
+                                # Process using analytics config current_pulse schema
+                                for key, time_point, type_name in [
+                                    ('ir_immediate_ohm', 0, 'immediate'),
+                                    ('ir_10s_ohm', 10, '10s'), 
+                                    ('ir_30s_ohm', 30, '30s')
+                                ]:
+                                    if key in current_pulse:
+                                        value = current_pulse[key]
+                                        if value is None:
+                                            resistance_summary['null_measurements'] += 1
+                                        elif isinstance(value, (int, float)) and value > 0:
+                                            resistance_summary['resistance_values_ohm'].append(value)
+                                            resistance_summary['time_points_s'].append(time_point)
+                                            resistance_summary['measurement_types'].add(type_name)
+                                            resistance_summary['valid_measurements'] += 1
+                                        else:
+                                            resistance_summary['invalid_measurements'] += 1
                 
                 # Also handle legacy nested structure if present (fallback)
                 else:
@@ -679,10 +707,11 @@ class DataAnalysisTab(param.Parameterized):
                                 # Extract exponential fit parameters
                                 if 'exponential_fit' in segment_kinetics:
                                     fit = segment_kinetics['exponential_fit']
-                                    if 'tau_s' in fit:
-                                        time_constants.append(fit['tau_s'])
-                                    if 'V_eq_V' in fit:
-                                        equilibrium_voltages.append(fit['V_eq_V'])
+                                    # Use analytics config field names for exponential_fit schema
+                                    if 'time_constant_s' in fit:
+                                        time_constants.append(fit['time_constant_s'])
+                                    if 'voltage_infinity' in fit:
+                                        equilibrium_voltages.append(fit['voltage_infinity'])
                         
                         if time_constants:
                             results['mean_time_constant'] = sum(time_constants) / len(time_constants)
@@ -783,32 +812,80 @@ class DataAnalysisTab(param.Parameterized):
                     'calculation_quality': []
                 }
                 
-                # Process actual backend structure (will be adjusted based on debug output)
-                # This is a template that will be refined once we see the actual data structure
-                for key, value in equilibrium_results.items():
-                    if isinstance(value, dict):
-                        kinetics_summary['total_measurements'] += 1
-                        
-                        # Look for equilibrium voltage data
-                        if 'equilibrium_voltage_v' in value and value['equilibrium_voltage_v'] is not None:
-                            kinetics_summary['equilibrium_voltages'].append(value['equilibrium_voltage_v'])
-                            kinetics_summary['valid_measurements'] += 1
-                        else:
-                            kinetics_summary['null_measurements'] += 1
-                        
-                        # Look for time constant data
-                        if 'time_constant_s' in value and value['time_constant_s'] is not None:
-                            kinetics_summary['time_constants'].append(value['time_constant_s'])
-                        
-                        # Look for diffusion coefficient data
-                        if 'diffusion_coefficient_cm2_s' in value and value['diffusion_coefficient_cm2_s'] is not None:
-                            kinetics_summary['diffusion_coefficients'].append(value['diffusion_coefficient_cm2_s'])
-                        
-                        # Track calculation quality
-                        quality = value.get('calculation_quality', 'unknown')
-                        kinetics_summary['calculation_quality'].append(quality)
-                        if quality == 'invalid':
-                            kinetics_summary['invalid_measurements'] += 1
+                # Process backend structure using analytics config schemas
+                # Look for segments with analysis_results containing exponential_fit data
+                if hasattr(equilibrium_results, '__iter__'):
+                    for segment_data in equilibrium_results:
+                        if isinstance(segment_data, dict) and 'analysis_results' in segment_data:
+                            analysis_results = segment_data.get('analysis_results', {})
+                            kinetics_summary['total_measurements'] += 1
+                            
+                            # Process exponential_fit schema for equilibrium voltage and time constants
+                            if isinstance(analysis_results, dict) and 'exponential_fit' in analysis_results:
+                                exp_fit = analysis_results['exponential_fit']
+                                
+                                # Extract equilibrium voltage using analytics config schema
+                                if 'voltage_infinity' in exp_fit and exp_fit['voltage_infinity'] is not None:
+                                    kinetics_summary['equilibrium_voltages'].append(exp_fit['voltage_infinity'])
+                                    kinetics_summary['valid_measurements'] += 1
+                                else:
+                                    kinetics_summary['null_measurements'] += 1
+                                
+                                # Extract time constant using analytics config schema
+                                if 'time_constant_s' in exp_fit and exp_fit['time_constant_s'] is not None:
+                                    kinetics_summary['time_constants'].append(exp_fit['time_constant_s'])
+                                
+                                # Track R² quality from exponential fit
+                                if 'r_squared' in exp_fit:
+                                    r_squared = exp_fit['r_squared']
+                                    if r_squared and r_squared > 0.8:
+                                        quality = 'valid'
+                                    elif r_squared and r_squared > 0.5:
+                                        quality = 'marginal'
+                                    else:
+                                        quality = 'invalid'
+                                    kinetics_summary['calculation_quality'].append(quality)
+                                    if quality == 'invalid':
+                                        kinetics_summary['invalid_measurements'] += 1
+                            
+                            # Also check sqrt_fit schema for additional kinetics data
+                            if isinstance(analysis_results, dict) and 'sqrt_fit' in analysis_results:
+                                sqrt_fit = analysis_results['sqrt_fit']
+                                
+                                # Could extract diffusion-related data from sqrt_fit if available
+                                # For now, we'll focus on the exponential fit data
+                                
+                # Fallback: if backend returns direct key-value pairs (older format)
+                else:
+                    for key, value in equilibrium_results.items():
+                        if isinstance(value, dict):
+                            kinetics_summary['total_measurements'] += 1
+                            
+                            # Look for analytics config field names first, then fallback to any equilibrium voltage field
+                            voltage_fields = ['voltage_infinity', 'equilibrium_voltage_v', 'voltage_eq']
+                            time_constant_fields = ['time_constant_s', 'tau_s']
+                            
+                            found_voltage = False
+                            for field in voltage_fields:
+                                if field in value and value[field] is not None:
+                                    kinetics_summary['equilibrium_voltages'].append(value[field])
+                                    kinetics_summary['valid_measurements'] += 1
+                                    found_voltage = True
+                                    break
+                            
+                            if not found_voltage:
+                                kinetics_summary['null_measurements'] += 1
+                            
+                            for field in time_constant_fields:
+                                if field in value and value[field] is not None:
+                                    kinetics_summary['time_constants'].append(value[field])
+                                    break
+                            
+                            # Track calculation quality
+                            quality = value.get('calculation_quality', 'unknown')
+                            kinetics_summary['calculation_quality'].append(quality)
+                            if quality == 'invalid':
+                                kinetics_summary['invalid_measurements'] += 1
                 
                 # Add summary to results
                 results['kinetics_analysis'] = kinetics_summary
