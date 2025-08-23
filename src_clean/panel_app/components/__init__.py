@@ -6,6 +6,8 @@ Modular components for the electrochemical analysis interface:
 - FileUploader: File upload, processing, and selection  
 - DataViewer: Data visualization and analysis
 - StatusBar: Status messages and system information
+- GroupManagementTab: Group management and organization
+- DataAnalysisTabWrapper: Advanced data analysis and visualization (Tab 3)
 """
 
 from .cell_manager import CellManager
@@ -13,5 +15,6 @@ from .file_uploader import FileUploader
 from .data_viewer import DataViewer
 from .status_bar import StatusBar
 from .group_management_tab import GroupManagementTab
+from .data_analysis import DataAnalysisTabWrapper
 
-__all__ = ['CellManager', 'FileUploader', 'DataViewer', 'StatusBar', 'GroupManagementTab']
+__all__ = ['CellManager', 'FileUploader', 'DataViewer', 'StatusBar', 'GroupManagementTab', 'DataAnalysisTabWrapper']

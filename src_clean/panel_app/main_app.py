@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from backend import get_backend_api
-from panel_app.components import CellManager, FileUploader, DataViewer, StatusBar, GroupManagementTab
+from panel_app.components import CellManager, FileUploader, DataViewer, StatusBar, GroupManagementTab, DataAnalysisTabWrapper
 class ElectrochemicalApp(param.Parameterized):
     """
     Professional Panel application for electrochemical data analysis.
@@ -46,6 +46,7 @@ class ElectrochemicalApp(param.Parameterized):
         self.data_viewer = DataViewer(api=self.api)
         self.status_bar = self._create_status_bar()
         self.group_management_tab = GroupManagementTab(api=self.api)
+        self.data_analysis_tab = DataAnalysisTabWrapper(api=self.api)
 
         # Setup component connections
         self._setup_connections()
@@ -380,13 +381,8 @@ class ElectrochemicalApp(param.Parameterized):
         # Tab 2: Group Management (new)
         tab2_content = self.group_management_tab.panel
 
-        # Tab 3: Data Analysis (placeholder for now)
-        tab3_content = pn.pane.HTML("""
-        <div style='text-align: center; padding: 100px; color: #666;'>
-            <h2 style='color: #2E4057;'>📊 Advanced Data Analysis</h2>
-            <p>Enhanced analytics and group-based analysis coming soon...</p>
-        </div>
-        """)
+        # Tab 3: Data Analysis (NEW - Phase 1 implementation)
+        tab3_content = self.data_analysis_tab.panel
 
         # Create tabs with tab switching refresh logic
         tabs = pn.Tabs(

@@ -1,0 +1,238 @@
+"""
+Tab 3 Data Analysis - Results Display & Formatting
+
+Handles formatting and display of analysis results.
+Creates professional output for different analysis types.
+
+Architecture: Results formatting dispatcher with analysis-specific methods.
+"""
+
+import panel as pn
+from typing import Dict, List, Any
+
+
+class ResultsDisplay:
+    """
+    Handles formatting and display of analysis results.
+    Creates professional output for different analysis types.
+    
+    Phase 1: Basic results placeholders
+    Phase 2: Simple results display with backend data
+    Phase 3: Analysis-specific results formatting
+    Phase 4: Advanced export and detailed results
+    """
+    
+    def __init__(self, api):
+        self.api = api
+        
+        # Create results panels
+        self._create_results_panels()
+        
+        # Current state
+        self.current_results = {}
+        self.current_analysis = "basic_statistics"
+    
+    def _create_results_panels(self):
+        """Create results display panels."""
+        
+        # Quick results panel (always visible)
+        self.quick_results_panel = pn.pane.HTML(
+            """
+            <div style='color: #666; font-style: italic; padding: 20px; text-align: center;'>
+                📊 Analysis results will appear here...<br>
+                <small>Select groups and run analysis to see results</small>
+            </div>
+            """,
+            width=450,
+            height=150
+        )
+        
+        # Detailed results panel (for Row 3, future phases)
+        self.detailed_results_panel = pn.pane.HTML(
+            """
+            <div style='color: #666; padding: 20px;'>
+                <em>Detailed results and export options will be available in future phases...</em>
+            </div>
+            """,
+            width=800
+        )
+    
+    def get_quick_results_panel(self):
+        """Return the quick results panel."""
+        return self.quick_results_panel
+    
+    def get_detailed_results_panel(self):
+        """Return the detailed results panel."""
+        return self.detailed_results_panel
+    
+    # ===== RESULTS FORMATTING =====
+    
+    def format_results(self, analysis_type: str, results: Dict[str, Any]):
+        """Main results formatting dispatcher."""
+        
+        try:
+            if analysis_type == "basic_statistics":
+                return self._format_basic_statistics_results(results)
+            elif analysis_type == "dqdv_analysis":
+                return self._format_dqdv_results(results)
+            elif analysis_type == "kinetics_analysis":
+                return self._format_kinetics_results(results)
+            else:
+                return self._format_generic_results(results)
+                
+        except Exception as e:
+            return self._format_error_results(f"Error formatting results: {str(e)}")
+    
+    def _format_basic_statistics_results(self, results: Dict[str, Any]):
+        """Format basic statistics results."""
+        
+        # Phase 1: Placeholder results
+        if not results:
+            results = {
+                'total_segments': 45,
+                'total_groups': 3,
+                'duration_mean': 125.4,
+                'duration_std': 23.1,
+                'voltage_mean': 3.85,
+                'voltage_std': 0.12,
+                'capacity_mean': 0.045,
+                'capacity_std': 0.008
+            }
+        
+        html_content = f"""
+        <div style='background: #F8F9FA; padding: 15px; border-radius: 6px; border: 1px solid #E0E0E0;'>
+            <div style='color: #2E4057; font-weight: 600; font-size: 16px; margin-bottom: 12px;'>
+                🔬 Basic Statistics Results
+            </div>
+            
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;'>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Total Segments:</strong> {results.get('total_segments', 'N/A')}
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Total Groups:</strong> {results.get('total_groups', 'N/A')}
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Duration:</strong> {results.get('duration_mean', 0):.1f} ± {results.get('duration_std', 0):.1f} s
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Voltage:</strong> {results.get('voltage_mean', 0):.2f} ± {results.get('voltage_std', 0):.2f} V
+                </div>
+            </div>
+            
+            <div style='color: #666; font-size: 12px; margin-top: 8px;'>
+                <em>Phase 1: Placeholder data - Real analysis in Phase 2</em>
+            </div>
+        </div>
+        """
+        
+        return html_content
+    
+    def _format_dqdv_results(self, results: Dict[str, Any]):
+        """Format dQ/dV analysis results."""
+        
+        # Phase 1: Placeholder
+        html_content = """
+        <div style='background: #E3F2FD; padding: 15px; border-radius: 6px; border: 1px solid #1976D2;'>
+            <div style='color: #1976D2; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+                📈 dQ/dV Analysis Results
+            </div>
+            <div style='color: #666; font-style: italic;'>
+                dQ/dV analysis results will be displayed here in Phase 3...
+            </div>
+        </div>
+        """
+        
+        return html_content
+    
+    def _format_kinetics_results(self, results: Dict[str, Any]):
+        """Format kinetics analysis results."""
+        
+        # Phase 1: Placeholder
+        html_content = """
+        <div style='background: #E8F5E8; padding: 15px; border-radius: 6px; border: 1px solid #2E7D32;'>
+            <div style='color: #2E7D32; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+                ⚡ Kinetics Analysis Results
+            </div>
+            <div style='color: #666; font-style: italic;'>
+                Kinetics analysis results will be displayed here in Phase 3...
+            </div>
+        </div>
+        """
+        
+        return html_content
+    
+    def _format_generic_results(self, results: Dict[str, Any]):
+        """Format generic results."""
+        
+        html_content = f"""
+        <div style='background: #FFF3E0; padding: 15px; border-radius: 6px; border: 1px solid #F57C00;'>
+            <div style='color: #F57C00; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+                📊 Analysis Results
+            </div>
+            <div style='color: #666;'>
+                Results available: {len(results) if results else 0} items
+            </div>
+        </div>
+        """
+        
+        return html_content
+    
+    def _format_error_results(self, error_message: str):
+        """Format error results."""
+        
+        html_content = f"""
+        <div style='background: #FFEBEE; padding: 15px; border-radius: 6px; border: 1px solid #D32F2F;'>
+            <div style='color: #D32F2F; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+                ❌ Analysis Error
+            </div>
+            <div style='color: #666; font-size: 14px;'>
+                {error_message}
+            </div>
+        </div>
+        """
+        
+        return html_content
+    
+    # ===== RESULTS MANAGEMENT =====
+    
+    def update_results_display(self, analysis_type: str, results: Dict[str, Any]):
+        """Update results display with new results."""
+        
+        self.current_analysis = analysis_type
+        self.current_results = results
+        
+        # Format results for quick display
+        formatted_results = self.format_results(analysis_type, results)
+        
+        # Update quick results panel
+        self.quick_results_panel.object = formatted_results
+    
+    def clear_results_display(self):
+        """Clear results display."""
+        
+        self.current_results = {}
+        
+        self.quick_results_panel.object = """
+        <div style='color: #666; font-style: italic; padding: 20px; text-align: center;'>
+            📊 Analysis results will appear here...<br>
+            <small>Select groups and run analysis to see results</small>
+        </div>
+        """
+    
+    # ===== EXPORT FUNCTIONALITY (FUTURE PHASES) =====
+    
+    def create_detailed_results_table(self, analysis_type: str, results: Dict[str, Any]):
+        """Create detailed results table for export."""
+        # Phase 4: Implementation
+        pass
+    
+    def prepare_results_for_export(self, analysis_type: str, results: Dict[str, Any], format: str):
+        """Prepare results for export in specified format."""
+        # Phase 4: Implementation  
+        pass
+    
+    def create_results_summary_text(self, analysis_type: str, results: Dict[str, Any]):
+        """Create text summary of results."""
+        # Phase 4: Implementation
+        pass
