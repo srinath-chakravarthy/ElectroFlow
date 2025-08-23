@@ -302,6 +302,14 @@ class DataAnalysisTab(param.Parameterized):
     def _on_cell_changed(self, event):
         """Handle cell selection change."""
         new_cell = event.new
+        # Ensure we have a string value, not a tuple
+        if isinstance(new_cell, (tuple, list)) and len(new_cell) > 1:
+            new_cell = new_cell[1]  # Take the value part of (label, value) tuple
+        elif isinstance(new_cell, (tuple, list)) and len(new_cell) == 1:
+            new_cell = new_cell[0]
+        
+        # Ensure it's a string
+        new_cell = str(new_cell) if new_cell is not None else ""
         self.current_cell = new_cell
         
         if new_cell:
@@ -318,6 +326,14 @@ class DataAnalysisTab(param.Parameterized):
     def _on_analysis_type_changed(self, event):
         """Handle analysis type change.""" 
         new_analysis = event.new
+        # Ensure we have a string value, not a tuple
+        if isinstance(new_analysis, (tuple, list)) and len(new_analysis) > 1:
+            new_analysis = new_analysis[1]  # Take the value part of (label, value) tuple
+        elif isinstance(new_analysis, (tuple, list)) and len(new_analysis) == 1:
+            new_analysis = new_analysis[0]
+        
+        # Ensure it's a string
+        new_analysis = str(new_analysis) if new_analysis is not None else "basic_statistics"
         old_analysis = self.current_analysis
         
         self.current_analysis = new_analysis
