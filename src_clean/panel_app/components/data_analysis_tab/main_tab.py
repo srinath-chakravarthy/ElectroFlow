@@ -551,6 +551,7 @@ class DataAnalysisTab(param.Parameterized):
                     'total_measurements': 0,
                     'valid_measurements': 0,
                     'null_measurements': 0,
+                    'invalid_measurements': 0,
                     'resistance_values_ohm': [],
                     'time_points_s': [],
                     'average_resistance_ohm': 0.0,

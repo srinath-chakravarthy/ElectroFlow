@@ -122,6 +122,11 @@ class PlottingManager:
         """Main plot generation dispatcher."""
         
         try:
+            # CRITICAL FIX: Update available plot types for this analysis
+            self.update_available_plots(analysis_type)
+            print(f"Updated plot types for {analysis_type}: {self.plot_type_selector.options}")
+            print(f"Selected plot type: {self.plot_type_selector.value}")
+            
             if analysis_type == "basic_statistics":
                 return self._create_basic_statistics_plot(data, settings)
             elif analysis_type == "resistance_analysis":
@@ -134,6 +139,9 @@ class PlottingManager:
                 return self._create_empty_plot(f"Unknown analysis type: {analysis_type}")
                 
         except Exception as e:
+            print(f"Plot creation error for {analysis_type}: {e}")
+            import traceback
+            traceback.print_exc()
             return self._create_empty_plot(f"Error creating plot: {str(e)}")
     
     def _create_basic_statistics_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
