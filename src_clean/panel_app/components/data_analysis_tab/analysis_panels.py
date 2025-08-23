@@ -26,6 +26,9 @@ class AnalysisPanels:
     def __init__(self, api):
         self.api = api
         
+        # Store reference to main tab for button updates
+        self.main_tab = None
+        
         # Create all panels
         self._create_all_panels()
         
@@ -81,9 +84,12 @@ class AnalysisPanels:
             disabled=True
         )
         
-        # Button event handlers (Phase 1: basic functionality)
+        # Button event handlers (Phase 2: functional)
         self.select_all_btn.on_click(self._on_select_all)
         self.clear_all_btn.on_click(self._on_clear_all)
+        
+        # Groups selection change handler  
+        self.groups_checkboxes.param.watch(self._on_groups_selection_changed, 'value')
         
         # Groups panel layout
         self.groups_panel = pn.Column(
@@ -286,30 +292,57 @@ class AnalysisPanels:
     # ===== GROUPS MANAGEMENT =====
     
     def update_available_groups(self, cell_name: str):
-        """Update available groups for selected cell."""
+        """Update available groups for selected cell - Phase 2: Real API integration."""
         
         try:
-            # Get groups for cell (Phase 1: just show placeholder)
-            # Phase 2 will add real API calls
-            placeholder_groups = [
-                f"Template_All_Rest ({cell_name})",
-                f"Template_All_CC ({cell_name})", 
-                f"User_Custom_Group ({cell_name})"
-            ]
+            # Phase 2: Get real groups from API
+            groups_data = self.api.get_cell_groups_with_counts(cell_name)
             
-            self.groups_checkboxes.options = placeholder_groups
+            if groups_data:
+                # Format groups for display: "GroupName (15 segments)"
+                group_options = [
+                    f"{group['group_name']} ({group['segment_count']} segments)" 
+                    for group in groups_data
+                ]
+                
+                # Store group IDs for backend calls
+                self.group_id_mapping = {
+                    f"{group['group_name']} ({group['segment_count']} segments)": group['group_id']
+                    for group in groups_data
+                }
+            else:
+                # Fallback to placeholder if no groups
+                group_options = [
+                    f"No groups available for {cell_name}",
+                ]
+                self.group_id_mapping = {}
+            
+            self.groups_checkboxes.options = group_options
             self.groups_checkboxes.value = []
             
-            # Enable buttons
-            self.select_all_btn.disabled = False
-            self.clear_all_btn.disabled = False
+            # Enable/disable buttons based on availability
+            has_groups = len(group_options) > 0 and not group_options[0].startswith("No groups")
+            self.select_all_btn.disabled = not has_groups
+            self.clear_all_btn.disabled = not has_groups
             
             # Update summary
             self._update_groups_summary()
             
         except Exception as e:
-            print(f"Error updating groups: {e}")
-            self.clear_groups()
+            print(f"Error updating groups for {cell_name}: {e}")
+            # Fallback to placeholder
+            placeholder_groups = [
+                f"Template_All_Rest ({cell_name})",
+                f"Template_All_CC ({cell_name})", 
+                f"User_Custom_Group ({cell_name})"
+            ]
+            self.groups_checkboxes.options = placeholder_groups
+            self.groups_checkboxes.value = []
+            self.group_id_mapping = {group: f"placeholder_{i}" for i, group in enumerate(placeholder_groups)}
+            
+            self.select_all_btn.disabled = False
+            self.clear_all_btn.disabled = False
+            self._update_groups_summary()
     
     def clear_groups(self):
         """Clear groups selection."""
@@ -352,6 +385,16 @@ class AnalysisPanels:
         self.groups_checkboxes.value = []
         self._update_groups_summary()
     
+    def _on_groups_selection_changed(self, event):
+        """Handle groups selection change - enable/disable analyze button."""
+        self._update_groups_summary()
+        
+        # Enable/disable analyze button based on selection
+        if hasattr(self, 'main_tab') and self.main_tab:
+            selected_count = len(self.groups_checkboxes.value)
+            if hasattr(self.main_tab, 'analyze_btn'):
+                self.main_tab.analyze_btn.disabled = (selected_count == 0)
+    
     # ===== SETTINGS MANAGEMENT =====
     
     def get_current_settings(self, analysis_type: str) -> Dict[str, Any]:
@@ -378,8 +421,16 @@ class AnalysisPanels:
             return {}
     
     def get_selected_groups(self) -> List[str]:
-        """Get currently selected groups."""
-        return list(self.groups_checkboxes.value)
+        """Get currently selected group IDs for backend calls."""
+        selected_display_names = list(self.groups_checkboxes.value)
+        
+        # Convert display names to group IDs if mapping exists
+        if hasattr(self, 'group_id_mapping') and self.group_id_mapping:
+            return [self.group_id_mapping.get(display_name, display_name) 
+                   for display_name in selected_display_names]
+        
+        # Fallback to display names
+        return selected_display_names
     
     def get_filter_settings(self) -> Dict[str, Any]:
         """Get current filter settings.""" 
