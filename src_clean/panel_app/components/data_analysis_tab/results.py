@@ -84,9 +84,13 @@ class ResultsDisplay:
             return self._format_error_results(f"Error formatting results: {str(e)}")
     
     def _format_basic_statistics_results(self, results: Dict[str, Any]):
-        """Format basic statistics results."""
+        """Format basic statistics results with real backend data."""
         
-        # Phase 1: Placeholder results
+        # Check if we have real backend data
+        has_real_data = 'backend_results' in results or any(key.endswith('_mean') for key in results.keys())
+        data_source = "Real electrochemical analysis" if has_real_data else "Simulated data"
+        
+        # Use real data or fallback to placeholder
         if not results:
             results = {
                 'total_segments': 45,
@@ -116,12 +120,18 @@ class ResultsDisplay:
                     <strong>Duration:</strong> {results.get('duration_mean', 0):.1f} ± {results.get('duration_std', 0):.1f} s
                 </div>
                 <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
-                    <strong>Voltage:</strong> {results.get('voltage_mean', 0):.2f} ± {results.get('voltage_std', 0):.2f} V
+                    <strong>Voltage:</strong> {results.get('voltage_mean', 0):.3f} ± {results.get('voltage_std', 0):.3f} V
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Capacity:</strong> {results.get('capacity_mean', 0):.4f} ± {results.get('capacity_std', 0):.4f} Ah
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Energy:</strong> {results.get('energy_mean', 0):.4f} ± {results.get('energy_std', 0):.4f} Wh
                 </div>
             </div>
             
             <div style='color: #666; font-size: 12px; margin-top: 8px;'>
-                <em>Phase 1: Placeholder data - Real analysis in Phase 2</em>
+                <em>{data_source} • {results.get('analysis_timestamp', 'Current session')}</em>
             </div>
         </div>
         """
@@ -129,16 +139,71 @@ class ResultsDisplay:
         return html_content
     
     def _format_dqdv_results(self, results: Dict[str, Any]):
-        """Format dQ/dV analysis results."""
+        """Format dQ/dV analysis results with real electrochemical insights data."""
         
-        # Phase 1: Placeholder
-        html_content = """
+        insights = results.get('electrochemical_insights', {})
+        rest_analysis = insights.get('rest_analysis', {})
+        
+        if not rest_analysis:
+            html_content = """
+            <div style='background: #E3F2FD; padding: 15px; border-radius: 6px; border: 1px solid #1976D2;'>
+                <div style='color: #1976D2; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+                    📈 dQ/dV Analysis Results
+                </div>
+                <div style='color: #666; font-style: italic;'>
+                    No electrochemical insights data available for dQ/dV analysis
+                </div>
+            </div>
+            """
+            return html_content
+        
+        # Analyze rest segments for voltage relaxation
+        total_rest_segments = len(rest_analysis)
+        analyzed_segments = 0
+        total_time_constant = 0
+        total_voltage_drop = 0
+        avg_r_squared = 0
+        
+        for segment_data in rest_analysis.values():
+            if segment_data and 'voltage_relaxation' in segment_data:
+                analyzed_segments += 1
+                relaxation = segment_data['voltage_relaxation']
+                total_time_constant += relaxation.get('time_constant_s', 0.0)
+                total_voltage_drop += relaxation.get('voltage_drop_mv', 0.0)
+                avg_r_squared += relaxation.get('r_squared', 0.0)
+        
+        if analyzed_segments > 0:
+            avg_time_constant = total_time_constant / analyzed_segments
+            avg_voltage_drop = total_voltage_drop / analyzed_segments
+            avg_r_squared = avg_r_squared / analyzed_segments
+        else:
+            avg_time_constant = avg_voltage_drop = avg_r_squared = 0
+        
+        quality_indicator = "🟢 Excellent" if avg_r_squared > 0.9 else "🟡 Good" if avg_r_squared > 0.7 else "🔴 Poor"
+        
+        html_content = f"""
         <div style='background: #E3F2FD; padding: 15px; border-radius: 6px; border: 1px solid #1976D2;'>
-            <div style='color: #1976D2; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+            <div style='color: #1976D2; font-weight: 600; font-size: 16px; margin-bottom: 12px;'>
                 📈 dQ/dV Analysis Results
             </div>
-            <div style='color: #666; font-style: italic;'>
-                dQ/dV analysis results will be displayed here in Phase 3...
+            
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;'>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Rest Segments:</strong> {analyzed_segments} of {total_rest_segments}
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Fit Quality:</strong> {quality_indicator} (R²={avg_r_squared:.3f})
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Avg Time Constant:</strong> {avg_time_constant:.1f} s
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Avg Voltage Drop:</strong> {avg_voltage_drop:.1f} mV
+                </div>
+            </div>
+            
+            <div style='color: #666; font-size: 12px; margin-top: 8px;'>
+                <em>Electrochemical insights backend • Voltage relaxation analysis complete</em>
             </div>
         </div>
         """
@@ -146,16 +211,83 @@ class ResultsDisplay:
         return html_content
     
     def _format_kinetics_results(self, results: Dict[str, Any]):
-        """Format kinetics analysis results."""
+        """Format kinetics analysis results with comprehensive electrochemical data."""
         
-        # Phase 1: Placeholder
-        html_content = """
+        kinetics_data = results.get('kinetics_analysis', {})
+        
+        if not kinetics_data:
+            html_content = """
+            <div style='background: #E8F5E8; padding: 15px; border-radius: 6px; border: 1px solid #2E7D32;'>
+                <div style='color: #2E7D32; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+                    ⚡ Kinetics Analysis Results
+                </div>
+                <div style='color: #666; font-style: italic;'>
+                    No kinetics analysis data available
+                </div>
+            </div>
+            """
+            return html_content
+        
+        # Extract analysis components
+        time_constants = kinetics_data.get('time_constants', [])
+        diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
+        resistance_data = kinetics_data.get('resistance_analysis', {})
+        equilibrium_data = kinetics_data.get('equilibrium_analysis', {})
+        
+        # Calculate summary statistics
+        num_time_constants = len(time_constants)
+        num_diffusion_coeffs = len(diffusion_coeffs)
+        num_equilibrium_points = len(equilibrium_data)
+        
+        avg_resistance = resistance_data.get('average_resistance_ohm', 0.0)
+        
+        # Calculate equilibrium voltage statistics
+        eq_voltages = []
+        for eq_data in equilibrium_data.values():
+            if eq_data and 'equilibrium_voltage_v' in eq_data:
+                eq_voltages.append(eq_data['equilibrium_voltage_v'])
+        
+        avg_eq_voltage = sum(eq_voltages) / len(eq_voltages) if eq_voltages else 0.0
+        
+        # Determine analysis completeness
+        completeness_score = 0
+        if num_time_constants > 0: completeness_score += 25
+        if num_diffusion_coeffs > 0: completeness_score += 25
+        if avg_resistance > 0: completeness_score += 25
+        if num_equilibrium_points > 0: completeness_score += 25
+        
+        completeness_indicator = (
+            "🟢 Complete" if completeness_score == 100 else
+            "🟡 Partial" if completeness_score >= 50 else
+            "🔴 Limited"
+        )
+        
+        html_content = f"""
         <div style='background: #E8F5E8; padding: 15px; border-radius: 6px; border: 1px solid #2E7D32;'>
-            <div style='color: #2E7D32; font-weight: 600; font-size: 16px; margin-bottom: 10px;'>
+            <div style='color: #2E7D32; font-weight: 600; font-size: 16px; margin-bottom: 12px;'>
                 ⚡ Kinetics Analysis Results
             </div>
-            <div style='color: #666; font-style: italic;'>
-                Kinetics analysis results will be displayed here in Phase 3...
+            
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;'>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Time Constants:</strong> {num_time_constants} parameters
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Diffusion Coeffs:</strong> {num_diffusion_coeffs} computed
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Avg Resistance:</strong> {avg_resistance:.4f} Ω
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8;'>
+                    <strong>Equilibrium V:</strong> {avg_eq_voltage:.4f} V
+                </div>
+                <div style='background: white; padding: 8px; border-radius: 4px; border: 1px solid #E8E8E8; grid-column: 1 / -1;'>
+                    <strong>Analysis Status:</strong> {completeness_indicator} ({completeness_score}% complete)
+                </div>
+            </div>
+            
+            <div style='color: #666; font-size: 12px; margin-top: 8px;'>
+                <em>Comprehensive kinetics backend • {num_equilibrium_points} equilibrium points analyzed</em>
             </div>
         </div>
         """

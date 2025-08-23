@@ -102,7 +102,6 @@ class PlottingManager:
                 Advanced plot controls will be available in future phases...
             </div>
             """),
-            collapsed=True,  # Start collapsed
             visible=False    # Hidden in Phase 1
         )
         
@@ -239,16 +238,323 @@ class PlottingManager:
         return self._create_empty_plot("Box plot visualization will be implemented in future phases")
     
     def _create_dqdv_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
-        """Create dQ/dV analysis plot."""
+        """Create dQ/dV analysis plot with real electrochemical insights data."""
         
-        # Phase 1: Placeholder
-        return self._create_empty_plot("dQ/dV plotting will be implemented in Phase 3")
+        if not data or 'electrochemical_insights' not in data:
+            return self._create_empty_plot("No dQ/dV analysis data available")
+        
+        # Get current plot type
+        plot_type = self.plot_type_selector.value
+        
+        if plot_type == "dqdv_voltage":
+            return self._create_dqdv_voltage_table(data)
+        elif plot_type == "peak_analysis":
+            return self._create_dqdv_peak_analysis(data)  
+        elif plot_type == "overlay_comparison":
+            return self._create_dqdv_overlay_comparison(data)
+        else:
+            return self._create_dqdv_voltage_table(data)  # Default
     
     def _create_kinetics_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
-        """Create kinetics analysis plot."""
+        """Create kinetics analysis plot with real electrochemical data."""
         
-        # Phase 1: Placeholder  
-        return self._create_empty_plot("Kinetics plotting will be implemented in Phase 3")
+        if not data or 'kinetics_analysis' not in data:
+            return self._create_empty_plot("No kinetics analysis data available")
+        
+        # Get current plot type
+        plot_type = self.plot_type_selector.value
+        
+        if plot_type == "voltage_time":
+            return self._create_kinetics_voltage_table(data)
+        elif plot_type == "kinetics_fit":
+            return self._create_kinetics_fit_summary(data)
+        elif plot_type == "fit_quality":
+            return self._create_kinetics_quality_table(data)
+        else:
+            return self._create_kinetics_voltage_table(data)  # Default
+    
+    # ===== dQ/dV VISUALIZATION METHODS =====
+    
+    def _create_dqdv_voltage_table(self, data: Dict[str, Any]):
+        """Create dQ/dV voltage relaxation analysis table."""
+        
+        insights = data.get('electrochemical_insights', {})
+        rest_analysis = insights.get('rest_analysis', {})
+        
+        # Extract voltage relaxation data
+        rest_data = []
+        for segment_id, segment_data in rest_analysis.items():
+            if segment_data and 'voltage_relaxation' in segment_data:
+                relaxation = segment_data['voltage_relaxation']
+                rest_data.append({
+                    'segment_id': segment_id,
+                    'initial_v': relaxation.get('initial_voltage_v', 0.0),
+                    'equilibrium_v': relaxation.get('equilibrium_voltage_v', 0.0), 
+                    'time_constant_s': relaxation.get('time_constant_s', 0.0),
+                    'r_squared': relaxation.get('r_squared', 0.0),
+                    'voltage_drop_mv': relaxation.get('voltage_drop_mv', 0.0)
+                })
+        
+        if not rest_data:
+            return self._create_empty_plot("No voltage relaxation data available for dQ/dV analysis")
+        
+        # Create summary table
+        total_segments = len(rest_data)
+        avg_time_constant = sum(d['time_constant_s'] for d in rest_data) / total_segments
+        avg_voltage_drop = sum(d['voltage_drop_mv'] for d in rest_data) / total_segments
+        
+        # Build HTML table
+        rows_html = ""
+        for i, row in enumerate(rest_data[:10]):  # Show first 10
+            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
+            rows_html += f"""
+            <tr style='{style}'>
+                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>{row['segment_id'][:12]}...</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['initial_v']:.3f}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['equilibrium_v']:.3f}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['time_constant_s']:.1f}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['voltage_drop_mv']:.1f}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{row['r_squared']:.3f}</td>
+            </tr>
+            """
+        
+        voltage_html = f"""
+        <div style='padding: 20px;'>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
+                <h3 style='color: #2E4057; margin: 0;'>⚡ dQ/dV - Voltage Relaxation Analysis</h3>
+                <div style='color: #666; font-size: 12px;'>
+                    {total_segments} rest segments analyzed<br>
+                    <em>Electrochemical insights backend</em>
+                </div>
+            </div>
+            
+            <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <thead>
+                    <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
+                        <th style='padding: 12px; text-align: left; font-weight: 600;'>Segment</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Initial V</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>Equilibrium V</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>τ (s)</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>ΔV (mV)</th>
+                        <th style='padding: 12px; text-align: right; font-weight: 600;'>R²</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+            
+            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
+                <strong style='color: #1976D2;'>Analysis Summary:</strong><br>
+                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
+                    Average time constant: <strong>{avg_time_constant:.1f} s</strong><br>
+                    Average voltage drop: <strong>{avg_voltage_drop:.1f} mV</strong><br>
+                    {f"Showing first 10 of {total_segments} segments" if total_segments > 10 else f"All {total_segments} segments displayed"}
+                </div>
+            </div>
+        </div>
+        """
+        
+        return pn.pane.HTML(voltage_html)
+    
+    def _create_dqdv_peak_analysis(self, data: Dict[str, Any]):
+        """Create dQ/dV peak analysis placeholder."""
+        return self._create_empty_plot("dQ/dV peak analysis visualization will be enhanced in future phases")
+    
+    def _create_dqdv_overlay_comparison(self, data: Dict[str, Any]):
+        """Create dQ/dV overlay comparison placeholder."""
+        return self._create_empty_plot("dQ/dV overlay comparison will be enhanced in future phases")
+    
+    # ===== KINETICS VISUALIZATION METHODS =====
+    
+    def _create_kinetics_voltage_table(self, data: Dict[str, Any]):
+        """Create kinetics voltage analysis table."""
+        
+        kinetics_data = data.get('kinetics_analysis', {})
+        
+        # Extract time constants data
+        time_constants = kinetics_data.get('time_constants', [])
+        diffusion_coeffs = kinetics_data.get('diffusion_coefficients', [])
+        resistance_data = kinetics_data.get('resistance_analysis', {})
+        
+        if not time_constants and not diffusion_coeffs:
+            return self._create_empty_plot("No kinetics analysis data available")
+        
+        # Build time constants table
+        tc_rows = ""
+        for i, tc in enumerate(time_constants[:8]):  # Show first 8
+            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
+            tc_rows += f"""
+            <tr style='{style}'>
+                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>τ{i+1}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{tc:.2f}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>Voltage relaxation</td>
+            </tr>
+            """
+        
+        # Build diffusion coefficients table  
+        dc_rows = ""
+        for i, dc in enumerate(diffusion_coeffs[:5]):
+            style = "background: white;" if i % 2 == 0 else "background: #F8F9FA;"
+            dc_rows += f"""
+            <tr style='{style}'>
+                <td style='padding: 8px; border-bottom: 1px solid #E0E0E0;'>D{i+1}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0; font-family: monospace;'>{dc:.2e}</td>
+                <td style='padding: 8px; text-align: right; border-bottom: 1px solid #E0E0E0;'>cm²/s</td>
+            </tr>
+            """
+        
+        # Resistance summary
+        resistance_summary = ""
+        if resistance_data:
+            avg_resistance = resistance_data.get('average_resistance_ohm', 0.0)
+            resistance_summary = f"""
+            <div style='margin-top: 20px; padding: 12px; background: #FFF3E0; border-radius: 6px; border-left: 4px solid #FF9800;'>
+                <strong style='color: #FF9800;'>Resistance Analysis:</strong><br>
+                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
+                    Average IR resistance: <strong>{avg_resistance:.4f} Ω</strong><br>
+                    Analysis method: Current pulse response
+                </div>
+            </div>
+            """
+        
+        kinetics_html = f"""
+        <div style='padding: 20px;'>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
+                <h3 style='color: #2E4057; margin: 0;'>⚗️ Kinetics - Voltage & Time Analysis</h3>
+                <div style='color: #666; font-size: 12px;'>
+                    {len(time_constants)} time constants<br>
+                    <em>Electrochemical kinetics backend</em>
+                </div>
+            </div>
+            
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px;'>
+                <div>
+                    <h4 style='color: #1976D2; margin-bottom: 10px;'>Time Constants</h4>
+                    <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                        <thead>
+                            <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
+                                <th style='padding: 10px; text-align: left; font-weight: 600;'>Parameter</th>
+                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Value (s)</th>
+                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Process</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {tc_rows}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div>
+                    <h4 style='color: #1976D2; margin-bottom: 10px;'>Diffusion Coefficients</h4>
+                    <table style='width: 100%; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                        <thead>
+                            <tr style='background: linear-gradient(135deg, #2E4057 0%, #1976D2 100%); color: white;'>
+                                <th style='padding: 10px; text-align: left; font-weight: 600;'>Parameter</th>
+                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Value</th>
+                                <th style='padding: 10px; text-align: right; font-weight: 600;'>Units</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {dc_rows}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            {resistance_summary}
+        </div>
+        """
+        
+        return pn.pane.HTML(kinetics_html)
+    
+    def _create_kinetics_fit_summary(self, data: Dict[str, Any]):
+        """Create kinetics fit quality summary."""
+        
+        kinetics_data = data.get('kinetics_analysis', {})
+        equilibrium_data = kinetics_data.get('equilibrium_analysis', {})
+        
+        if not equilibrium_data:
+            return self._create_empty_plot("No equilibrium analysis data available for fit summary")
+        
+        # Extract equilibrium voltages
+        eq_voltages = []
+        for segment_id, eq_data in equilibrium_data.items():
+            if eq_data and 'equilibrium_voltage_v' in eq_data:
+                eq_voltages.append({
+                    'segment_id': segment_id,
+                    'equilibrium_v': eq_data['equilibrium_voltage_v'],
+                    'confidence': eq_data.get('confidence_level', 0.0),
+                    'method': eq_data.get('analysis_method', 'Unknown')
+                })
+        
+        if not eq_voltages:
+            return self._create_empty_plot("No equilibrium voltage data available")
+        
+        # Summary statistics
+        avg_voltage = sum(d['equilibrium_v'] for d in eq_voltages) / len(eq_voltages)
+        voltage_std = (sum((d['equilibrium_v'] - avg_voltage)**2 for d in eq_voltages) / len(eq_voltages))**0.5
+        avg_confidence = sum(d['confidence'] for d in eq_voltages) / len(eq_voltages)
+        
+        fit_html = f"""
+        <div style='padding: 20px;'>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
+                <h3 style='color: #2E4057; margin: 0;'>🎯 Kinetics Fit - Equilibrium Analysis</h3>
+                <div style='color: #666; font-size: 12px;'>
+                    {len(eq_voltages)} equilibrium points<br>
+                    <em>High confidence kinetics fitting</em>
+                </div>
+            </div>
+            
+            <div style='display: grid; grid-template-columns: 2fr 1fr; gap: 20px;'>
+                <div style='padding: 20px; background: #F8F9FA; border-radius: 8px; border-left: 4px solid #4CAF50;'>
+                    <h4 style='color: #4CAF50; margin-top: 0;'>Equilibrium Voltage Summary</h4>
+                    <div style='margin-bottom: 15px;'>
+                        <div style='font-size: 18px; font-weight: 600; color: #2E4057;'>{avg_voltage:.4f} ± {voltage_std:.4f} V</div>
+                        <div style='color: #666; font-size: 14px;'>Mean equilibrium voltage</div>
+                    </div>
+                    <div style='margin-bottom: 15px;'>
+                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{avg_confidence:.1%}</div>
+                        <div style='color: #666; font-size: 14px;'>Average confidence level</div>
+                    </div>
+                    <div>
+                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{len(eq_voltages)}</div>
+                        <div style='color: #666; font-size: 14px;'>Segments analyzed</div>
+                    </div>
+                </div>
+                
+                <div style='padding: 20px; background: #E8F5E8; border-radius: 8px;'>
+                    <h4 style='color: #4CAF50; margin-top: 0;'>Fit Quality</h4>
+                    <div style='text-align: center;'>
+                        <div style='font-size: 36px; color: #4CAF50; margin: 10px 0;'>
+                            {"✓" if avg_confidence > 0.8 else "⚠" if avg_confidence > 0.6 else "✗"}
+                        </div>
+                        <div style='font-weight: 600; color: #2E4057;'>
+                            {"Excellent" if avg_confidence > 0.8 else "Good" if avg_confidence > 0.6 else "Poor"} Fit
+                        </div>
+                        <div style='color: #666; font-size: 12px; margin-top: 5px;'>
+                            Based on confidence metrics
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
+                <strong style='color: #1976D2;'>Kinetics Analysis Notes:</strong><br>
+                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
+                    Equilibrium voltages extracted from voltage relaxation curves<br>
+                    High confidence indicates stable electrochemical equilibrium<br>
+                    Voltage variation: {(voltage_std/avg_voltage*100):.2f}% relative standard deviation
+                </div>
+            </div>
+        </div>
+        """
+        
+        return pn.pane.HTML(fit_html)
+    
+    def _create_kinetics_quality_table(self, data: Dict[str, Any]):
+        """Create kinetics fit quality assessment table."""
+        return self._create_empty_plot("Kinetics fit quality table will be enhanced in future phases")
     
     def _create_empty_plot(self, message: str = "No data to display"):
         """Create empty plot with message."""

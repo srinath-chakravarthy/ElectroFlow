@@ -133,7 +133,6 @@ class AnalysisPanels:
             pn.pane.HTML("<strong>Basic Statistics Settings</strong>"),
             self.basic_stats_metrics,
             self.basic_stats_statistics,
-            collapsed=True,  # Start collapsed
             width=320
         )
     
@@ -165,7 +164,6 @@ class AnalysisPanels:
             self.dqdv_method,
             self.dqdv_window, 
             self.dqdv_smoothing,
-            collapsed=True,  # Start collapsed
             width=320,
             visible=False  # Hidden initially
         )
@@ -198,7 +196,6 @@ class AnalysisPanels:
             self.kinetics_fit_type,
             self.kinetics_time_range,
             self.kinetics_quality_threshold,
-            collapsed=True,  # Start collapsed
             width=320,
             visible=False  # Hidden initially
         )
@@ -242,7 +239,6 @@ class AnalysisPanels:
                 self.reset_filters_btn,
                 margin=(10, 0)
             ),
-            collapsed=True,  # Start collapsed
             width=320
         )
     
