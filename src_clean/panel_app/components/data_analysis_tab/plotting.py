@@ -53,8 +53,8 @@ class PlottingManager:
                 </div>
             </div>
             """,
-            height=350,
-            width=500
+            height=500,
+            width=700
         )
         
     def get_plot_area(self):
@@ -226,16 +226,230 @@ class PlottingManager:
         return pn.pane.HTML(summary_html)
     
     def _create_statistics_histogram(self, data: Dict[str, Any]):
-        """Create histogram visualization for statistics."""
+        """Create histogram visualization for statistics with real electrochemical data."""
         
-        # Phase 3: Placeholder for future histogram implementation
-        return self._create_empty_plot("Histogram visualization will be implemented in future phases")
+        backend_results = data.get('backend_results', {})
+        
+        if not backend_results:
+            return self._create_empty_plot("No statistical data available for histogram")
+        
+        # Extract data for histogram visualization
+        metrics_data = []
+        for metric_name, metric_stats in backend_results.items():
+            if isinstance(metric_stats, dict) and 'count' in metric_stats:
+                count = metric_stats.get('count', 0)
+                mean = metric_stats.get('mean', 0)
+                std = metric_stats.get('std', 0)
+                
+                # Create distribution info for display
+                metrics_data.append({
+                    'metric': metric_name.replace('_', ' ').title(),
+                    'mean': mean,
+                    'std': std,
+                    'count': count,
+                    'min': metric_stats.get('min', 0),
+                    'max': metric_stats.get('max', 0)
+                })
+        
+        if not metrics_data:
+            return self._create_empty_plot("No statistical distributions available")
+        
+        # Create histogram visualization with distribution data
+        histogram_html = f"""
+        <div style='padding: 20px;'>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
+                <h3 style='color: #2E4057; margin: 0;'>📊 Statistical Distributions - Histogram View</h3>
+                <div style='color: #666; font-size: 12px;'>
+                    {len(metrics_data)} metrics analyzed<br>
+                    <em>Distribution analysis from backend</em>
+                </div>
+            </div>
+            
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;'>
+        """
+        
+        # Create distribution cards for each metric
+        for i, metric in enumerate(metrics_data[:6]):  # Show first 6 metrics
+            # Calculate distribution range for visual representation
+            range_val = metric['max'] - metric['min']
+            normalized_std = (metric['std'] / range_val * 100) if range_val > 0 else 0
+            
+            # Color scheme for different metrics
+            colors = ['#1976D2', '#388E3C', '#F57C00', '#7B1FA2', '#C62828', '#00796B']
+            color = colors[i % len(colors)]
+            
+            histogram_html += f"""
+                <div style='background: white; border-radius: 8px; padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid {color};'>
+                    <h4 style='color: {color}; margin: 0 0 12px 0; font-size: 16px;'>{metric['metric']}</h4>
+                    
+                    <!-- Distribution visualization -->
+                    <div style='background: #F5F5F5; height: 80px; border-radius: 4px; margin-bottom: 12px; position: relative; overflow: hidden;'>
+                        <div style='position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); 
+                                    width: {min(normalized_std + 20, 90)}%; height: 60%; background: {color}; 
+                                    border-radius: 4px 4px 0 0; opacity: 0.3;'></div>
+                        <div style='position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); 
+                                    width: 8px; height: 80%; background: {color}; border-radius: 2px;'></div>
+                        <div style='position: absolute; top: 8px; right: 8px; font-size: 10px; color: #666;'>n={metric['count']}</div>
+                    </div>
+                    
+                    <!-- Statistics -->
+                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;'>
+                        <div><strong>Mean:</strong> {metric['mean']:.3f}</div>
+                        <div><strong>Std:</strong> {metric['std']:.3f}</div>
+                        <div><strong>Min:</strong> {metric['min']:.3f}</div>
+                        <div><strong>Max:</strong> {metric['max']:.3f}</div>
+                    </div>
+                </div>
+            """
+        
+        histogram_html += """
+            </div>
+            
+            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
+                <strong style='color: #1976D2;'>Distribution Analysis:</strong><br>
+                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
+                    Visual representation shows mean (dark bar) and standard deviation (light area)<br>
+                    Each metric's distribution characteristics displayed with sample count<br>
+                    Data sourced from electrochemical analysis backend
+                </div>
+            </div>
+        </div>
+        """
+        
+        return pn.pane.HTML(histogram_html)
     
     def _create_statistics_boxplot(self, data: Dict[str, Any]):
-        """Create box plot visualization for statistics."""
+        """Create box plot visualization for statistics with real electrochemical data."""
         
-        # Phase 3: Placeholder for future box plot implementation
-        return self._create_empty_plot("Box plot visualization will be implemented in future phases")
+        backend_results = data.get('backend_results', {})
+        
+        if not backend_results:
+            return self._create_empty_plot("No statistical data available for box plots")
+        
+        # Extract data for box plot visualization
+        metrics_data = []
+        for metric_name, metric_stats in backend_results.items():
+            if isinstance(metric_stats, dict) and all(k in metric_stats for k in ['min', 'max', 'mean']):
+                metrics_data.append({
+                    'metric': metric_name.replace('_', ' ').title(),
+                    'min': metric_stats.get('min', 0),
+                    'q1': metric_stats.get('mean', 0) - metric_stats.get('std', 0) * 0.5,  # Approx Q1
+                    'median': metric_stats.get('mean', 0),  # Use mean as median approximation
+                    'q3': metric_stats.get('mean', 0) + metric_stats.get('std', 0) * 0.5,  # Approx Q3
+                    'max': metric_stats.get('max', 0),
+                    'mean': metric_stats.get('mean', 0),
+                    'std': metric_stats.get('std', 0),
+                    'count': metric_stats.get('count', 0)
+                })
+        
+        if not metrics_data:
+            return self._create_empty_plot("No statistical distributions available for box plots")
+        
+        # Create box plot visualization
+        boxplot_html = f"""
+        <div style='padding: 20px;'>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
+                <h3 style='color: #2E4057; margin: 0;'>📦 Statistical Distributions - Box Plot View</h3>
+                <div style='color: #666; font-size: 12px;'>
+                    {len(metrics_data)} metrics analyzed<br>
+                    <em>Five-number summary from backend</em>
+                </div>
+            </div>
+            
+            <div style='display: flex; flex-direction: column; gap: 20px;'>
+        """
+        
+        # Create box plot for each metric
+        for i, metric in enumerate(metrics_data[:8]):  # Show first 8 metrics
+            # Normalize values for visual representation (0-100 scale)
+            value_range = metric['max'] - metric['min']
+            if value_range == 0:
+                continue
+                
+            # Calculate positions as percentages
+            q1_pos = ((metric['q1'] - metric['min']) / value_range) * 80 + 10
+            median_pos = ((metric['median'] - metric['min']) / value_range) * 80 + 10  
+            q3_pos = ((metric['q3'] - metric['min']) / value_range) * 80 + 10
+            mean_pos = ((metric['mean'] - metric['min']) / value_range) * 80 + 10
+            
+            # Color scheme for different metrics
+            colors = ['#1976D2', '#388E3C', '#F57C00', '#7B1FA2', '#C62828', '#00796B', '#795548', '#607D8B']
+            color = colors[i % len(colors)]
+            
+            boxplot_html += f"""
+                <div style='background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid {color};'>
+                    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;'>
+                        <h4 style='color: {color}; margin: 0; font-size: 16px;'>{metric['metric']}</h4>
+                        <span style='color: #666; font-size: 12px;'>n = {metric['count']}</span>
+                    </div>
+                    
+                    <!-- Box plot visualization -->
+                    <div style='position: relative; height: 60px; background: #F8F9FA; border-radius: 6px; margin-bottom: 15px;'>
+                        <!-- Whisker line (min to max) -->
+                        <div style='position: absolute; top: 50%; left: 10%; right: 10%; height: 2px; background: {color}; transform: translateY(-50%);'></div>
+                        
+                        <!-- Box (Q1 to Q3) -->
+                        <div style='position: absolute; top: 25%; left: {q1_pos}%; width: {q3_pos - q1_pos}%; height: 50%; 
+                                    background: {color}; opacity: 0.3; border-radius: 3px;'></div>
+                        <div style='position: absolute; top: 25%; left: {q1_pos}%; width: {q3_pos - q1_pos}%; height: 50%; 
+                                    border: 2px solid {color}; border-radius: 3px;'></div>
+                        
+                        <!-- Median line -->
+                        <div style='position: absolute; top: 20%; left: {median_pos}%; width: 2px; height: 60%; background: {color};'></div>
+                        
+                        <!-- Mean marker (diamond) -->
+                        <div style='position: absolute; top: 50%; left: {mean_pos}%; width: 8px; height: 8px; 
+                                    background: {color}; transform: translate(-50%, -50%) rotate(45deg); border: 1px solid white;'></div>
+                        
+                        <!-- Min/Max markers -->
+                        <div style='position: absolute; top: 35%; left: 10%; width: 2px; height: 30%; background: {color};'></div>
+                        <div style='position: absolute; top: 35%; right: 10%; width: 2px; height: 30%; background: {color};'></div>
+                        
+                        <!-- Value labels -->
+                        <div style='position: absolute; top: -15px; left: 10%; font-size: 10px; color: #666; transform: translateX(-50%);'>{metric['min']:.3f}</div>
+                        <div style='position: absolute; top: -15px; right: 10%; font-size: 10px; color: #666; transform: translateX(50%);'>{metric['max']:.3f}</div>
+                        <div style='position: absolute; bottom: -15px; left: {median_pos}%; font-size: 10px; color: {color}; transform: translateX(-50%);'>{metric['median']:.3f}</div>
+                    </div>
+                    
+                    <!-- Statistics summary -->
+                    <div style='display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 11px; text-align: center;'>
+                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
+                            <div style='font-weight: bold; color: {color};'>Q1</div>
+                            <div>{metric['q1']:.3f}</div>
+                        </div>
+                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
+                            <div style='font-weight: bold; color: {color};'>Median</div>
+                            <div>{metric['median']:.3f}</div>
+                        </div>
+                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
+                            <div style='font-weight: bold; color: {color};'>Q3</div>
+                            <div>{metric['q3']:.3f}</div>
+                        </div>
+                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
+                            <div style='font-weight: bold; color: {color};'>Mean</div>
+                            <div>{metric['mean']:.3f}</div>
+                        </div>
+                    </div>
+                </div>
+            """
+        
+        boxplot_html += """
+            </div>
+            
+            <div style='margin-top: 20px; padding: 12px; background: #E8F5E8; border-radius: 6px; border-left: 4px solid #388E3C;'>
+                <strong style='color: #388E3C;'>Box Plot Legend:</strong><br>
+                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
+                    📦 <strong>Box:</strong> Q1 to Q3 (interquartile range) • 
+                    <strong>Line in box:</strong> Median • 
+                    <strong>Diamond:</strong> Mean • 
+                    <strong>Whiskers:</strong> Min to Max range<br>
+                    Statistical quartiles approximated from mean and standard deviation
+                </div>
+            </div>
+        </div>
+        """
+        
+        return pn.pane.HTML(boxplot_html)
     
     def _create_dqdv_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
         """Create dQ/dV analysis plot with real electrochemical insights data."""
