@@ -11,7 +11,7 @@ import panel as pn
 from typing import Dict, List, Any
 
 # Registry imports for dynamic result formatting
-from ....analysis.registry import get_analysis_registry
+from src_clean.analysis.registry import get_analysis_registry
 
 
 class ResultsDisplay:
