@@ -108,12 +108,15 @@ class ElectrochemicalInsights:
         """
         try:
             kinetics_results = []
+            core_segment_data = []
             
             for segment in segment_data:
                 if segment.get('technique_name', '').upper() != 'REST':
                     continue
                 
                 segment_id = segment.get('id', 'unknown')
+
+
                 analysis_results = segment.get('analysis_results', {})
                 
                 if isinstance(analysis_results, str):
@@ -125,14 +128,19 @@ class ElectrochemicalInsights:
                 # Extract relaxation kinetics from stored fit coefficients
                 kinetics = self._extract_relaxation_from_json(segment_id, analysis_results)
                 kinetics_results.extend(kinetics)
-            
+
+                # Add core segment data for plotting fix - This is temporary so that plots work.
+                if kinetics:
+                    core_segment_data.append(segment)
+
             # Aggregate results
             summary = self._summarize_relaxation_kinetics(kinetics_results)
             
             return {
                 'analysis_type': 'rest_relaxation_kinetics',
                 'segment_count': len([s for s in segment_data if s.get('technique_name', '').upper() == 'REST']),
-                'individual_kinetics': kinetics_results,
+                'core_segment_data': core_segment_data,
+                'individual_kinetics': [self._kinetics_to_dict(k) for k in kinetics_results],
                 'summary_statistics': summary,
                 'electrochemical_insights': self._interpret_relaxation_kinetics(kinetics_results)
             }
@@ -153,27 +161,32 @@ class ElectrochemicalInsights:
         """
         try:
             resistance_results = []
-            
+            core_segment_data = []
             for segment in segment_data:
                 technique = segment.get('technique_name', '').upper()
                 if technique != 'GALVANOSTATIC':
                     continue
                 
                 segment_id = segment.get('id', 'unknown')
-                
+
+
+
                 # Calculate instantaneous resistance from segment boundaries
                 resistance_analysis = self._calculate_instantaneous_resistance(segment)
                 if resistance_analysis:
                     resistance_analysis.segment_id = segment_id
                     resistance_analysis.technique = technique
                     resistance_results.append(resistance_analysis)
-            
+
+                    # Add core segment data for plotting fix - This is temporary so that plots work.
+                    core_segment_data.append(segment)
             # Summary statistics
             summary = self._summarize_resistance_analysis(resistance_results)
             
             return {
                 'analysis_type': 'instantaneous_resistance_analysis',
                 'segment_count': len([s for s in segment_data if s.get('technique_name', '').upper() == 'GALVANOSTATIC']),
+                'core_segment_data': core_segment_data,
                 'individual_resistances': [self._resistance_to_dict(r) for r in resistance_results],
                 'summary_statistics': summary,
                 'electrochemical_insights': self._interpret_resistance_analysis(resistance_results)
@@ -277,60 +290,39 @@ class ElectrochemicalInsights:
         """Extract relaxation kinetics from stored JSON coefficients."""
         kinetics = []
         
-        # Check for all fit coefficients
-        all_fits = analysis_results.get('all_fit_coefficients', {})
-        
-        # Voltage fits
-        voltage_exp = all_fits.get('exponential_fits', {}).get('voltage', {})
-        if voltage_exp.get('r_squared', 0) > 0.5:  # Quality threshold
+        # HACKY FIX: Handle actual JSON structure from database
+        if analysis_results.get('success') and analysis_results.get('analysis_type') == 'voltage_decay':
+            # Direct coefficients at root level for successful voltage decay analysis
+            if analysis_results.get('r_squared', 0) > 0.1:  # Lower threshold for testing
+                kinetic = RelaxationKinetics(
+                    technique='REST',
+                    variable_type='voltage',
+                    fit_type='exponential',
+                    equilibrium_value=analysis_results.get('voltage_infinity', 0.0),
+                    amplitude=analysis_results.get('voltage_amplitude', 0.0),
+                    time_constant=analysis_results.get('time_constant_s', 0.0),
+                    r_squared=analysis_results.get('r_squared', 0.0),
+                    rmse=analysis_results.get('rmse', 0.0),
+                    data_points=analysis_results.get('data_points', 0)
+                )
+                kinetic.relaxation_quality = self._assess_fit_quality(kinetic.r_squared)
+                kinetic.diffusion_regime = self._assess_diffusion_regime(kinetic.time_constant)
+                kinetics.append(kinetic)
+        elif not analysis_results.get('success'):
+            # Map failed analysis as poor quality
             kinetic = RelaxationKinetics(
                 technique='REST',
                 variable_type='voltage',
                 fit_type='exponential',
-                equilibrium_value=voltage_exp.get('voltage_infinity', 0.0),
-                amplitude=voltage_exp.get('voltage_amplitude', 0.0),
-                time_constant=voltage_exp.get('time_constant_s', 0.0),
-                r_squared=voltage_exp.get('r_squared', 0.0),
-                rmse=voltage_exp.get('rmse', 0.0),
-                data_points=voltage_exp.get('data_points', 0)
+                equilibrium_value=0.0,
+                amplitude=0.0,
+                time_constant=0.0,
+                r_squared=0.0,
+                rmse=999.0,
+                data_points=0
             )
-            kinetic.relaxation_quality = self._assess_fit_quality(kinetic.r_squared)
-            kinetic.diffusion_regime = self._assess_diffusion_regime(kinetic.time_constant)
-            kinetics.append(kinetic)
-        
-        voltage_sqrt = all_fits.get('sqrt_fits', {}).get('voltage', {})
-        if voltage_sqrt.get('r_squared', 0) > 0.5:  # Quality threshold
-            kinetic = RelaxationKinetics(
-                technique='REST',
-                variable_type='voltage',
-                fit_type='sqrt',
-                equilibrium_value=voltage_sqrt.get('voltage_infinity', 0.0),
-                amplitude=voltage_sqrt.get('voltage_sqrt_amplitude', 0.0),
-                sqrt_coefficient=voltage_sqrt.get('voltage_sqrt_amplitude', 0.0),
-                r_squared=voltage_sqrt.get('r_squared', 0.0),
-                rmse=voltage_sqrt.get('rmse', 0.0),
-                data_points=voltage_sqrt.get('data_points', 0)
-            )
-            kinetic.relaxation_quality = self._assess_fit_quality(kinetic.r_squared)
-            kinetic.diffusion_regime = "diffusion_limited"  # sqrt fits indicate diffusion
-            kinetics.append(kinetic)
-        
-        # Current fits (similar pattern)
-        current_exp = all_fits.get('exponential_fits', {}).get('current', {})
-        if current_exp.get('r_squared', 0) > 0.5:
-            kinetic = RelaxationKinetics(
-                technique='REST',
-                variable_type='current',
-                fit_type='exponential',
-                equilibrium_value=current_exp.get('current_infinity', 0.0),
-                amplitude=current_exp.get('current_amplitude', 0.0),
-                time_constant=current_exp.get('time_constant_s', 0.0),
-                r_squared=current_exp.get('r_squared', 0.0),
-                rmse=current_exp.get('rmse', 0.0),
-                data_points=current_exp.get('data_points', 0)
-            )
-            kinetic.relaxation_quality = self._assess_fit_quality(kinetic.r_squared)
-            kinetic.diffusion_regime = self._assess_diffusion_regime(kinetic.time_constant)
+            kinetic.relaxation_quality = "failed"
+            kinetic.diffusion_regime = "unknown"
             kinetics.append(kinetic)
         
         return kinetics
@@ -725,6 +717,24 @@ class ElectrochemicalInsights:
             'calculation_quality': resistance.calculation_quality
         }
     
+    def _kinetics_to_dict(self, kinetics: RelaxationKinetics) -> Dict[str, Any]:
+        """Convert RelaxationKinetics to dictionary for consistent API output."""
+        return {
+            'segment_id': getattr(kinetics, 'segment_id', 'unknown'),
+            'technique': kinetics.technique,
+            'variable_type': kinetics.variable_type,
+            'fit_type': kinetics.fit_type,
+            'equilibrium_value': kinetics.equilibrium_value,
+            'amplitude': kinetics.amplitude,
+            'time_constant': kinetics.time_constant,
+            'sqrt_coefficient': kinetics.sqrt_coefficient,
+            'r_squared': kinetics.r_squared,
+            'rmse': kinetics.rmse,
+            'data_points': kinetics.data_points,
+            'relaxation_quality': kinetics.relaxation_quality,
+            'diffusion_regime': kinetics.diffusion_regime
+        }
+
     def _equilibrium_to_dict(self, equilibrium: EquilibriumAnalysis, diffusion_coeff: Optional[float] = None) -> Dict[str, Any]:
         """Convert EquilibriumAnalysis to dictionary using analytics_config exponential_fit schema."""
         return {

@@ -55,7 +55,7 @@ class AnalysisPanels:
     def _create_groups_panel(self):
         """Create groups selection panel (always visible)."""
 
-        # Groups checkbox list
+        # Groups checkbox list (placeholder for Phase 1)
         self.groups_checkboxes = pn.widgets.CheckBoxGroup(
             name="Available Groups",
             options=[],
@@ -84,7 +84,7 @@ class AnalysisPanels:
             disabled=True
         )
 
-        # Button event handlers
+        # Button event handlers (Phase 2: functional)
         self.select_all_btn.on_click(self._on_select_all)
         self.clear_all_btn.on_click(self._on_clear_all)
 
@@ -140,22 +140,23 @@ class AnalysisPanels:
         """dQ/dV Analysis specific settings panel."""
 
         self.dqdv_method = pn.widgets.Select(
-            name="dQ/dV Method",
-            options=["Numerical Derivative", "Curve Smoothing", "Moving Average"],
-            value="Numerical Derivative",
-            width=300
+            name="Method",
+            options=["Savitzky-Golay", "Spline", "Finite Difference"],
+            value="Savitzky-Golay",
+            width=200
         )
 
         self.dqdv_window = pn.widgets.IntSlider(
-            name="Smoothing Window",
-            start=1, end=50, value=5, step=1,
-            width=300
+            name="Window Size",
+            start=5, end=21, step=2, value=7,
+            width=200
         )
 
-        self.dqdv_smoothing = pn.widgets.FloatSlider(
-            name="Smoothing Factor",
-            start=0.0, end=1.0, value=0.1, step=0.01,
-            width=300
+        self.dqdv_smoothing = pn.widgets.Select(
+            name="Smoothing",
+            options=["Auto", "Light", "Heavy", "Custom"],
+            value="Auto",
+            width=200
         )
 
         self.dqdv_panel = pn.Column(
@@ -163,29 +164,31 @@ class AnalysisPanels:
             self.dqdv_method,
             self.dqdv_window,
             self.dqdv_smoothing,
-            width=320
+            width=320,
+            visible=False  # Hidden initially
         )
 
     def _create_kinetics_settings(self):
         """Kinetics Analysis specific settings panel."""
 
         self.kinetics_fit_type = pn.widgets.Select(
-            name="Fitting Model",
-            options=["Exponential", "Power Law", "Combined"],
-            value="Combined",
-            width=300
+            name="Fit Type",
+            options=["Exponential", "Square Root", "Both"],
+            value="Both",
+            width=200
         )
 
-        self.kinetics_time_range = pn.widgets.RangeSlider(
-            name="Time Range (s)",
-            start=0, end=1000, value=(10, 100), step=1,
-            width=300
+        self.kinetics_time_range = pn.widgets.Select(
+            name="Time Range",
+            options=["Auto", "Custom"],
+            value="Auto",
+            width=200
         )
 
         self.kinetics_quality_threshold = pn.widgets.FloatSlider(
-            name="Quality Threshold (R²)",
-            start=0.5, end=1.0, value=0.95, step=0.01,
-            width=300
+            name="Min RÂ² Threshold",
+            start=0.5, end=1.0, step=0.01, value=0.8,
+            width=200
         )
 
         self.kinetics_panel = pn.Column(
@@ -193,11 +196,14 @@ class AnalysisPanels:
             self.kinetics_fit_type,
             self.kinetics_time_range,
             self.kinetics_quality_threshold,
-            width=320
+            width=320,
+            visible=False  # Hidden initially
         )
 
+    # ===== FILTERS SECTION =====
+
     def _create_filters_panel(self):
-        """Create general filters panel (used by all analysis types)."""
+        """Create filters section (collapsible)."""
 
         self.technique_filters = pn.widgets.CheckBoxGroup(
             name="Technique Filters",
@@ -225,7 +231,7 @@ class AnalysisPanels:
         )
 
         self.filters_panel = pn.Column(
-            pn.pane.HTML("<strong>🔍 Filters</strong>"),
+            pn.pane.HTML("<strong>ðŸ” Filters</strong>"),
             self.technique_filters,
             self.voltage_range,
             pn.Row(
@@ -407,29 +413,24 @@ class AnalysisPanels:
                 'time_range': self.kinetics_time_range.value,
                 'quality_threshold': self.kinetics_quality_threshold.value
             }
-        elif analysis_type == "resistance_analysis":
-            return {'analysis_type': 'resistance_analysis'}
         else:
             return {}
 
     def get_selected_groups(self) -> List[str]:
         """Get currently selected group IDs for backend calls."""
+        selected_display_names = list(self.groups_checkboxes.value)
 
-        # Convert display names back to group IDs using the mapping
-        selected_display_names = self.groups_checkboxes.value
-        selected_ids = []
+        # Convert display names to group IDs if mapping exists
+        if hasattr(self, 'group_id_mapping') and self.group_id_mapping:
+            return [self.group_id_mapping.get(display_name, display_name)
+                    for display_name in selected_display_names]
 
-        for display_name in selected_display_names:
-            group_id = self.group_id_mapping.get(display_name)
-            if group_id:
-                selected_ids.append(str(group_id))
-
-        return selected_ids
+        # Fallback to display names
+        return selected_display_names
 
     def get_filter_settings(self) -> Dict[str, Any]:
         """Get current filter settings."""
-
         return {
-            'technique_filters': self.technique_filters.value,
+            'techniques': self.technique_filters.value,
             'voltage_range': self.voltage_range.value
         }
