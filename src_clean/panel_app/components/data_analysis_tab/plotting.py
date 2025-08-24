@@ -39,8 +39,8 @@ class PlottingManager:
     def _create_plot_area(self):
         """Create main plot area."""
         
-        # Initialize with placeholder
-        self.plot_area = pn.pane.HTML(
+        # Initialize with placeholder - use Column instead of HTML pane to support both HTML and HoloViews
+        placeholder = pn.pane.HTML(
             """
             <div style='border: 2px dashed #E0E0E0; border-radius: 8px; 
                         padding: 40px; text-align: center; color: #666;
@@ -56,6 +56,7 @@ class PlottingManager:
             height=500,
             width=700
         )
+        self.plot_area = pn.Column(placeholder, sizing_mode='stretch_width')
         
     def get_plot_area(self):
         """Return the main plot area."""
@@ -1436,22 +1437,23 @@ class PlottingManager:
     # ===== PLOT MANAGEMENT =====
     
     def update_plot_area(self, plot_object):
-        """Update the plot area with new plot."""
+        """Update the plot area with new plot - supports both HTML and Panel objects."""
         
         self.current_plot = plot_object
         
-        # Handle Panel HTML objects vs strings
+        # Clear existing content and add new plot
+        self.plot_area.clear()
+        
         if plot_object is None:
-            self.plot_area.object = ""
-        elif hasattr(plot_object, 'object'):
-            # If it's a Panel HTML pane, extract the HTML content
-            self.plot_area.object = plot_object.object
-        elif isinstance(plot_object, str):
-            # If it's already a string, use it directly
-            self.plot_area.object = plot_object
+            # Show empty placeholder
+            placeholder = pn.pane.HTML(
+                "<div style='padding: 40px; text-align: center; color: #666;'>No plot to display</div>",
+                height=300
+            )
+            self.plot_area.append(placeholder)
         else:
-            # Convert to string as fallback
-            self.plot_area.object = str(plot_object)
+            # Add the plot object directly to the Column
+            self.plot_area.append(plot_object)
         
         # Enable export button when plot is available
         self.export_plot_btn.disabled = (plot_object is None)
