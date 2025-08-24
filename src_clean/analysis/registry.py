@@ -92,8 +92,8 @@ class AnalysisConfig:
             return False, f"Analysis requires at least {self.min_segments} segments, got {len(segments)}"
         
         if self.required_techniques:
-            available_techniques = set(seg.get('fundamental_technique', '') for seg in segments)
-            required_set = set(self.required_techniques)
+            available_techniques = set(seg.get('fundamental_technique', '').lower() for seg in segments)
+            required_set = set(technique.lower() for technique in self.required_techniques)
             if not required_set.issubset(available_techniques):
                 missing = required_set - available_techniques
                 return False, f"Analysis requires techniques: {missing}"
@@ -239,10 +239,12 @@ class AnalysisRegistry:
     def _register_default_analyses(self):
         """Register the default analyses that replace existing specialized methods."""
         
-        # Import analysis functions (will be implemented in next step)
+        # Import analysis functions
         from .basic_statistics import basic_statistics_analysis
         from .resistance_analysis import resistance_analysis_function
         from .kinetics_analysis import kinetics_analysis_function
+        from .equilibrium_analysis import equilibrium_analysis_function
+        from .current_decay_analysis import current_decay_analysis_function
         
         # Basic Statistics Analysis
         self.register_analysis(AnalysisConfig(
@@ -312,6 +314,64 @@ class AnalysisRegistry:
             },
             default_settings={"fit_type": "auto_best", "min_r_squared": 0.8},
             available_plots=[PlotType.TIME_SERIES, PlotType.SCATTER, PlotType.CORRELATION],
+            default_plot=PlotType.TIME_SERIES
+        ))
+        
+        # Equilibrium Analysis
+        self.register_analysis(AnalysisConfig(
+            analysis_id="equilibrium_analysis",
+            name="Equilibrium Analysis",
+            description="Equilibrium voltage analysis and stability assessment",
+            category=AnalysisCategory.THERMODYNAMICS,
+            min_segments=1,
+            analysis_function=equilibrium_analysis_function,
+            settings_schema={
+                "min_duration_s": {
+                    "type": "float",
+                    "min": 1,
+                    "default": 60,
+                    "description": "Minimum duration for equilibrium (seconds)"
+                },
+                "max_drift_rate_mv_per_min": {
+                    "type": "float", 
+                    "min": 0.1,
+                    "max": 10.0,
+                    "default": 1.0,
+                    "description": "Maximum drift rate (mV/min)"
+                }
+            },
+            default_settings={"min_duration_s": 60, "max_drift_rate_mv_per_min": 1.0},
+            available_plots=[PlotType.TIME_SERIES, PlotType.SCATTER, PlotType.BOX_PLOT],
+            default_plot=PlotType.TIME_SERIES
+        ))
+        
+        # Current Decay Analysis
+        self.register_analysis(AnalysisConfig(
+            analysis_id="current_decay_analysis",
+            name="Current Decay Analysis",
+            description="Potentiostatic current decay kinetics analysis",
+            category=AnalysisCategory.KINETICS,
+            required_techniques=["Potentiostatic"],
+            min_segments=1,
+            requires_analysis_results=True,
+            analysis_function=current_decay_analysis_function,
+            settings_schema={
+                "min_r_squared": {
+                    "type": "float",
+                    "min": 0.0,
+                    "max": 1.0,
+                    "default": 0.8,
+                    "description": "Minimum R² for decay fits"
+                },
+                "min_duration_s": {
+                    "type": "float",
+                    "min": 1,
+                    "default": 10,
+                    "description": "Minimum duration for decay analysis (seconds)"
+                }
+            },
+            default_settings={"min_r_squared": 0.8, "min_duration_s": 10},
+            available_plots=[PlotType.TIME_SERIES, PlotType.SCATTER],
             default_plot=PlotType.TIME_SERIES
         ))
         
