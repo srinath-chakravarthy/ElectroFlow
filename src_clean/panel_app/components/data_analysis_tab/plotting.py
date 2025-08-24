@@ -73,6 +73,9 @@ class PlottingManager:
             width=200
         )
         
+        # Connect event handler for plot type changes
+        self.plot_type_selector.param.watch(self._on_plot_type_changed, 'value')
+        
         self.export_plot_btn = pn.widgets.Button(
             name="💾 Export Plot",
             button_type="default",
@@ -123,6 +126,11 @@ class PlottingManager:
         """Main plot generation dispatcher."""
         
         try:
+            # Store current data for plot type changes
+            self.current_analysis_type = analysis_type
+            self.current_data = data
+            self.current_settings = settings
+            
             # CRITICAL FIX: Update available plot types for this analysis
             self.update_available_plots(analysis_type)
             print(f"Updated plot types for {analysis_type}: {self.plot_type_selector.options}")
@@ -1478,6 +1486,23 @@ class PlottingManager:
         # Update selector options
         self.plot_type_selector.options = plot_options
         self.plot_type_selector.value = plot_options[0][1]  # Select first option
+    
+    def _on_plot_type_changed(self, event):
+        """Handle plot type selector changes - regenerate plot with current data."""
+        
+        print(f"DEBUG: Plot type changed to: {event.new}")
+        
+        # Only regenerate if we have current data stored
+        if hasattr(self, 'current_analysis_type') and hasattr(self, 'current_data') and hasattr(self, 'current_settings'):
+            print(f"DEBUG: Regenerating plot for {self.current_analysis_type} with plot type {event.new}")
+            
+            # Recreate plot with new type
+            new_plot = self.create_plot(self.current_analysis_type, self.current_data, self.current_settings)
+            
+            # Update plot area
+            self.update_plot_area(new_plot)
+        else:
+            print("DEBUG: No current data stored - cannot regenerate plot")
     
     # ===== STYLING AND UTILITIES =====
     
