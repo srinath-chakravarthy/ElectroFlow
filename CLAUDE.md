@@ -107,8 +107,22 @@ A modular, instrument-agnostic **web application** for R&D electrochemical data 
 
 ## 🎯 CURRENT IMPLEMENTATION PRIORITIES (August 2025)
 
-### Priority 0: ✅ COMPLETED - Tab 3 Backend Analytics Implementation
-**Objective**: Bug fix to get Tab 3 to work with plots. Code in panel_app/components/data_analysis_tab.
+### Priority 0: 🔄 IN PROGRESS - Registry-Based Analytics System Refactor
+**Objective**: Transform entire analytics system from specialized methods to unified registry approach.
+
+#### 📋 **See Refactor.md for Implementation Plan**
+**Refactor Branch**: `dev-clean-registry`  
+**Progress Tracking**: See `REFACTOR_PROGRESS.md`  
+**Architecture Decisions**: See `ARCHITECTURE_DECISIONS.md`
+
+#### 🎯 **Refactor Objectives:**
+- **Development Speed**: 2+ days debugging → 30 minutes per new analysis
+- **Code Reduction**: 1000+ UI lines → ~200 lines generic routing
+- **API Simplification**: 15+ specialized methods → 2-3 generic methods
+- **Focus**: Electrochemical algorithms instead of software plumbing
+
+#### ✅ **Previous Tab 3 Implementation (Pre-Refactor)**
+**Note**: Tab 3 plotting was fixed but revealed fundamental architecture issues that this refactor addresses.
 
 #### ✅ System Status (100% Complete):
 - ✅ **LazyDataService**: Polars lazy loading with query cache and filter chaining
@@ -131,16 +145,31 @@ api.get_electrochemical_current_decay_analysis(group_ids) → decay kinetics
 api.get_unified_electrochemical_analysis(group_ids) → comprehensive analysis
 ```
 
-### Priority 1: 🚧 NEXT - Tab 3 Data Analysis UI Integration  
-**Objective**: Complete Tab 3 user interface using implemented backend
+### Priority 1: ✅ COMPLETED - Tab 3 Data Analysis UI Integration  
+**Objective**: Fix Tab 3 plotting functionality with backend data integration
 
-#### 🎯 Implementation Plan:
-- **Filter Controls**: Dynamic UI for technique, time, voltage range selection
-- **Visualization Panel**: 5 plot types using lazy data materialization
-- **Analysis Display**: Professional presentation of electrochemical insights
-- **Interactive Workflow**: Real-time filter updates with on-demand data loading
+#### ✅ CRITICAL BUG FIXES COMPLETED (August 24, 2025):
+**Development Time**: 1.5 days of intensive debugging and 2 complete rewrites
 
-**Architecture Pattern**: Lazy query building (instant) → Filter changes (instant) → Visualization request (50-200ms materialization)
+- ✅ **Data Structure Unification**: Fixed fundamental architecture inconsistency where resistance analysis returned dictionaries but kinetics analysis returned dataclass objects
+- ✅ **Core Segment Data Integration**: Added `core_segment_data` field to backend methods to provide plotting code access to essential segment fields (`start_potential_v`, `start_time_s`, etc.)
+- ✅ **Plot Switching Mechanism**: Fixed missing `resistance_analysis` case in `get_current_settings()` method that was causing empty settings `{}` and breaking plot type switching
+- ✅ **JSON Schema Mismatch**: Updated `_extract_relaxation_from_json()` to handle actual database JSON structure instead of expected nested format
+- ✅ **List Synchronization**: Fixed critical bug where `core_segment_data` and `individual_kinetics` lists were out of sync (62 vs 56 items) due to failed analysis segments being handled inconsistently
+
+#### 🔧 TECHNICAL DEBT RESOLVED:
+- **Plotting Architecture**: All resistance and kinetics plotting methods now use unified `zip(individual_data, core_segments_data)` pattern
+- **Backend Consistency**: Both resistance and kinetics analysis now return dictionaries with `_to_dict()` conversion for consistent API interface  
+- **Data Access Patterns**: Plotting code uses segment context from `core_segment_data` and computed insights from `individual_*` arrays
+- **Error Handling**: Failed analysis segments now properly excluded from both data arrays to maintain zip() synchronization
+
+#### 📊 WORKING FUNCTIONALITY:
+- **Resistance Analysis**: 3 plot types (Temporal, Voltage Correlation, Distribution) with live plot switching
+- **Kinetics Analysis**: 4 plot types (Voltage Relaxation, Stability, Kinetics, Quality Comparison) with real electrochemical insights
+- **Plot Type Switching**: Dynamic plot updates within analysis types without backend re-calls
+- **Real Data Integration**: Handles both successful analysis results and failed analysis cases gracefully
+
+**Architecture Pattern**: Unified backend data structure → Core segment fields + Computed insights → Synchronized plotting arrays
 
 ## 📝 AUGUST 23, 2025 - MAJOR DEVELOPMENT ACHIEVEMENTS
 

@@ -1,0 +1,162 @@
+# Registry-Based Analytics System Refactor
+
+**Branch:** `dev-clean-registry`  
+**Started:** August 24, 2025  
+**Status:** Phase 0 - Documentation Setup Complete
+
+## Refactor Objective
+
+**CRITICAL DISCOVERY**: Complete system architecture transformation required due to massive database method redundancy.
+
+Transform the current system from **50+ redundant database methods** and complex routing to a unified registry-based architecture:
+- **Query Redundancy**: 8+ nearly identical SQL queries for segment statistics
+- **Method Duplication**: 22 database methods + 35 API methods with similar JOIN patterns  
+- **UI Complexity**: 16 routing points preventing rapid analysis development
+- **Current Focus**: Segment-based analytics (NOT raw data yet)
+
+**Registry Solution Enables**:
+- **30 minutes to add new analysis** (vs 2+ days of database + UI debugging)
+- **Query Efficiency**: Single base query → multiple analyses (vs N redundant queries)
+- **Code Reduction**: 50+ methods → ~10 registry functions + dispatcher
+- **Focus on electrochemical algorithms** (vs endless database plumbing)
+
+## Phase Progress
+
+### ✅ Phase 0: Documentation Setup (August 24)
+- [x] Created `dev-clean-registry` branch
+- [x] Archived old context files to `old_context_files/`
+- [x] Created fresh refactor documentation
+- [x] **Comprehensive system audit** → **MASSIVE REDUNDANCY DISCOVERED** ⚠️
+- [x] **COMPREHENSIVE_AUDIT.md** - Complete redundancy analysis documented
+- [ ] Update CLAUDE.md with refactor status
+
+**AUDIT FINDINGS**: 
+- **Database Layer**: 22 methods with 8+ nearly identical SQL queries
+- **Backend API**: 35 methods, many calling same base queries then processing  
+- **UI Layer**: 16 routing points across 4 components
+- **Total Impact**: 50+ redundant methods requiring complete architecture change
+
+### 🔲 Phase 1: Universal Query Engine  
+**Objective**: Replace 22 redundant database methods with unified query system
+- [ ] Create `src_clean/core/query_engine.py` - Universal segments query system
+- [ ] Create `src_clean/analysis/registry.py` - Analysis function registry
+- [ ] Implement `get_segments_data(filters)` → replaces 8+ similar SQL queries
+- [ ] Add `QueryFilters` dataclass for standardized filtering
+- [ ] Keep existing methods during transition
+
+### 🔲 Phase 2: Analysis Registry Dispatcher
+**Objective**: Replace 35 redundant API methods with registry-based analytics
+- [ ] Create `src_clean/backend/analysis_engine.py` - Central analysis dispatcher  
+- [ ] Implement `get_analysis(type, filters, settings)` → replaces 15+ analytics methods
+- [ ] Convert ElectrochemicalInsights methods to registry functions
+- [ ] Integrate with universal query engine from Phase 1
+- [ ] Standard DataFrame format: `time_s | value | group_id | segment_id | analysis_type | quality_score | technique | unit`
+
+### 🔲 Phase 3: UI Integration  
+**Objective**: Replace 16 routing points with registry lookups
+- [ ] Replace `main_tab.py` if/elif analysis routing with `api.get_analysis()` calls
+- [ ] Convert `plotting.py` specialized plot methods to generic DataFrame plotting
+- [ ] Update `analysis_panels.py` settings routing with registry configuration
+- [ ] Replace `results.py` format methods with registry-based templates
+- [ ] Ensure all existing UI functionality preserved
+
+### 🔲 Phase 4: System Integration & CLI
+**Objective**: Complete segment-based analytics system integration
+- [ ] Update CLI to use unified query system (currently uses traditional methods)
+- [ ] Ensure Jupyter/scripting interfaces work with registry
+- [ ] Performance optimization and caching strategy
+- [ ] **LazyDataService remains separate** - for future raw data & on-the-fly analytics
+
+### 🔲 Phase 5: Legacy Cleanup
+**Objective**: Remove 50+ redundant methods and finalize clean architecture
+- [ ] **Delete 22 redundant database methods** in `database.py`
+- [ ] **Delete 25+ redundant API methods** in `api.py` 
+- [ ] **Delete 10+ UI routing methods** across Tab 3 components
+- [ ] Update all import statements throughout codebase
+- [ ] Final testing and validation of registry-only system
+
+## Key Decisions Made
+
+### Architecture Patterns
+- **Registry as Smart Router**: Can dispatch to generic OR custom methods as needed
+- **DataFrame Standard**: All analytics return consistent DataFrame format
+- **LazyDataService Integration**: TBD during implementation
+- **Error Propagation**: TBD during implementation
+
+### Preservation Strategy  
+- **UI Patterns**: Preserve Panel widgets, layouts, event handlers
+- **Backend Logic**: Preserve LazyDataService and database patterns
+- **Custom Analysis**: Registry can call specialized methods when needed
+
+## FUTURE SCOPE (After Registry Complete)
+
+**LazyDataService Purpose**: Raw data access and filtering for on-the-fly analytics
+- **Current Status**: Implemented but not yet used 
+- **Timeline**: After segment-based analytics registry is working
+- **Integration**: Will complement registry system for raw data analysis
+- **Scope**: Point-by-point data processing, real-time filtering, visualization
+
+## Current System Dependencies ✅ AUDIT COMPLETE
+
+**System Size**: 45 Python files analyzed  
+**Critical Dependencies Found**: 8 specialized methods + 16 UI routing points
+
+### Backend API Methods (src_clean/backend/api.py) - 4 specialized methods
+- `get_electrochemical_rest_analysis()` ← **HIGH PRIORITY (Tab 3 active)**
+- `get_electrochemical_resistance_analysis()` ← **HIGH PRIORITY (Tab 3 active)**  
+- `get_electrochemical_equilibrium_analysis()` ← **MEDIUM PRIORITY**
+- `get_electrochemical_current_decay_analysis()` ← **MEDIUM PRIORITY**
+- `get_unified_electrochemical_analysis()` - calls all 4 above
+
+### ElectrochemicalInsights Class (src_clean/analysis/electrochemical_insights.py) - 4 core methods
+- `get_rest_relaxation_kinetics()` ← **HIGH PRIORITY (Tab 3 active)**
+- `get_instantaneous_resistance_analysis()` ← **HIGH PRIORITY (Tab 3 active)**
+- `get_equilibrium_voltage_analysis()` ← **MEDIUM PRIORITY** 
+- `get_current_decay_kinetics()` ← **MEDIUM PRIORITY**
+
+### Tab 3 UI Components - 4 analysis types × 4 components = 16 routing points
+**main_tab.py** - `_run_analysis()` method + 4 specialized run methods  
+**analysis_panels.py** - Settings panel routing for 4 analysis types  
+**plotting.py** - Plot creation routing + 4 specialized plot methods  
+**results.py** - Results formatting routing + 4 specialized format methods  
+
+### Dependencies Verified ✅
+- **CLI**: Uses existing DataFrame methods (`get_multi_group_segments`) ✅ No changes needed
+- **Database Layer**: Already returns proper format ✅ No changes needed
+
+### Critical Path Analysis
+**MUST CONVERT FIRST** (actively used in Tab 3):
+1. ElectrochemicalInsights resistance + kinetics methods
+2. Backend API resistance + kinetics methods  
+3. Tab 3 UI routing logic (16 routing points → registry lookups)
+
+**LOWER PRIORITY** (implemented but not heavily used):
+- Equilibrium and current decay methods
+- dQ/dV analysis (returns "not implemented")
+
+**Risk Assessment**: MEDIUM - Isolated system, single user, can coordinate changes
+
+## Recommended Implementation Strategy
+
+**Incremental Migration Approach**:  
+1. **Phase 1**: Create registry foundation + DataFrame standard format
+2. **Phase 2**: Convert resistance + kinetics methods ONLY (2 high-priority methods)  
+3. **Phase 3**: Replace Tab 3 routing for resistance + kinetics analysis types ONLY
+4. **Validate**: Ensure Tab 3 works with 2 converted analysis types
+5. **Complete**: Migrate remaining equilibrium + current decay + dQ/dV methods
+
+**Benefits**: Tab 3 stays functional throughout refactor, incremental validation, reduced risk
+
+## Success Criteria
+
+- [ ] Add new analysis in 30 minutes (registry + calculation only)
+- [ ] Zero UI changes needed for new analysis
+- [ ] All existing functionality preserved
+- [ ] Same analysis works in web/CLI/jupyter interfaces
+- [ ] Performance suitable for on-the-fly analytics
+
+## Notes
+
+**Old Context Available:** All previous documentation moved to `old_context_files/` for reference during implementation.
+
+**Implementation Philosophy:** Follow Refactor.md principle - "Use your Python knowledge and existing codebase patterns to implement the best solution."
