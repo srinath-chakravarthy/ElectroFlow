@@ -32,18 +32,18 @@ class AnalysisPanels:
         # Store reference to main tab for button updates
         self.main_tab = None
 
+        # Get analysis registry for dynamic configuration
+        self.registry = get_analysis_registry()
+        
+        # Cache for dynamically created settings panels
+        self.settings_panels_cache = {}
+
         # Create all panels
         self._create_all_panels()
 
         # Current state
         self.current_analysis = "basic_statistics"
         self.selected_groups = []
-        
-        # Get analysis registry for dynamic configuration
-        self.registry = get_analysis_registry()
-        
-        # Cache for dynamically created settings panels
-        self.settings_panels_cache = {}
 
     def _create_all_panels(self):
         """Create all widget panels."""

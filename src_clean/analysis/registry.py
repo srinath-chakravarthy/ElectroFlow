@@ -32,12 +32,11 @@ class AnalysisCategory(Enum):
 class PlotType(Enum):
     """Available plot types for analysis visualization."""
     TIME_SERIES = "time_series"
-    SCATTER = "scatter"
+    XY_PLOT = "xy_plot" 
     HISTOGRAM = "histogram"
     BOX_PLOT = "box_plot"
     HEATMAP = "heatmap"
     BAR_CHART = "bar_chart"
-    CORRELATION = "correlation"
     CUSTOM = "custom"
 
 
@@ -285,7 +284,7 @@ class AnalysisRegistry:
                 }
             },
             default_settings={"time_points": ["immediate", "10s"]},
-            available_plots=[PlotType.TIME_SERIES, PlotType.SCATTER, PlotType.BAR_CHART],
+            available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT, PlotType.BAR_CHART],
             default_plot=PlotType.TIME_SERIES
         ))
         
@@ -313,7 +312,7 @@ class AnalysisRegistry:
                 }
             },
             default_settings={"fit_type": "auto_best", "min_r_squared": 0.8},
-            available_plots=[PlotType.TIME_SERIES, PlotType.SCATTER, PlotType.CORRELATION],
+            available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT],
             default_plot=PlotType.TIME_SERIES
         ))
         
@@ -341,7 +340,7 @@ class AnalysisRegistry:
                 }
             },
             default_settings={"min_duration_s": 60, "max_drift_rate_mv_per_min": 1.0},
-            available_plots=[PlotType.TIME_SERIES, PlotType.SCATTER, PlotType.BOX_PLOT],
+            available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT, PlotType.BOX_PLOT],
             default_plot=PlotType.TIME_SERIES
         ))
         
@@ -371,7 +370,7 @@ class AnalysisRegistry:
                 }
             },
             default_settings={"min_r_squared": 0.8, "min_duration_s": 10},
-            available_plots=[PlotType.TIME_SERIES, PlotType.SCATTER],
+            available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT],
             default_plot=PlotType.TIME_SERIES
         ))
         

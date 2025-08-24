@@ -20,4 +20,28 @@
 
 ---
 
+## Bug #3: Plot Configuration Mapping Issue
+
+**Error Summary:** "Plot configuration not found for time_series" in resistance analysis
+**Root Cause:** Mismatch between registry PlotType enum (`TIME_SERIES`) and plot configurations
+**Impact:** Resistance analysis plotting fails with configuration not found error
+**Fixes Applied:** 
+- **Part 1 (Completed):** Added `"time_series"` plot configuration mapping to existing plot configs
+- **Part 2 (Completed):** Unified naming system - replaced `SCATTER` → `XY_PLOT` throughout registry
+- **Part 3 (Completed):** Added analysis-specific display names system
+**Status:** 🔄 **PARTIALLY RESOLVED** - Ready for user testing (Bug #3.2 will contain test results)
+
+---
+
+## Bug #3.1: Python Syntax Error in plotting.py  
+
+**Error Summary:** `SyntaxError: unexpected character after line continuation character` at line 1120
+**Root Cause:** Embedded literal `\n` characters in function definition during multi-line edit
+**Impact:** Panel app fails to start with Python syntax error
+**Fix Applied:** Cleaned up corrupted function definition with proper line breaks
+**Technical Details:** Multi-line edit tool embedded `\n` instead of actual newlines
+**Status:** ✅ **RESOLVED**
+
+---
+
 *Bug entries will be added as testing continues...*

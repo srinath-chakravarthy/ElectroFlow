@@ -14,6 +14,21 @@ We just completed transforming **16 Tab 3 routing points** from hard-coded if/el
 User Input → analysis_panels.py (settings) → main_tab.py (execution) → analysis_engine.py (registry dispatch) → plotting.py (visualization) → results.py (formatting)
 ```
 
+## Unified Plot Type System
+
+**Generic Plot Types (Registry & Configurations):**
+- `"time_series"` - Any quantity vs time (resistance over time, voltage evolution, etc.)
+- `"xy_plot"` - Any X vs Y relationship (resistance vs voltage, kinetics vs conditions, etc.)
+- `"histogram"` - Distribution of any quantity
+- `"bar_chart"` - Categorical comparisons
+
+**Analysis-Specific Display Names (UI Dropdown):**
+- **Resistance Analysis**: "Temporal Resistance Evolution", "Resistance vs Voltage"
+- **Kinetics Analysis**: "Voltage Relaxation Over Time", "Kinetics vs Voltage"
+- **Basic Statistics**: "Duration Timeline", "Technique Comparison"
+
+**Customization:** Edit `_get_plot_display_name()` in `plotting.py` to change dropdown names
+
 ## Key Integration Points to Test
 
 ### 1. **Settings → Analysis Execution Flow**

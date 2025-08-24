@@ -338,6 +338,15 @@ class PlottingManager:
                     "alpha": 0.7
                 },
                 # Resistance plots
+                "time_series": {  # Generic time series mapping for resistance
+                    "plot_func": "line",
+                    "x": "time",
+                    "y": "resistance",
+                    "by": "resistance_type",
+                    "title": "Temporal Resistance Evolution",
+                    "xlabel": "Time (s)",
+                    "ylabel": "Resistance (Ω)"
+                },
                 "temporal_resistance": {
                     "plot_func": "line",
                     "x": "time",
@@ -346,6 +355,17 @@ class PlottingManager:
                     "title": "Temporal Resistance Evolution",
                     "xlabel": "Time (s)",
                     "ylabel": "Resistance (Ω)"
+                },
+                "xy_plot": {  # Generic X-Y relationship mapping
+                    "plot_func": "scatter",
+                    "x": "voltage",
+                    "y": "resistance",
+                    "by": "resistance_type",
+                    "title": "X-Y Correlation Analysis",
+                    "xlabel": "X Variable",
+                    "ylabel": "Y Variable",
+                    "size": 80,
+                    "alpha": 0.8
                 },
                 "resistance_voltage": {
                     "plot_func": "scatter",
@@ -1097,6 +1117,50 @@ class PlottingManager:
             error_msg = pn.pane.Markdown(f"**Plot Update Error:** {str(e)}")
             self.plot_container.objects = [error_msg]
 
+    def _get_plot_display_name(self, analysis_type: str, plot_type: str) -> str:
+        """Get analysis-specific display name for plot types."""
+        
+        # Custom display names for each analysis type
+        display_names = {
+            "basic_statistics": {
+                "time_series": "Duration Timeline",
+                "xy_plot": "Technique Comparison", 
+                "histogram": "Distribution Analysis",
+                "bar_chart": "Technique Count"
+            },
+            "resistance_analysis": {
+                "time_series": "Temporal Resistance Evolution",
+                "xy_plot": "Resistance vs Voltage",
+                "histogram": "Resistance Distribution",
+                "bar_chart": "Resistance Summary"
+            },
+            "kinetics_analysis": {
+                "time_series": "Voltage Relaxation Over Time", 
+                "xy_plot": "Kinetics vs Voltage",
+                "histogram": "Kinetics Distribution",
+                "box_plot": "Kinetics Quality Analysis"
+            },
+            "equilibrium_analysis": {
+                "time_series": "Equilibrium Evolution",
+                "xy_plot": "Equilibrium vs Conditions",
+                "histogram": "Stability Distribution",
+                "box_plot": "Equilibrium Quality"
+            },
+            "current_decay_analysis": {
+                "time_series": "Current Decay Over Time",
+                "xy_plot": "Decay Rate vs Conditions"
+            },
+            "dqdv_analysis": {
+                "time_series": "dQ/dV Evolution",
+                "xy_plot": "dQ/dV vs Voltage",
+                "histogram": "Peak Distribution"
+            }
+        }
+        
+        # Get analysis-specific name or fallback to generic
+        analysis_names = display_names.get(analysis_type, {})
+        return analysis_names.get(plot_type, plot_type.replace('_', ' ').title())
+    
     def update_available_plots(self, analysis_type: str):
         """Update available plot types based on analysis type using registry."""
         
@@ -1107,7 +1171,7 @@ class PlottingManager:
             if analysis_config and hasattr(analysis_config, 'available_plots'):
                 # Use registry-defined plot types
                 registry_plots = analysis_config.available_plots
-                options = [(plot.value.replace('_', ' ').title(), plot.value) for plot in registry_plots]
+                options = [(self._get_plot_display_name(analysis_type, plot.value), plot.value) for plot in registry_plots]
                 
                 if not options:
                     # Fallback to generic options
