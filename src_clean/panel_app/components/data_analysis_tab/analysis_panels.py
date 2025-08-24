@@ -12,7 +12,7 @@ import param
 from typing import Dict, List, Any
 
 # Registry imports for dynamic configuration
-from ...analysis.registry import get_analysis_registry
+from ....analysis.registry import get_analysis_registry
 
 
 class AnalysisPanels:

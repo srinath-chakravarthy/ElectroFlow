@@ -390,8 +390,8 @@ class DataAnalysisTab(param.Parameterized):
         
         try:
             # Import the new analysis engine
-            from ...backend.analysis_engine import get_analysis_engine
-            from ...core.query_filters import group_filter, AggregationType
+            from ....backend.analysis_engine import get_analysis_engine
+            from ....core.query_filters import group_filter, AggregationType
             
             # Create analysis engine and data filters
             engine = get_analysis_engine()

@@ -13,7 +13,7 @@ import holoviews as hv
 import hvplot.pandas
 
 # Registry imports for dynamic plotting
-from ...analysis.registry import get_analysis_registry
+from ....analysis.registry import get_analysis_registry
 
 # Enable bokeh backend
 hv.extension('bokeh')
