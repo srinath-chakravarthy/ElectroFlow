@@ -11,6 +11,9 @@ import panel as pn
 import param
 from typing import Dict, List, Any
 
+# Registry imports for dynamic configuration
+from ...analysis.registry import get_analysis_registry
+
 
 class AnalysisPanels:
     """
@@ -35,6 +38,12 @@ class AnalysisPanels:
         # Current state
         self.current_analysis = "basic_statistics"
         self.selected_groups = []
+        
+        # Get analysis registry for dynamic configuration
+        self.registry = get_analysis_registry()
+        
+        # Cache for dynamically created settings panels
+        self.settings_panels_cache = {}
 
     def _create_all_panels(self):
         """Create all widget panels."""
@@ -42,10 +51,8 @@ class AnalysisPanels:
         # Groups selection panel (always visible)
         self._create_groups_panel()
 
-        # Analysis-specific settings panels
-        self._create_basic_statistics_settings()
-        self._create_dqdv_settings()
-        self._create_kinetics_settings()
+        # Create analysis-specific settings panels dynamically from registry
+        self._create_registry_based_settings_panels()
 
         # Filters panel (collapsible)
         self._create_filters_panel()
@@ -109,92 +116,167 @@ class AnalysisPanels:
 
     # ===== ANALYSIS SETTINGS BY TYPE =====
 
-    def _create_basic_statistics_settings(self):
-        """Basic Statistics analysis settings panel."""
-
-        self.basic_stats_metrics = pn.widgets.CheckBoxGroup(
-            name="Metrics to Include",
-            options=[
-                "Duration", "Start Voltage", "End Voltage",
-                "Voltage Range", "Capacity", "Energy"
-            ],
-            value=["Duration", "Start Voltage", "End Voltage", "Capacity"],
-            width=300
+    def _create_registry_based_settings_panels(self):
+        """Create analysis-specific settings panels dynamically from registry."""
+        
+        try:
+            # Get all available analyses from registry
+            available_analyses = self.registry.list_analyses()
+            
+            for analysis_config in available_analyses:
+                analysis_id = analysis_config.analysis_id
+                analysis_name = analysis_config.name
+                
+                # Create settings panel for this analysis type
+                settings_panel = self._create_settings_panel_for_analysis(analysis_config)
+                
+                # Cache the panel
+                self.settings_panels_cache[analysis_id] = {
+                    'panel': settings_panel,
+                    'config': analysis_config,
+                    'widgets': {}  # Will store references to widgets for value retrieval
+                }
+                
+                print(f"✅ Created registry-based settings panel for {analysis_name}")
+                
+        except Exception as e:
+            print(f"⚠️  Failed to create registry-based settings panels, using fallback: {e}")
+            self._create_fallback_settings_panels()
+    
+    def _create_settings_panel_for_analysis(self, analysis_config):
+        """Create a settings panel for a specific analysis based on registry config."""
+        
+        analysis_id = analysis_config.analysis_id
+        analysis_name = analysis_config.name
+        
+        # Default settings based on analysis type
+        settings_widgets = []
+        widget_refs = {}  # Store widget references for value retrieval
+        
+        # Analysis-specific settings based on analysis ID
+        if analysis_id == "basic_statistics":
+            # Metrics selection
+            metrics_widget = pn.widgets.CheckBoxGroup(
+                name="Metrics to Include",
+                options=["Duration", "Start Voltage", "End Voltage", "Voltage Range", "Capacity", "Energy"],
+                value=["Duration", "Start Voltage", "End Voltage", "Capacity"],
+                width=300
+            )
+            settings_widgets.append(metrics_widget)
+            widget_refs['metrics'] = metrics_widget
+            
+            # Statistics type selection
+            stats_widget = pn.widgets.CheckBoxGroup(
+                name="Statistics to Compute",
+                options=["Mean", "Std Dev", "Min", "Max", "Count"],
+                value=["Mean", "Std Dev", "Count"],
+                width=300
+            )
+            settings_widgets.append(stats_widget)
+            widget_refs['statistics'] = stats_widget
+            
+        elif analysis_id == "dqdv_analysis":
+            # Method selection
+            method_widget = pn.widgets.Select(
+                name="dQ/dV Method",
+                options=["Numerical Derivative", "Curve Smoothing", "Moving Average"],
+                value="Numerical Derivative",
+                width=300
+            )
+            settings_widgets.append(method_widget)
+            widget_refs['method'] = method_widget
+            
+            # Window size
+            window_widget = pn.widgets.IntSlider(
+                name="Smoothing Window",
+                start=1, end=50, value=5, step=1,
+                width=300
+            )
+            settings_widgets.append(window_widget)
+            widget_refs['window_size'] = window_widget
+            
+            # Smoothing factor
+            smoothing_widget = pn.widgets.FloatSlider(
+                name="Smoothing Factor",
+                start=0.0, end=1.0, value=0.1, step=0.01,
+                width=300
+            )
+            settings_widgets.append(smoothing_widget)
+            widget_refs['smoothing'] = smoothing_widget
+            
+        elif analysis_id == "kinetics_analysis":
+            # Fitting model
+            fit_type_widget = pn.widgets.Select(
+                name="Fitting Model",
+                options=["Exponential", "Power Law", "Combined"],
+                value="Combined",
+                width=300
+            )
+            settings_widgets.append(fit_type_widget)
+            widget_refs['fit_type'] = fit_type_widget
+            
+            # Time range
+            time_range_widget = pn.widgets.RangeSlider(
+                name="Time Range (s)",
+                start=0, end=1000, value=(10, 100), step=1,
+                width=300
+            )
+            settings_widgets.append(time_range_widget)
+            widget_refs['time_range'] = time_range_widget
+            
+            # Quality threshold
+            quality_widget = pn.widgets.FloatSlider(
+                name="Quality Threshold (R²)",
+                start=0.5, end=1.0, value=0.95, step=0.01,
+                width=300
+            )
+            settings_widgets.append(quality_widget)
+            widget_refs['quality_threshold'] = quality_widget
+            
+        elif analysis_id in ["resistance_analysis", "equilibrium_analysis", "current_decay_analysis"]:
+            # Simple analyses with minimal settings
+            info_widget = pn.pane.HTML(
+                f"<em>Analysis '{analysis_name}' uses default settings.</em>"
+            )
+            settings_widgets.append(info_widget)
+        
+        else:
+            # Generic fallback for unknown analysis types
+            info_widget = pn.pane.HTML(
+                f"<em>Analysis '{analysis_name}' - settings not yet configured.</em>"
+            )
+            settings_widgets.append(info_widget)
+        
+        # Store widget references for value retrieval
+        if analysis_id in self.settings_panels_cache:
+            self.settings_panels_cache[analysis_id]['widgets'] = widget_refs
+        
+        # Create panel with header and settings
+        panel = pn.Column(
+            pn.pane.HTML(f"<strong>{analysis_name} Settings</strong>"),
+            *settings_widgets,
+            width=320,
+            visible=False  # Start hidden
         )
-
-        self.basic_stats_statistics = pn.widgets.CheckBoxGroup(
-            name="Statistics to Compute",
-            options=["Mean", "Std Dev", "Min", "Max", "Count"],
-            value=["Mean", "Std Dev", "Count"],
-            width=300
-        )
-
-        self.basic_statistics_panel = pn.Column(
-            pn.pane.HTML("<strong>Basic Statistics Settings</strong>"),
-            self.basic_stats_metrics,
-            self.basic_stats_statistics,
+        
+        return panel
+    
+    def _create_fallback_settings_panels(self):
+        """Fallback settings panels if registry fails."""
+        
+        # Basic fallback panel
+        fallback_panel = pn.Column(
+            pn.pane.HTML("<strong>Analysis Settings</strong>"),
+            pn.pane.HTML("<em>Using default settings for analysis.</em>"),
             width=320
         )
-
-    def _create_dqdv_settings(self):
-        """dQ/dV Analysis specific settings panel."""
-
-        self.dqdv_method = pn.widgets.Select(
-            name="dQ/dV Method",
-            options=["Numerical Derivative", "Curve Smoothing", "Moving Average"],
-            value="Numerical Derivative",
-            width=300
-        )
-
-        self.dqdv_window = pn.widgets.IntSlider(
-            name="Smoothing Window",
-            start=1, end=50, value=5, step=1,
-            width=300
-        )
-
-        self.dqdv_smoothing = pn.widgets.FloatSlider(
-            name="Smoothing Factor",
-            start=0.0, end=1.0, value=0.1, step=0.01,
-            width=300
-        )
-
-        self.dqdv_panel = pn.Column(
-            pn.pane.HTML("<strong>dQ/dV Analysis Settings</strong>"),
-            self.dqdv_method,
-            self.dqdv_window,
-            self.dqdv_smoothing,
-            width=320
-        )
-
-    def _create_kinetics_settings(self):
-        """Kinetics Analysis specific settings panel."""
-
-        self.kinetics_fit_type = pn.widgets.Select(
-            name="Fitting Model",
-            options=["Exponential", "Power Law", "Combined"],
-            value="Combined",
-            width=300
-        )
-
-        self.kinetics_time_range = pn.widgets.RangeSlider(
-            name="Time Range (s)",
-            start=0, end=1000, value=(10, 100), step=1,
-            width=300
-        )
-
-        self.kinetics_quality_threshold = pn.widgets.FloatSlider(
-            name="Quality Threshold (R²)",
-            start=0.5, end=1.0, value=0.95, step=0.01,
-            width=300
-        )
-
-        self.kinetics_panel = pn.Column(
-            pn.pane.HTML("<strong>Kinetics Analysis Settings</strong>"),
-            self.kinetics_fit_type,
-            self.kinetics_time_range,
-            self.kinetics_quality_threshold,
-            width=320
-        )
+        
+        # Cache fallback for basic_statistics
+        self.settings_panels_cache["basic_statistics"] = {
+            'panel': fallback_panel,
+            'config': None,
+            'widgets': {}
+        }
 
     def _create_filters_panel(self):
         """Create general filters panel (used by all analysis types)."""
@@ -239,45 +321,68 @@ class AnalysisPanels:
     # ===== PANEL MANAGEMENT =====
 
     def get_current_settings_panel(self):
-        """Get settings panel for current analysis type."""
+        """Get settings panel for current analysis type using registry."""
 
-        # Container that will hold the current settings panel
-        self.settings_container = pn.Column(
-            self.basic_statistics_panel,  # Default to basic statistics
-            width=320
-        )
-
+        # Create container for current settings panel
+        self.settings_container = pn.Column(width=320)
+        
+        # Show initial panel (basic_statistics)
+        self.show_settings_for_analysis(self.current_analysis)
+        
         return self.settings_container
 
     def show_settings_for_analysis(self, analysis_type: str):
-        """Show settings panel for specific analysis type."""
+        """Show settings panel for specific analysis type using registry."""
 
         self.current_analysis = analysis_type
-
-        # Hide all panels first
-        self.basic_statistics_panel.visible = False
-        self.dqdv_panel.visible = False
-        self.kinetics_panel.visible = False
-
-        # Show appropriate panel
-        if analysis_type == "basic_statistics":
-            self.basic_statistics_panel.visible = True
-        elif analysis_type == "dqdv_analysis":
-            self.dqdv_panel.visible = True
-        elif analysis_type == "kinetics_analysis":
-            self.kinetics_panel.visible = True
-
-        # Update container contents
-        self.settings_container.clear()
-        if analysis_type == "basic_statistics":
-            self.settings_container.append(self.basic_statistics_panel)
-        elif analysis_type == "dqdv_analysis":
-            self.settings_container.append(self.dqdv_panel)
-        elif analysis_type == "kinetics_analysis":
-            self.settings_container.append(self.kinetics_panel)
-
-        # Always show filters at bottom
-        self.settings_container.append(self.filters_panel)
+        
+        try:
+            # Hide all existing panels first
+            for cached_analysis in self.settings_panels_cache.values():
+                if cached_analysis.get('panel'):
+                    cached_analysis['panel'].visible = False
+            
+            # Get the panel for this analysis type
+            analysis_cache = self.settings_panels_cache.get(analysis_type)
+            
+            if analysis_cache and analysis_cache.get('panel'):
+                # Show the registry-based panel
+                target_panel = analysis_cache['panel']
+                target_panel.visible = True
+                
+                # Update container contents
+                if hasattr(self, 'settings_container'):
+                    self.settings_container.clear()
+                    self.settings_container.append(target_panel)
+                    
+                    # Always show filters at bottom
+                    self.settings_container.append(self.filters_panel)
+                    
+                print(f"✅ Showing registry-based settings for {analysis_type}")
+                
+            else:
+                # Fallback: create simple settings panel
+                print(f"⚠️  No registry settings found for {analysis_type}, using fallback")
+                fallback_panel = pn.Column(
+                    pn.pane.HTML(f"<strong>{analysis_type.replace('_', ' ').title()} Settings</strong>"),
+                    pn.pane.HTML("<em>Using default settings for this analysis.</em>"),
+                    width=320
+                )
+                
+                if hasattr(self, 'settings_container'):
+                    self.settings_container.clear()
+                    self.settings_container.append(fallback_panel)
+                    self.settings_container.append(self.filters_panel)
+                    
+        except Exception as e:
+            print(f"❌ Error showing settings for {analysis_type}: {e}")
+            # Show basic fallback
+            if hasattr(self, 'settings_container'):
+                self.settings_container.clear()
+                self.settings_container.append(
+                    pn.pane.HTML(f"<em>Error loading settings for {analysis_type}</em>")
+                )
+                self.settings_container.append(self.filters_panel)
 
     # ===== GROUPS MANAGEMENT =====
 
@@ -388,29 +493,33 @@ class AnalysisPanels:
     # ===== SETTINGS MANAGEMENT =====
 
     def get_current_settings(self, analysis_type: str) -> Dict[str, Any]:
-        """Get current settings for specified analysis type."""
+        """Get current settings for specified analysis type using registry."""
 
-        if analysis_type == "basic_statistics":
-            return {
-                'metrics': self.basic_stats_metrics.value,
-                'statistics': self.basic_stats_statistics.value
-            }
-        elif analysis_type == "dqdv_analysis":
-            return {
-                'method': self.dqdv_method.value,
-                'window_size': self.dqdv_window.value,
-                'smoothing': self.dqdv_smoothing.value
-            }
-        elif analysis_type == "kinetics_analysis":
-            return {
-                'fit_type': self.kinetics_fit_type.value,
-                'time_range': self.kinetics_time_range.value,
-                'quality_threshold': self.kinetics_quality_threshold.value
-            }
-        elif analysis_type == "resistance_analysis":
-            return {'analysis_type': 'resistance_analysis'}
-        else:
-            return {}
+        try:
+            # Get cached analysis info
+            analysis_cache = self.settings_panels_cache.get(analysis_type, {})
+            widgets = analysis_cache.get('widgets', {})
+            
+            if not widgets:
+                # Return default settings for analyses without widgets
+                return {'analysis_type': analysis_type}
+            
+            # Extract current values from widgets
+            settings = {'analysis_type': analysis_type}
+            
+            for setting_name, widget in widgets.items():
+                try:
+                    settings[setting_name] = widget.value
+                except Exception as widget_error:
+                    print(f"⚠️  Error getting value for {setting_name}: {widget_error}")
+                    settings[setting_name] = None
+            
+            print(f"✅ Retrieved registry-based settings for {analysis_type}: {list(settings.keys())}")
+            return settings
+            
+        except Exception as e:
+            print(f"⚠️  Error getting settings for {analysis_type}, using fallback: {e}")
+            return {'analysis_type': analysis_type}
 
     def get_selected_groups(self) -> List[str]:
         """Get currently selected group IDs for backend calls."""

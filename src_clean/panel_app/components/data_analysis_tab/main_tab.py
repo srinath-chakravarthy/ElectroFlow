@@ -386,8 +386,34 @@ class DataAnalysisTab(param.Parameterized):
             self.analyze_btn.disabled = False
 
     def _run_analysis(self, analysis_type: str, selected_groups: List[str], settings: Dict[str, Any]) -> Dict[str, Any]:
-        """Run analysis using backend API."""
-
+        """Run analysis using new registry-based analysis engine."""
+        
+        try:
+            # Import the new analysis engine
+            from ...backend.analysis_engine import get_analysis_engine
+            from ...core.query_filters import group_filter, AggregationType
+            
+            # Create analysis engine and data filters
+            engine = get_analysis_engine()
+            data_filters = group_filter(selected_groups, AggregationType.RAW)
+            
+            # Execute analysis using registry system
+            result = engine.get_analysis(analysis_type, data_filters, settings)
+            
+            # Log successful registry-based analysis
+            if "error" not in result:
+                print(f"✅ Registry analysis {analysis_type}: {result.get('segments_analyzed', 0)} segments")
+            
+            return result
+            
+        except Exception as e:
+            # Fallback to old methods if registry fails (safety net)
+            print(f"⚠️  Registry analysis failed, using fallback: {e}")
+            return self._run_analysis_fallback(analysis_type, selected_groups, settings)
+    
+    def _run_analysis_fallback(self, analysis_type: str, selected_groups: List[str], settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Fallback to old analysis methods if registry fails."""
+        
         if analysis_type == "basic_statistics":
             return self._run_basic_statistics_analysis(selected_groups, settings)
         elif analysis_type == "resistance_analysis":

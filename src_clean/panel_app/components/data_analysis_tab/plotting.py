@@ -12,6 +12,9 @@ from typing import Dict, List, Any, Optional
 import holoviews as hv
 import hvplot.pandas
 
+# Registry imports for dynamic plotting
+from ...analysis.registry import get_analysis_registry
+
 # Enable bokeh backend
 hv.extension('bokeh')
 pn.extension('bokeh')
@@ -31,6 +34,9 @@ class PlottingManager:
         self.current_data = None
         self.current_settings = None
 
+        # Get analysis registry for dynamic plotting
+        self.registry = get_analysis_registry()
+        
         # Create components
         self._create_plot_area()
         self._create_plot_controls()
@@ -90,7 +96,7 @@ class PlottingManager:
         return self.plot_controls
 
     def create_plot(self, analysis_type: str, data: Dict[str, Any], settings: Dict[str, Any]):
-        """Create plot using hvplot."""
+        """Create plot using registry-driven generic DataFrame plotting."""
 
         try:
             # Store current data for plot type switching
@@ -102,43 +108,344 @@ class PlottingManager:
             if data.get("error"):
                 return pn.pane.Markdown(f"**Error:** {data['error']}")
 
-            # Route to appropriate plot method
-            if analysis_type == "basic_statistics":
-                return self._create_basic_stats_plot(data, settings)
-            elif analysis_type == "resistance_analysis":
-                return self._create_resistance_plot(data, settings)
-            elif analysis_type == "kinetics_analysis":
-                return self._create_kinetics_plot(data, settings)
-            elif analysis_type == "dqdv_analysis":
-                return self._create_dqdv_plot(data, settings)
+            # Get current plot type from selector
+            plot_type_raw = self.plot_type_select.value
+            if isinstance(plot_type_raw, tuple) and len(plot_type_raw) > 1:
+                plot_type = plot_type_raw[1]  # Get the value part of (label, value) tuple
             else:
-                return pn.pane.Markdown(f"**Plot type '{analysis_type}' not implemented yet**")
+                plot_type = str(plot_type_raw)
+            
+            print(f"✅ Creating registry-driven plot: {analysis_type}, plot_type: {plot_type}")
+            
+            # Use registry-driven generic plotting
+            return self._create_registry_driven_plot(analysis_type, data, settings, plot_type)
 
         except Exception as e:
-            print(f"Plot creation error: {e}")
+            print(f"❌ Plot creation error: {e}")
             return pn.pane.Markdown(f"**Plot Error:** {str(e)}")
 
-    def _create_basic_stats_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
-        """Route to appropriate basic statistics visualization based on plot type selector."""
+    def _create_registry_driven_plot(self, analysis_type: str, data: Dict[str, Any], settings: Dict[str, Any], plot_type: str):
+        """Create plot using registry-driven generic DataFrame approach."""
         
-        # Get current plot type from selector - handle tuple format
-        plot_type_raw = self.plot_type_select.value
-        if isinstance(plot_type_raw, tuple) and len(plot_type_raw) > 1:
-            plot_type = plot_type_raw[1]  # Get the value part of (label, value) tuple
-        else:
-            plot_type = str(plot_type_raw)
+        try:
+            # Get analysis configuration from registry
+            analysis_config = self.registry.get_analysis(analysis_type)
+            if not analysis_config:
+                return pn.pane.Markdown(f"**Unknown analysis type:** {analysis_type}")
             
-        print(f"DEBUG: Creating basic stats plot, type: {plot_type}")
-
-        # Route to specific plot method
+            # Extract DataFrame from analysis results
+            plot_df = self._extract_dataframe_for_plotting(analysis_type, data, plot_type)
+            if plot_df is None or plot_df.empty:
+                return pn.pane.Markdown(f"**No data available for plotting {plot_type}**")
+            
+            # Create plot using generic DataFrame plotting
+            plot = self._create_generic_dataframe_plot(plot_df, analysis_type, plot_type, settings)
+            
+            print(f"✅ Created registry-driven plot for {analysis_type}: {plot_type}")
+            return plot
+            
+        except Exception as e:
+            print(f"❌ Registry-driven plot creation failed: {e}")
+            # Fallback to legacy plotting if available
+            return self._create_fallback_plot(analysis_type, data, settings, plot_type)
+    
+    def _extract_dataframe_for_plotting(self, analysis_type: str, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract appropriate DataFrame for plotting based on analysis type and plot type."""
+        
+        try:
+            # Handle different analysis result structures
+            if analysis_type == "basic_statistics":
+                return self._extract_basic_statistics_dataframe(data, plot_type)
+            elif analysis_type == "resistance_analysis":
+                return self._extract_resistance_dataframe(data, plot_type)
+            elif analysis_type == "kinetics_analysis":
+                return self._extract_kinetics_dataframe(data, plot_type)
+            elif analysis_type == "equilibrium_analysis":
+                return self._extract_equilibrium_dataframe(data, plot_type)
+            elif analysis_type == "current_decay_analysis":
+                return self._extract_current_decay_dataframe(data, plot_type)
+            elif analysis_type == "dqdv_analysis":
+                return self._extract_dqdv_dataframe(data, plot_type)
+            else:
+                # Generic fallback - try to extract segments data
+                segments = data.get("segments", [])
+                if segments:
+                    return pd.DataFrame(segments)
+                return None
+                
+        except Exception as e:
+            print(f"⚠️ Error extracting DataFrame for {analysis_type}.{plot_type}: {e}")
+            return None
+    
+    def _extract_basic_statistics_dataframe(self, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract DataFrame for basic statistics plotting."""
+        
+        segments = data.get("segments", [])
+        if not segments:
+            return None
+        
+        df = pd.DataFrame(segments)
+        
         if plot_type == "technique_count":
-            return self._basic_stats_technique_count(data)
+            # Group by technique and count
+            technique_counts = df.groupby('fundamental_technique').size().reset_index()
+            technique_counts.columns = ['technique', 'count']
+            return technique_counts
+            
         elif plot_type == "duration_analysis":
-            return self._basic_stats_duration_analysis(data)
-        else:
-            return self._basic_stats_technique_count(data)  # Default
+            # Return duration data with techniques
+            if 'duration_s' in df.columns and 'fundamental_technique' in df.columns:
+                duration_df = df[df['duration_s'].notna() & (df['duration_s'] > 0)]
+                return duration_df[['duration_s', 'fundamental_technique']]
+                
+        return df
+    
+    def _extract_resistance_dataframe(self, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract DataFrame for resistance analysis plotting."""
+        
+        resistance_data = data.get('resistance_data', [])
+        if not resistance_data:
+            return None
+        
+        # Convert resistance measurements to DataFrame format
+        plot_data = []
+        
+        for measurement in resistance_data:
+            if not isinstance(measurement, dict):
+                continue
+                
+            segment_id = measurement.get('segment_id')
+            ir_immediate = measurement.get('ir_immediate_ohm')
+            ir_10s = measurement.get('ir_10s_ohm')
+            ir_30s = measurement.get('ir_30s_ohm')
+            start_voltage = measurement.get('start_potential_v')
+            time = measurement.get('start_time_s', 0)
+            
+            # Add different resistance types as separate rows
+            if ir_immediate is not None:
+                plot_data.append({
+                    'segment_id': segment_id,
+                    'resistance': ir_immediate,
+                    'resistance_type': 'Immediate',
+                    'voltage': start_voltage,
+                    'time': time
+                })
+            if ir_10s is not None:
+                plot_data.append({
+                    'segment_id': segment_id,
+                    'resistance': ir_10s,
+                    'resistance_type': '10s',
+                    'voltage': start_voltage,
+                    'time': time + 10
+                })
+            if ir_30s is not None:
+                plot_data.append({
+                    'segment_id': segment_id,
+                    'resistance': ir_30s,
+                    'resistance_type': '30s',
+                    'voltage': start_voltage,
+                    'time': time + 30
+                })
+        
+        return pd.DataFrame(plot_data) if plot_data else None
+    
+    def _extract_kinetics_dataframe(self, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract DataFrame for kinetics analysis plotting."""
+        
+        kinetics_data = data.get('kinetics_data', [])
+        if not kinetics_data:
+            return None
+        
+        # Convert kinetics measurements to DataFrame format
+        plot_data = []
+        
+        for i, measurement in enumerate(kinetics_data):
+            if not isinstance(measurement, dict):
+                continue
+                
+            segment_id = measurement.get('segment_id')
+            equilibrium_value = measurement.get('equilibrium_value')
+            fit_type = measurement.get('fit_type', 'exponential')
+            r_squared = measurement.get('r_squared', 0.0)
+            rmse = measurement.get('rmse')
+            time_constant = measurement.get('time_constant')
+            amplitude = measurement.get('amplitude')
+            variable_type = measurement.get('variable_type', 'voltage')
+            
+            # Only process voltage measurements
+            if variable_type == 'voltage':
+                plot_data.append({
+                    'segment_id': segment_id,
+                    'sequence': i + 1,
+                    'equilibrium_voltage': equilibrium_value,
+                    'fit_type': 'Exponential' if fit_type == 'exponential' else 'sqrt(t)',
+                    'r_squared': r_squared,
+                    'rmse': rmse,
+                    'time_constant': time_constant,
+                    'amplitude': amplitude,
+                    'normalized_error': rmse / abs(equilibrium_value) if rmse and equilibrium_value else None
+                })
+        
+        return pd.DataFrame(plot_data) if plot_data else None
+    
+    def _extract_equilibrium_dataframe(self, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract DataFrame for equilibrium analysis plotting."""
+        
+        equilibrium_data = data.get('equilibrium_data', [])
+        if not equilibrium_data:
+            return None
+        
+        return pd.DataFrame(equilibrium_data)
+    
+    def _extract_current_decay_dataframe(self, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract DataFrame for current decay analysis plotting."""
+        
+        decay_data = data.get('current_decay_data', [])
+        if not decay_data:
+            return None
+        
+        return pd.DataFrame(decay_data)
+    
+    def _extract_dqdv_dataframe(self, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract DataFrame for dQ/dV analysis plotting."""
+        
+        # dQ/dV not implemented yet
+        return None
+    
+    def _create_generic_dataframe_plot(self, df: pd.DataFrame, analysis_type: str, plot_type: str, settings: Dict[str, Any]):
+        """Create plot using generic DataFrame plotting based on plot type."""
+        
+        try:
+            # Define generic plotting configurations
+            plot_configs = {
+                # Basic Statistics plots
+                "technique_count": {
+                    "plot_func": "bar",
+                    "x": "technique",
+                    "y": "count",
+                    "title": "Technique Count Analysis",
+                    "xlabel": "Technique",
+                    "ylabel": "Count"
+                },
+                "duration_analysis": {
+                    "plot_func": "hist",
+                    "y": "duration_s",
+                    "by": "fundamental_technique",
+                    "title": "Duration Analysis by Technique",
+                    "xlabel": "Duration (s)",
+                    "ylabel": "Count",
+                    "bins": 15,
+                    "alpha": 0.7
+                },
+                # Resistance plots
+                "temporal_resistance": {
+                    "plot_func": "line",
+                    "x": "time",
+                    "y": "resistance",
+                    "by": "resistance_type",
+                    "title": "Temporal Resistance Evolution",
+                    "xlabel": "Time (s)",
+                    "ylabel": "Resistance (Ω)"
+                },
+                "resistance_voltage": {
+                    "plot_func": "scatter",
+                    "x": "voltage",
+                    "y": "resistance",
+                    "by": "resistance_type",
+                    "title": "Resistance vs Voltage Correlation",
+                    "xlabel": "Starting Voltage (V)",
+                    "ylabel": "Resistance (Ω)",
+                    "size": 80,
+                    "alpha": 0.8
+                },
+                "resistance_distribution": {
+                    "plot_func": "hist",
+                    "y": "resistance",
+                    "by": "resistance_type",
+                    "title": "Resistance Distribution Analysis",
+                    "xlabel": "Resistance (Ω)",
+                    "ylabel": "Count",
+                    "bins": 20,
+                    "alpha": 0.8
+                },
+                # Kinetics plots
+                "voltage_relaxation": {
+                    "plot_func": "line",
+                    "x": "sequence",
+                    "y": "equilibrium_voltage",
+                    "by": "fit_type",
+                    "title": "Voltage Relaxation Evolution",
+                    "xlabel": "Measurement Sequence",
+                    "ylabel": "Equilibrium Voltage (V)"
+                },
+                "relaxation_stability": {
+                    "plot_func": "scatter",
+                    "x": "sequence",
+                    "y": "normalized_error",
+                    "by": "fit_type",
+                    "title": "Relaxation Stability (Normalized RMSE)",
+                    "xlabel": "Measurement Sequence",
+                    "ylabel": "RMSE / |V∞|",
+                    "size": 50,
+                    "alpha": 0.7
+                }
+            }
+            
+            # Get plot configuration
+            config = plot_configs.get(plot_type)
+            if not config:
+                return pn.pane.Markdown(f"**Plot configuration not found for {plot_type}**")
+            
+            # Extract configuration parameters
+            plot_func = config.pop("plot_func")
+            
+            # Get the hvplot method
+            if plot_func == "bar":
+                hvplot_method = df.hvplot.bar
+            elif plot_func == "hist":
+                hvplot_method = df.hvplot.hist
+            elif plot_func == "line":
+                hvplot_method = df.hvplot.line
+            elif plot_func == "scatter":
+                hvplot_method = df.hvplot.scatter
+            else:
+                return pn.pane.Markdown(f"**Unknown plot function: {plot_func}**")
+            
+            # Add standard tools
+            config["tools"] = ['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save']
+            config["width"] = 700
+            config["height"] = 400
+            
+            # Create the plot
+            plot = hvplot_method(**config)
+            
+            print(f"✅ Created generic DataFrame plot: {analysis_type}.{plot_type}")
+            return plot
+            
+        except Exception as e:
+            print(f"❌ Generic DataFrame plot creation failed: {e}")
+            return pn.pane.Markdown(f"**Generic plot error:** {str(e)}")
+    
+    def _create_fallback_plot(self, analysis_type: str, data: Dict[str, Any], settings: Dict[str, Any], plot_type: str):
+        """Fallback plotting if registry-driven approach fails."""
+        
+        # Simple fallback based on analysis type
+        if analysis_type == "basic_statistics":
+            segments = data.get("segments", [])
+            if segments:
+                df = pd.DataFrame(segments)
+                if 'fundamental_technique' in df.columns:
+                    technique_counts = df.groupby('fundamental_technique').size().reset_index()
+                    technique_counts.columns = ['Technique', 'Count']
+                    return technique_counts.hvplot.bar(
+                        x='Technique', y='Count',
+                        title=f'Basic Statistics - {plot_type}',
+                        tools=['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save']
+                    )
+        
+        return pn.pane.Markdown(f"**Fallback plot for {analysis_type}.{plot_type}**\n\nRegistry-driven plotting failed, and no suitable fallback available.")
 
-    def _basic_stats_technique_count(self, data: Dict[str, Any]):
+    def _legacy_basic_stats_technique_count(self, data: Dict[str, Any]):
         """Create technique count bar chart using real segment data."""
 
         # Get real segments data
@@ -176,7 +483,7 @@ class PlottingManager:
             traceback.print_exc()
             return pn.pane.Markdown(f"**Error creating plot:** {str(e)}")
 
-    def _basic_stats_duration_analysis(self, data: Dict[str, Any]):
+    def _legacy_basic_stats_duration_analysis(self, data: Dict[str, Any]):
         """Create duration analysis histogram using real segment data."""
 
         # Get real segments data
@@ -223,7 +530,7 @@ class PlottingManager:
             traceback.print_exc()
             return pn.pane.Markdown(f"**Error creating plot:** {str(e)}")
 
-    def _create_resistance_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
+    def _legacy_create_resistance_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
         """Route to appropriate resistance visualization based on plot type selector."""
         
         # Get current plot type from selector - handle tuple format
@@ -453,7 +760,7 @@ class PlottingManager:
             print(f"DEBUG: Error creating resistance distribution plot: {e}")
             return pn.pane.Markdown(f"**Error creating plot:** {str(e)}")
 
-    def _create_kinetics_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
+    def _legacy_create_kinetics_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
         """Route to appropriate kinetics visualization based on plot type selector."""
         
         # Get current plot type from selector - handle tuple format
@@ -751,7 +1058,7 @@ class PlottingManager:
             print(f"DEBUG: Error creating quality comparison plot: {e}")
             return pn.pane.Markdown(f"**Error creating plot:** {str(e)}")
 
-    def _create_dqdv_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
+    def _legacy_create_dqdv_plot(self, data: Dict[str, Any], settings: Dict[str, Any]):
         """dQ/dV analysis not implemented yet."""
 
         return pn.pane.Markdown(
@@ -791,34 +1098,65 @@ class PlottingManager:
             self.plot_container.objects = [error_msg]
 
     def update_available_plots(self, analysis_type: str):
-        """Update available plot types based on analysis type."""
-
-        plot_options = {
-            "basic_statistics": [
-                ("Technique Count", "technique_count"),
-                ("Duration Analysis", "duration_analysis")
-            ],
-            "resistance_analysis": [
-                ("Temporal Resistance", "temporal_resistance"),
-                ("Resistance vs Voltage", "resistance_voltage"),
-                ("Resistance Distribution", "resistance_distribution")
-            ],
-            "kinetics_analysis": [
-                ("Voltage Relaxation", "voltage_relaxation"),
-                ("Relaxation Stability", "relaxation_stability"),
-                ("Voltage Kinetics", "voltage_kinetics"),
-                ("Kinetics Quality", "kinetics_quality")
-            ],
-            "dqdv_analysis": [
-                ("dQ/dV Curves", "dqdv_curves"),
-                ("Peak Analysis", "peak_analysis")
-            ]
-        }
-
-        options = plot_options.get(analysis_type, [("Default", "default")])
-        self.plot_type_select.options = options
-        if options:
-            self.plot_type_select.value = options[0][1]
+        """Update available plot types based on analysis type using registry."""
+        
+        try:
+            # Get analysis configuration from registry
+            analysis_config = self.registry.get_analysis(analysis_type)
+            
+            if analysis_config and hasattr(analysis_config, 'available_plots'):
+                # Use registry-defined plot types
+                registry_plots = analysis_config.available_plots
+                options = [(plot.value.replace('_', ' ').title(), plot.value) for plot in registry_plots]
+                
+                if not options:
+                    # Fallback to generic options
+                    options = [("Default View", "default")]
+                    
+                print(f"✅ Using registry plot options for {analysis_type}: {[opt[1] for opt in options]}")
+                
+            else:
+                # Fallback to predefined plot options
+                plot_options = {
+                    "basic_statistics": [
+                        ("Technique Count", "technique_count"),
+                        ("Duration Analysis", "duration_analysis")
+                    ],
+                    "resistance_analysis": [
+                        ("Temporal Resistance", "temporal_resistance"),
+                        ("Resistance vs Voltage", "resistance_voltage"),
+                        ("Resistance Distribution", "resistance_distribution")
+                    ],
+                    "kinetics_analysis": [
+                        ("Voltage Relaxation", "voltage_relaxation"),
+                        ("Relaxation Stability", "relaxation_stability")
+                    ],
+                    "equilibrium_analysis": [
+                        ("Equilibrium Evolution", "equilibrium_evolution"),
+                        ("Stability Analysis", "stability_analysis")
+                    ],
+                    "current_decay_analysis": [
+                        ("Decay Kinetics", "decay_kinetics"),
+                        ("Decay Distribution", "decay_distribution")
+                    ],
+                    "dqdv_analysis": [
+                        ("dQ/dV Curves", "dqdv_curves"),
+                        ("Peak Analysis", "peak_analysis")
+                    ]
+                }
+                
+                options = plot_options.get(analysis_type, [("Default", "default")])
+                print(f"⚠️ Using fallback plot options for {analysis_type}: {[opt[1] for opt in options]}")
+            
+            self.plot_type_select.options = options
+            if options:
+                self.plot_type_select.value = options[0][1]
+                
+        except Exception as e:
+            print(f"❌ Error updating plot options for {analysis_type}: {e}")
+            # Ultimate fallback
+            self.plot_type_select.options = [("Default", "default")]
+            self.plot_type_select.value = "default"
 
     def _on_plot_type_changed(self, event):
         """Handle plot type selector changes - regenerate plot with new type."""
