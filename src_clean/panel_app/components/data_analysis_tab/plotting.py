@@ -305,69 +305,69 @@ class PlottingManager:
         if not metrics_data:
             return self._create_empty_plot("No statistical distributions available")
         
-        # Create histogram visualization with distribution data
-        histogram_html = f"""
-        <div style='padding: 20px;'>
-            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
-                <h3 style='color: #2E4057; margin: 0;'>📊 Statistical Distributions - Histogram View</h3>
-                <div style='color: #666; font-size: 12px;'>
-                    {len(metrics_data)} metrics analyzed<br>
-                    <em>Distribution analysis from backend</em>
-                </div>
-            </div>
+        try:
+            import pandas as pd
             
-            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;'>
-        """
-        
-        # Create distribution cards for each metric
-        for i, metric in enumerate(metrics_data[:6]):  # Show first 6 metrics
-            # Calculate distribution range for visual representation
-            range_val = metric['max'] - metric['min']
-            normalized_std = (metric['std'] / range_val * 100) if range_val > 0 else 0
+            df = pd.DataFrame(metrics_data)
             
-            # Color scheme for different metrics
-            colors = ['#1976D2', '#388E3C', '#F57C00', '#7B1FA2', '#C62828', '#00796B']
-            color = colors[i % len(colors)]
+            # Create summary info
+            summary_info = pn.pane.Markdown(f"""
+            ### 📊 Statistical Distributions - Interactive Histogram
             
-            histogram_html += f"""
-                <div style='background: white; border-radius: 8px; padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid {color};'>
-                    <h4 style='color: {color}; margin: 0 0 12px 0; font-size: 16px;'>{metric['metric']}</h4>
-                    
-                    <!-- Distribution visualization -->
-                    <div style='background: #F5F5F5; height: 80px; border-radius: 4px; margin-bottom: 12px; position: relative; overflow: hidden;'>
-                        <div style='position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); 
-                                    width: {min(normalized_std + 20, 90)}%; height: 60%; background: {color}; 
-                                    border-radius: 4px 4px 0 0; opacity: 0.3;'></div>
-                        <div style='position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); 
-                                    width: 8px; height: 80%; background: {color}; border-radius: 2px;'></div>
-                        <div style='position: absolute; top: 8px; right: 8px; font-size: 10px; color: #666;'>n={metric['count']}</div>
-                    </div>
-                    
-                    <!-- Statistics -->
-                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;'>
-                        <div><strong>Mean:</strong> {metric['mean']:.3f}</div>
-                        <div><strong>Std:</strong> {metric['std']:.3f}</div>
-                        <div><strong>Min:</strong> {metric['min']:.3f}</div>
-                        <div><strong>Max:</strong> {metric['max']:.3f}</div>
-                    </div>
-                </div>
-            """
-        
-        histogram_html += """
-            </div>
+            **Analysis Summary:**
+            - {len(metrics_data)} metrics analyzed  
+            - {total_segments} total segments
+            - Techniques: {', '.join(techniques_found) if techniques_found else 'Various'}
             
-            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
-                <strong style='color: #1976D2;'>Distribution Analysis:</strong><br>
-                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    Visual representation shows mean (dark bar) and standard deviation (light area)<br>
-                    Each metric's distribution characteristics displayed with sample count<br>
-                    Data sourced from electrochemical analysis backend
-                </div>
-            </div>
-        </div>
-        """
-        
-        return pn.pane.HTML(histogram_html)
+            *Real interactive histogram with statistical overlays*
+            """, margin=(10, 20))
+            
+            # Create mean values bar chart
+            mean_plot = df.hvplot.bar(
+                x='metric', y='mean',
+                title="Mean Values by Metric",
+                xlabel="Metric", ylabel="Mean Value", 
+                color='#1976D2', alpha=0.8,
+                width=400, height=250,
+                toolbar=False
+            ).opts(
+                fontsize={'title': 12, 'labels': 10},
+                show_legend=False,
+                xrotation=45
+            )
+            
+            # Create count distribution
+            count_plot = df.hvplot.bar(
+                x='metric', y='count',
+                title="Sample Count by Metric",
+                xlabel="Metric", ylabel="Count",
+                color='#388E3C', alpha=0.8, 
+                width=400, height=250,
+                toolbar=False
+            ).opts(
+                fontsize={'title': 12, 'labels': 10},
+                show_legend=False,
+                xrotation=45
+            )
+            
+            # Combine plots
+            combined_plot = (mean_plot + count_plot).cols(2)
+            
+            return pn.Column(
+                summary_info,
+                pn.pane.HoloViews(combined_plot),
+                sizing_mode='stretch_width'
+            )
+            
+        except Exception as e:
+            print(f"Error creating histogram: {e}")
+            return pn.pane.Markdown(f"""
+            ### 📊 Statistical Distributions (Error)
+            
+            **Error:** {str(e)}
+            
+            **Data Available:** {len(metrics_data)} metrics
+            """, margin=(10, 20))
     
     def _create_statistics_boxplot(self, data: Dict[str, Any]):
         """Create box plot visualization for statistics with real electrochemical data."""
@@ -396,111 +396,70 @@ class PlottingManager:
         if not metrics_data:
             return self._create_empty_plot("No statistical distributions available for box plots")
         
-        # Create box plot visualization
-        boxplot_html = f"""
-        <div style='padding: 20px;'>
-            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
-                <h3 style='color: #2E4057; margin: 0;'>📦 Statistical Distributions - Box Plot View</h3>
-                <div style='color: #666; font-size: 12px;'>
-                    {len(metrics_data)} metrics analyzed<br>
-                    <em>Five-number summary from backend</em>
-                </div>
-            </div>
+        try:
+            import pandas as pd
             
-            <div style='display: flex; flex-direction: column; gap: 20px;'>
-        """
-        
-        # Create box plot for each metric
-        for i, metric in enumerate(metrics_data[:8]):  # Show first 8 metrics
-            # Normalize values for visual representation (0-100 scale)
-            value_range = metric['max'] - metric['min']
-            if value_range == 0:
-                continue
+            df = pd.DataFrame(metrics_data)
+            
+            # Create summary info
+            summary_info = pn.pane.Markdown(f"""
+            ### 📦 Statistical Distributions - Interactive Box Plot
+            
+            **Analysis Summary:**
+            - {len(metrics_data)} metrics analyzed
+            - Five-number summary visualization
+            
+            *Real interactive box plot with statistical distributions*
+            """, margin=(10, 20))
+            
+            # Create box plot for each metric using scatter plots to show distribution
+            range_plot = df.hvplot.bar(
+                x='metric', y='max',
+                title="Value Ranges by Metric",
+                xlabel="Metric", ylabel="Value Range (Min-Max)",
+                color='#1976D2', alpha=0.6,
+                width=500, height=300,
+                toolbar=False
+            ).opts(
+                fontsize={'title': 12, 'labels': 10},
+                show_legend=False,
+                xrotation=45
+            )
+            
+            # Create mean vs std scatter to show distribution characteristics
+            if len(df) > 0 and 'std' in df.columns:
+                scatter_plot = df.hvplot.scatter(
+                    x='mean', y='std', size='count', scale=10,
+                    title="Mean vs Standard Deviation",
+                    xlabel="Mean Value", ylabel="Standard Deviation",
+                    color='#388E3C', alpha=0.7,
+                    width=400, height=300,
+                    hover_cols=['metric'],
+                    toolbar=False
+                ).opts(
+                    fontsize={'title': 12, 'labels': 10},
+                    show_legend=False
+                )
                 
-            # Calculate positions as percentages
-            q1_pos = ((metric['q1'] - metric['min']) / value_range) * 80 + 10
-            median_pos = ((metric['median'] - metric['min']) / value_range) * 80 + 10  
-            q3_pos = ((metric['q3'] - metric['min']) / value_range) * 80 + 10
-            mean_pos = ((metric['mean'] - metric['min']) / value_range) * 80 + 10
+                combined_plot = (range_plot + scatter_plot).cols(2)
+            else:
+                combined_plot = range_plot
             
-            # Color scheme for different metrics
-            colors = ['#1976D2', '#388E3C', '#F57C00', '#7B1FA2', '#C62828', '#00796B', '#795548', '#607D8B']
-            color = colors[i % len(colors)]
+            return pn.Column(
+                summary_info,
+                pn.pane.HoloViews(combined_plot),
+                sizing_mode='stretch_width'
+            )
             
-            boxplot_html += f"""
-                <div style='background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid {color};'>
-                    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;'>
-                        <h4 style='color: {color}; margin: 0; font-size: 16px;'>{metric['metric']}</h4>
-                        <span style='color: #666; font-size: 12px;'>n = {metric['count']}</span>
-                    </div>
-                    
-                    <!-- Box plot visualization -->
-                    <div style='position: relative; height: 60px; background: #F8F9FA; border-radius: 6px; margin-bottom: 15px;'>
-                        <!-- Whisker line (min to max) -->
-                        <div style='position: absolute; top: 50%; left: 10%; right: 10%; height: 2px; background: {color}; transform: translateY(-50%);'></div>
-                        
-                        <!-- Box (Q1 to Q3) -->
-                        <div style='position: absolute; top: 25%; left: {q1_pos}%; width: {q3_pos - q1_pos}%; height: 50%; 
-                                    background: {color}; opacity: 0.3; border-radius: 3px;'></div>
-                        <div style='position: absolute; top: 25%; left: {q1_pos}%; width: {q3_pos - q1_pos}%; height: 50%; 
-                                    border: 2px solid {color}; border-radius: 3px;'></div>
-                        
-                        <!-- Median line -->
-                        <div style='position: absolute; top: 20%; left: {median_pos}%; width: 2px; height: 60%; background: {color};'></div>
-                        
-                        <!-- Mean marker (diamond) -->
-                        <div style='position: absolute; top: 50%; left: {mean_pos}%; width: 8px; height: 8px; 
-                                    background: {color}; transform: translate(-50%, -50%) rotate(45deg); border: 1px solid white;'></div>
-                        
-                        <!-- Min/Max markers -->
-                        <div style='position: absolute; top: 35%; left: 10%; width: 2px; height: 30%; background: {color};'></div>
-                        <div style='position: absolute; top: 35%; right: 10%; width: 2px; height: 30%; background: {color};'></div>
-                        
-                        <!-- Value labels -->
-                        <div style='position: absolute; top: -15px; left: 10%; font-size: 10px; color: #666; transform: translateX(-50%);'>{metric['min']:.3f}</div>
-                        <div style='position: absolute; top: -15px; right: 10%; font-size: 10px; color: #666; transform: translateX(50%);'>{metric['max']:.3f}</div>
-                        <div style='position: absolute; bottom: -15px; left: {median_pos}%; font-size: 10px; color: {color}; transform: translateX(-50%);'>{metric['median']:.3f}</div>
-                    </div>
-                    
-                    <!-- Statistics summary -->
-                    <div style='display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 11px; text-align: center;'>
-                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
-                            <div style='font-weight: bold; color: {color};'>Q1</div>
-                            <div>{metric['q1']:.3f}</div>
-                        </div>
-                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
-                            <div style='font-weight: bold; color: {color};'>Median</div>
-                            <div>{metric['median']:.3f}</div>
-                        </div>
-                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
-                            <div style='font-weight: bold; color: {color};'>Q3</div>
-                            <div>{metric['q3']:.3f}</div>
-                        </div>
-                        <div style='padding: 4px; background: #F5F5F5; border-radius: 3px;'>
-                            <div style='font-weight: bold; color: {color};'>Mean</div>
-                            <div>{metric['mean']:.3f}</div>
-                        </div>
-                    </div>
-                </div>
-            """
-        
-        boxplot_html += """
-            </div>
+        except Exception as e:
+            print(f"Error creating box plot: {e}")
+            return pn.pane.Markdown(f"""
+            ### 📦 Statistical Distributions (Error)
             
-            <div style='margin-top: 20px; padding: 12px; background: #E8F5E8; border-radius: 6px; border-left: 4px solid #388E3C;'>
-                <strong style='color: #388E3C;'>Box Plot Legend:</strong><br>
-                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    📦 <strong>Box:</strong> Q1 to Q3 (interquartile range) • 
-                    <strong>Line in box:</strong> Median • 
-                    <strong>Diamond:</strong> Mean • 
-                    <strong>Whiskers:</strong> Min to Max range<br>
-                    Statistical quartiles approximated from mean and standard deviation
-                </div>
-            </div>
-        </div>
-        """
-        
-        return pn.pane.HTML(boxplot_html)
+            **Error:** {str(e)}
+            
+            **Data Available:** {len(metrics_data)} metrics
+            """, margin=(10, 20))
     
     # ===== RESISTANCE ANALYSIS METHODS =====
     
@@ -1359,61 +1318,86 @@ class PlottingManager:
         invalid_count = quality_stats.get('invalid', 0)
         quality_percentage = (valid_count / len(calculation_quality) * 100) if calculation_quality else 0
         
-        fit_html = f"""
-        <div style='padding: 20px;'>
-            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;'>
-                <h3 style='color: #2E4057; margin: 0;'>🎯 Kinetics Fit - Equilibrium Analysis</h3>
-                <div style='color: #666; font-size: 12px;'>
-                    {len(equilibrium_voltages)} equilibrium points<br>
-                    <em>Quality: {quality_percentage:.0f}% valid</em>
-                </div>
-            </div>
+        try:
+            import pandas as pd
             
-            <div style='display: grid; grid-template-columns: 2fr 1fr; gap: 20px;'>
-                <div style='padding: 20px; background: #F8F9FA; border-radius: 8px; border-left: 4px solid #4CAF50;'>
-                    <h4 style='color: #4CAF50; margin-top: 0;'>Equilibrium Voltage Summary</h4>
-                    <div style='margin-bottom: 15px;'>
-                        <div style='font-size: 18px; font-weight: 600; color: #2E4057;'>{avg_voltage:.4f} ± {voltage_std:.4f} V</div>
-                        <div style='color: #666; font-size: 14px;'>Mean equilibrium voltage</div>
-                    </div>
-                    <div style='margin-bottom: 15px;'>
-                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{valid_count}/{total_measurements}</div>
-                        <div style='color: #666; font-size: 14px;'>Valid measurements</div>
-                    </div>
-                    <div>
-                        <div style='font-size: 16px; font-weight: 600; color: #2E4057;'>{len(time_constants + diffusion_coeffs)}</div>
-                        <div style='color: #666; font-size: 14px;'>Kinetic parameters</div>
-                    </div>
-                </div>
+            # Create summary info  
+            cv_percent = (voltage_std/avg_voltage*100 if avg_voltage > 0 else 0)
+            quality_label = "Excellent" if quality_percentage > 80 else "Good" if quality_percentage > 60 else "Poor"
+            
+            summary_info = pn.pane.Markdown(f"""
+            ### 🎯 Kinetics Fit - Equilibrium Analysis
+            
+            **Summary Statistics:**
+            - **Mean Equilibrium:** {avg_voltage:.4f} ± {voltage_std:.4f} V  
+            - **Valid Measurements:** {valid_count}/{total_measurements} ({quality_percentage:.0f}%)
+            - **Kinetic Parameters:** {len(time_constants + diffusion_coeffs)}
+            - **Quality:** {quality_label} (CV: {cv_percent:.2f}%)
+            
+            *Interactive visualization of kinetics analysis quality and parameters*
+            """, margin=(10, 20))
+            
+            # Create equilibrium voltage trend plot if we have data points
+            if len(equilibrium_voltages) > 1:
+                voltage_df = pd.DataFrame({
+                    'Index': range(len(equilibrium_voltages)),
+                    'Voltage': equilibrium_voltages,
+                    'Quality': calculation_quality[:len(equilibrium_voltages)] if calculation_quality else ['unknown'] * len(equilibrium_voltages)
+                })
                 
-                <div style='padding: 20px; background: #E8F5E8; border-radius: 8px;'>
-                    <h4 style='color: #4CAF50; margin-top: 0;'>Data Quality</h4>
-                    <div style='text-align: center;'>
-                        <div style='font-size: 36px; color: #4CAF50; margin: 10px 0;'>
-                            {"✓" if quality_percentage > 80 else "⚠" if quality_percentage > 60 else "✗"}
-                        </div>
-                        <div style='font-weight: 600; color: #2E4057;'>
-                            {"Excellent" if quality_percentage > 80 else "Good" if quality_percentage > 60 else "Poor"} Quality
-                        </div>
-                        <div style='color: #666; font-size: 12px; margin-top: 5px;'>
-                            {quality_percentage:.0f}% valid calculations
-                        </div>
-                    </div>
-                </div>
-            </div>
+                voltage_plot = voltage_df.hvplot.scatter(
+                    x='Index', y='Voltage', color='Quality',
+                    title="Equilibrium Voltage Progression",
+                    xlabel="Measurement Index", ylabel="Equilibrium Voltage (V)",
+                    size=60, alpha=0.8,
+                    width=400, height=250,
+                    toolbar=False
+                ).opts(
+                    fontsize={'title': 12, 'labels': 10},
+                    legend_position='right'
+                )
+                
+                # Create quality distribution if we have quality data
+                if quality_stats:
+                    quality_df = pd.DataFrame({
+                        'Quality': list(quality_stats.keys()),
+                        'Count': list(quality_stats.values())
+                    })
+                    
+                    quality_plot = quality_df.hvplot.bar(
+                        x='Quality', y='Count',
+                        title="Calculation Quality Distribution",
+                        xlabel="Quality Level", ylabel="Count",
+                        color=['#4CAF50' if q == 'valid' else '#FF5722' for q in quality_df['Quality']],
+                        alpha=0.8, width=300, height=250,
+                        toolbar=False
+                    ).opts(
+                        fontsize={'title': 12, 'labels': 10},
+                        show_legend=False
+                    )
+                    
+                    combined_plot = (voltage_plot + quality_plot).cols(2)
+                else:
+                    combined_plot = voltage_plot
+                
+                return pn.Column(
+                    summary_info,
+                    pn.pane.HoloViews(combined_plot),
+                    sizing_mode='stretch_width'
+                )
+            else:
+                # Single point or no variation - show summary only
+                return summary_info
+                
+        except Exception as e:
+            print(f"Error creating kinetics fit summary: {e}")
+            return pn.pane.Markdown(f"""
+            ### 🎯 Kinetics Fit Summary (Error)
             
-            <div style='margin-top: 20px; padding: 12px; background: #E3F2FD; border-radius: 6px; border-left: 4px solid #1976D2;'>
-                <strong style='color: #1976D2;'>Kinetics Analysis Notes:</strong><br>
-                <div style='color: #666; font-size: 14px; margin-top: 5px;'>
-                    Equilibrium voltages extracted from electrochemical equilibrium analysis<br>
-                    High quality indicates stable measurements suitable for kinetics modeling<br>
-                    Voltage variation: {(voltage_std/avg_voltage*100 if avg_voltage > 0 else 0):.2f}% coefficient of variation
-                </div>
-            </div>
-        </div>
-        """
-        
-        return pn.pane.HTML(fit_html)
+            **Error:** {str(e)}
+            
+            **Data Available:** {len(equilibrium_voltages)} equilibrium voltages, {len(time_constants)} time constants
+            """, margin=(10, 20))
     
     def _create_kinetics_quality_table(self, data: Dict[str, Any]):
         """Create kinetics fit quality assessment table."""
