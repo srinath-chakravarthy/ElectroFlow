@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 
-def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
+def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
     """
     Analyze current decay kinetics from potentiostatic segments.
     
@@ -90,30 +90,45 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
             decay_data.append(decay_info)
         
         if not decay_data:
-            return {"error": "No current decay data found in potentiostatic segment analysis results"}
+            return pd.DataFrame(columns=['segment_id', 'error_message'])
         
-        # Calculate summary statistics
+        # Create core DataFrame from segments
+        core_df = pd.DataFrame(potentiostatic_segments)
+        
+        # Create analysis DataFrame
+        analysis_df = pd.DataFrame(decay_data)
+        
+        # Rename 'id' to 'segment_id' for consistency before merge
+        core_df = core_df.rename(columns={'id': 'segment_id'})
+        
+        # Merge core + analysis columns
+        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        df['analysis_type'] = 'current_decay_analysis'
+        df['quality_score'] = df['decay_quality'].map({'good': 1.0, 'poor': 0.0})
+        
+        # Calculate summary statistics and add as columns
         summary = _calculate_decay_summary(decay_data, settings)
-        
-        # Electrochemical insights
+        for key, value in summary.items():
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    df[f'summary_{key}_{sub_key}'] = sub_value
+            else:
+                df[f'summary_{key}'] = value
+                
+        # Add electrochemical insights as columns
         insights = _interpret_decay_data(decay_data, settings)
-        
-        return {
-            "analysis_type": "current_decay_analysis",
-            "segments": potentiostatic_segments,  # Pass through for compatibility
-            "decay_data": decay_data,
-            "summary": summary,
-            "insights": insights,
-            "settings_used": settings,
-            "total_segments": len(potentiostatic_segments),
-            "quality_fits": len([d for d in decay_data if d['decay_quality'] == 'good'])
-        }
+        for key, value in insights.items():
+            df[f'insight_{key}'] = value
+            
+        return df
         
     except Exception as e:
-        return {
-            "error": f"Current decay analysis failed: {str(e)}",
-            "analysis_type": "current_decay_analysis"
-        }
+        error_df = pd.DataFrame([{
+            'segment_id': None,
+            'error_message': f"Current decay analysis failed: {str(e)}",
+            'analysis_type': 'current_decay_analysis'
+        }])
+        return error_df
 
 
 def _extract_decay_fit_parameters(analysis_results: Dict[str, Any]) -> Dict[str, Any]:

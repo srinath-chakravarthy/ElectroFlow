@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 
-def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
+def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
     """
     Analyze relaxation kinetics from REST phase segments.
     
@@ -77,7 +77,8 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
             kinetics_data.append(kinetics_info)
         
         if not kinetics_data:
-            return {"error": "No kinetics data found in REST segment analysis results"}
+            # Return empty DataFrame with proper columns for error case
+            return pd.DataFrame(columns=['segment_id', 'error_message'])
         
         # Filter by quality if requested
         if min_r_squared > 0:
@@ -85,33 +86,51 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         else:
             high_quality_data = kinetics_data
         
-        # Convert to DataFrame for analysis
-        df = pd.DataFrame(kinetics_data)
+        # Create core DataFrame from segments
+        core_df = pd.DataFrame(rest_segments)
         
-        # Calculate summary statistics
+        # Create analysis DataFrame from kinetics data
+        analysis_df = pd.DataFrame(kinetics_data)
+        
+        # Rename 'id' to 'segment_id' for consistency before merge
+        core_df = core_df.rename(columns={'id': 'segment_id'})
+        
+        # Merge core + analysis columns
+        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        
+        # Add standard columns required by registry
+        df['analysis_type'] = 'kinetics_analysis'
+        df['quality_score'] = df.get('r_squared', 0.0)
+        
+        # Add summary statistics as columns
         summary = _calculate_kinetics_summary(kinetics_data, high_quality_data)
+        for key, value in summary.items():
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    df[f'summary_{key}_{sub_key}'] = sub_value
+            else:
+                df[f'summary_{key}'] = value
         
-        # Electrochemical insights
+        # Add electrochemical insights as columns
         insights = _interpret_kinetics_data(kinetics_data, settings)
-        
-        return {
-            "analysis_type": "kinetics_analysis",
-            "segments": rest_segments,  # Pass through for compatibility
-            "kinetics_data": kinetics_data,
-            "high_quality_data": high_quality_data,
-            "summary": summary,
-            "insights": insights,
-            "fit_type_used": fit_type,
-            "min_r_squared": min_r_squared,
-            "total_segments": len(rest_segments),
-            "valid_fits": len(high_quality_data)
-        }
+        for key, value in insights.items():
+            df[f'insight_{key}'] = value
+            
+        # Add analysis parameters as columns
+        df['fit_type_used'] = fit_type
+        df['min_r_squared_threshold'] = min_r_squared
+        df['is_high_quality'] = df['r_squared'] >= min_r_squared
+            
+        return df
         
     except Exception as e:
-        return {
-            "error": f"Kinetics analysis failed: {str(e)}",
-            "analysis_type": "kinetics_analysis"
-        }
+        # Return error as DataFrame
+        error_df = pd.DataFrame([{
+            'segment_id': None,
+            'error_message': f"Kinetics analysis failed: {str(e)}",
+            'analysis_type': 'kinetics_analysis'
+        }])
+        return error_df
 
 
 def _extract_fit_parameters(analysis_results: Dict[str, Any], fit_type: str) -> Dict[str, Any]:

@@ -199,15 +199,25 @@ class AnalysisRegistry:
             # Execute analysis function
             result = config.analysis_function(segments, merged_settings)
             
-            # Add metadata
-            result.update({
-                "analysis_type": analysis_id,
-                "analysis_name": config.name,
-                "segment_count": len(segments),
-                "settings_used": merged_settings
-            })
-            
-            return result
+            # Handle DataFrame returns (new format) vs Dict returns (legacy)
+            if hasattr(result, 'columns'):  # It's a DataFrame
+                # Add metadata as DataFrame attributes for backward compatibility
+                result.attrs.update({
+                    "analysis_type": analysis_id,
+                    "analysis_name": config.name,
+                    "segment_count": len(segments),
+                    "settings_used": merged_settings
+                })
+                return result
+            else:
+                # Legacy dictionary format - add metadata normally  
+                result.update({
+                    "analysis_type": analysis_id,
+                    "analysis_name": config.name,
+                    "segment_count": len(segments),
+                    "settings_used": merged_settings
+                })
+                return result
             
         except Exception as e:
             return {
@@ -263,7 +273,24 @@ class AnalysisRegistry:
             },
             default_settings={"metrics": ["duration_s", "start_potential_v", "end_potential_v"]},
             available_plots=[PlotType.TIME_SERIES, PlotType.HISTOGRAM, PlotType.BOX_PLOT],
-            default_plot=PlotType.TIME_SERIES
+            default_plot=PlotType.TIME_SERIES,
+            plot_config={
+                "Duration Distribution": {
+                    "plot_type": "histogram",
+                    "x_column": "duration_s",
+                    "title": "Segment Duration Distribution",
+                    "x_label": "Duration (s)",
+                    "y_label": "Count"
+                },
+                "Voltage Range": {
+                    "plot_type": "scatter",
+                    "x_column": "start_potential_v",
+                    "y_column": "end_potential_v",
+                    "title": "Start vs End Potential",
+                    "x_label": "Start Potential (V)",
+                    "y_label": "End Potential (V)"
+                }
+            }
         ))
         
         # Resistance Analysis  
@@ -285,7 +312,24 @@ class AnalysisRegistry:
             },
             default_settings={"time_points": ["immediate", "10s"]},
             available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT, PlotType.BAR_CHART],
-            default_plot=PlotType.TIME_SERIES
+            default_plot=PlotType.TIME_SERIES,
+            plot_config={
+                "Resistance vs Time": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": "ir_immediate_ohm",
+                    "title": "Instantaneous Resistance Over Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Resistance (Ω)"
+                },
+                "Resistance Distribution": {
+                    "plot_type": "histogram",
+                    "x_column": "ir_immediate_ohm",
+                    "title": "Resistance Distribution",
+                    "x_label": "Resistance (Ω)",
+                    "y_label": "Count"
+                }
+            }
         ))
         
         # Kinetics Analysis
@@ -313,7 +357,24 @@ class AnalysisRegistry:
             },
             default_settings={"fit_type": "auto_best", "min_r_squared": 0.8},
             available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT],
-            default_plot=PlotType.TIME_SERIES
+            default_plot=PlotType.TIME_SERIES,
+            plot_config={
+                "Voltage Recovery vs Time": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": "v_equilibrium_v",
+                    "title": "Voltage Recovery Over Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Equilibrium Voltage (V)"
+                },
+                "Fit Quality Distribution": {
+                    "plot_type": "histogram",
+                    "x_column": "r_squared",
+                    "title": "Kinetics Fit Quality Distribution",
+                    "x_label": "R²",
+                    "y_label": "Count"
+                }
+            }
         ))
         
         # Equilibrium Analysis
@@ -341,7 +402,24 @@ class AnalysisRegistry:
             },
             default_settings={"min_duration_s": 60, "max_drift_rate_mv_per_min": 1.0},
             available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT, PlotType.BOX_PLOT],
-            default_plot=PlotType.TIME_SERIES
+            default_plot=PlotType.TIME_SERIES,
+            plot_config={
+                "Equilibrium Voltage vs Time": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": "equilibrium_voltage_v",
+                    "title": "Equilibrium Voltage Over Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Equilibrium Voltage (V)"
+                },
+                "Drift Rate Distribution": {
+                    "plot_type": "histogram",
+                    "x_column": "drift_rate_mv_min",
+                    "title": "Voltage Drift Rate Distribution",
+                    "x_label": "Drift Rate (mV/min)",
+                    "y_label": "Count"
+                }
+            }
         ))
         
         # Current Decay Analysis
@@ -371,7 +449,24 @@ class AnalysisRegistry:
             },
             default_settings={"min_r_squared": 0.8, "min_duration_s": 10},
             available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT],
-            default_plot=PlotType.TIME_SERIES
+            default_plot=PlotType.TIME_SERIES,
+            plot_config={
+                "Decay Constant vs Time": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": "decay_constant_s",
+                    "title": "Current Decay Constant Over Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Decay Constant (s)"
+                },
+                "Current Drop Distribution": {
+                    "plot_type": "histogram",
+                    "x_column": "current_decay_percent",
+                    "title": "Current Decay Distribution",
+                    "x_label": "Current Drop (%)",
+                    "y_label": "Count"
+                }
+            }
         ))
         
         # dQ/dV Analysis (placeholder - not implemented yet)
@@ -381,12 +476,31 @@ class AnalysisRegistry:
             description="Differential capacity analysis (coming soon)",
             category=AnalysisCategory.THERMODYNAMICS,
             min_segments=1,
-            analysis_function=lambda segments, settings: {
-                "error": "dQ/dV analysis not implemented yet. Coming in future version.",
-                "placeholder": True
-            },
+            analysis_function=lambda segments, settings: pd.DataFrame([{
+                'segment_id': None,
+                'error_message': "dQ/dV analysis not implemented yet. Coming in future version.",
+                'analysis_type': 'dqdv_analysis',
+                'placeholder': True
+            }]),
             available_plots=[PlotType.TIME_SERIES],
-            default_plot=PlotType.TIME_SERIES
+            default_plot=PlotType.TIME_SERIES,
+            plot_config={
+                "Placeholder Plot 1": {
+                    "plot_type": "line",
+                    "x_column": "segment_id",
+                    "y_column": "placeholder",
+                    "title": "dQ/dV Analysis (Coming Soon)",
+                    "x_label": "Segment ID",
+                    "y_label": "Placeholder"
+                },
+                "Placeholder Plot 2": {
+                    "plot_type": "histogram",
+                    "x_column": "placeholder",
+                    "title": "dQ/dV Distribution (Coming Soon)",
+                    "x_label": "Placeholder",
+                    "y_label": "Count"
+                }
+            }
         ))
 
 

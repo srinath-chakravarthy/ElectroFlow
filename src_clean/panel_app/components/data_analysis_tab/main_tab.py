@@ -401,8 +401,19 @@ class DataAnalysisTab(param.Parameterized):
             result = engine.get_analysis(analysis_type, data_filters, settings)
             
             # Log successful registry-based analysis
-            if "error" not in result:
-                print(f"✅ Registry analysis {analysis_type}: {result.get('segments_analyzed', 0)} segments")
+            # Handle DataFrame vs dict results
+            has_error = False
+            segments_count = 0
+            
+            if hasattr(result, 'columns'):  # DataFrame
+                has_error = 'error_message' in result.columns and not result['error_message'].isna().all()
+                segments_count = len(result) if not has_error else 0
+            else:  # Dict
+                has_error = "error" in result
+                segments_count = result.get('segments_analyzed', 0)
+            
+            if not has_error:
+                print(f"✅ Registry analysis {analysis_type}: {segments_count} segments")
             
             return result
             

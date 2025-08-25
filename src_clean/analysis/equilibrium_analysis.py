@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 
-def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
+def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
     """
     Analyze equilibrium voltage from segment data.
     
@@ -89,30 +89,47 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
             equilibrium_data.append(equilibrium_info)
         
         if not equilibrium_data:
-            return {"error": "No equilibrium data found in segment analysis results"}
+            return pd.DataFrame(columns=['segment_id', 'error_message'])
+        
+        # Create core DataFrame from segments
+        core_df = pd.DataFrame(segments)
+        
+        # Create analysis DataFrame
+        analysis_df = pd.DataFrame(equilibrium_data)
+        
+        # Rename 'id' to 'segment_id' for consistency before merge
+        core_df = core_df.rename(columns={'id': 'segment_id'})
+        
+        # Merge core + analysis columns
+        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        df['analysis_type'] = 'equilibrium_analysis'
+        df['quality_score'] = df['equilibrium_quality'].map({'good': 1.0, 'poor': 0.0})
         
         # Calculate summary statistics
         summary = _calculate_equilibrium_summary(equilibrium_data, settings)
         
+        # Add summary and insights as columns
+        for key, value in summary.items():
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    df[f'summary_{key}_{sub_key}'] = sub_value
+            else:
+                df[f'summary_{key}'] = value
+                
         # Electrochemical insights
         insights = _interpret_equilibrium_data(equilibrium_data, settings)
-        
-        return {
-            "analysis_type": "equilibrium_analysis",
-            "segments": segments,  # Pass through for compatibility
-            "equilibrium_data": equilibrium_data,
-            "summary": summary,
-            "insights": insights,
-            "settings_used": settings,
-            "total_segments": len(segments),
-            "quality_segments": len([e for e in equilibrium_data if e['equilibrium_quality'] == 'good'])
-        }
+        for key, value in insights.items():
+            df[f'insight_{key}'] = value
+            
+        return df
         
     except Exception as e:
-        return {
-            "error": f"Equilibrium analysis failed: {str(e)}",
-            "analysis_type": "equilibrium_analysis"
-        }
+        error_df = pd.DataFrame([{
+            'segment_id': None,
+            'error_message': f"Equilibrium analysis failed: {str(e)}",
+            'analysis_type': 'equilibrium_analysis'
+        }])
+        return error_df
 
 
 def _calculate_equilibrium_summary(equilibrium_data: List[Dict[str, Any]], 

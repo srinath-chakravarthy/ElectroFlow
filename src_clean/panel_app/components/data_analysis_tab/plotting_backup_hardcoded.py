@@ -104,15 +104,16 @@ class PlottingManager:
             self.current_data = data
             self.current_settings = settings
 
-            # Update plot options when analysis type changes
-            self.update_plot_options(analysis_type)
-
             # Handle errors
             if data.get("error"):
                 return pn.pane.Markdown(f"**Error:** {data['error']}")
 
-            # Get current plot type from selector  
-            plot_type = self.plot_type_select.value
+            # Get current plot type from selector
+            plot_type_raw = self.plot_type_select.value
+            if isinstance(plot_type_raw, tuple) and len(plot_type_raw) > 1:
+                plot_type = plot_type_raw[1]  # Get the value part of (label, value) tuple
+            else:
+                plot_type = str(plot_type_raw)
             
             print(f"✅ Creating registry-driven plot: {analysis_type}, plot_type: {plot_type}")
             
@@ -124,7 +125,7 @@ class PlottingManager:
             return pn.pane.Markdown(f"**Plot Error:** {str(e)}")
 
     def _create_registry_driven_plot(self, analysis_type: str, data: Dict[str, Any], settings: Dict[str, Any], plot_type: str):
-        """Create plot using registry-driven configuration."""
+        """Create plot using registry-driven generic DataFrame approach."""
         
         try:
             # Get analysis configuration from registry
@@ -132,203 +133,50 @@ class PlottingManager:
             if not analysis_config:
                 return pn.pane.Markdown(f"**Unknown analysis type:** {analysis_type}")
             
-            # Get plot config from registry
-            plot_config = analysis_config.plot_config.get(plot_type)
-            if not plot_config:
-                return pn.pane.Markdown(f"**Unknown plot type {plot_type} for analysis {analysis_type}**")
-            
-            # Extract DataFrame from analysis results (expecting DataFrame-first architecture)
-            plot_df = self._extract_dataframe_from_results(data)
+            # Extract DataFrame from analysis results
+            plot_df = self._extract_dataframe_for_plotting(analysis_type, data, plot_type)
             if plot_df is None or plot_df.empty:
                 return pn.pane.Markdown(f"**No data available for plotting {plot_type}**")
             
-            # Create plot using registry plot configuration
-            plot = self._create_plot_from_config(plot_df, plot_config)
+            # Create plot using generic DataFrame plotting
+            plot = self._create_generic_dataframe_plot(plot_df, analysis_type, plot_type, settings)
             
             print(f"✅ Created registry-driven plot for {analysis_type}: {plot_type}")
             return plot
             
         except Exception as e:
             print(f"❌ Registry-driven plot creation failed: {e}")
-            return pn.pane.Markdown(f"**Plot creation error:** {str(e)}")
+            # Fallback to legacy plotting if available
+            return self._create_fallback_plot(analysis_type, data, settings, plot_type)
     
-    def _extract_dataframe_from_results(self, data: Dict[str, Any]) -> Optional[pd.DataFrame]:
-        """Extract DataFrame from analysis results (DataFrame-first architecture)."""
+    def _extract_dataframe_for_plotting(self, analysis_type: str, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
+        """Extract appropriate DataFrame for plotting based on analysis type and plot type."""
         
         try:
-            # DataFrame-first architecture - analysis functions return DataFrames directly
-            if isinstance(data, pd.DataFrame):
-                print(f"✅ Analysis result is already a DataFrame")
-                return data
-            
-            # Handle wrapped DataFrame results
-            if 'dataframe' in data:
-                df = data['dataframe']
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    print(f"✅ Found DataFrame in results")
-                    return df
-            
-            # Handle 'data' key containing DataFrame
-            if 'data' in data:
-                df_data = data['data']
-                if isinstance(df_data, pd.DataFrame) and not df_data.empty:
-                    print(f"✅ Found DataFrame in 'data' key")
-                    return df_data
-            
-            print(f"⚠️ No DataFrame found in analysis results")
-            return None
+            # Handle different analysis result structures
+            if analysis_type == "basic_statistics":
+                return self._extract_basic_statistics_dataframe(data, plot_type)
+            elif analysis_type == "resistance_analysis":
+                return self._extract_resistance_dataframe(data, plot_type)
+            elif analysis_type == "kinetics_analysis":
+                return self._extract_kinetics_dataframe(data, plot_type)
+            elif analysis_type == "equilibrium_analysis":
+                return self._extract_equilibrium_dataframe(data, plot_type)
+            elif analysis_type == "current_decay_analysis":
+                return self._extract_current_decay_dataframe(data, plot_type)
+            elif analysis_type == "dqdv_analysis":
+                return self._extract_dqdv_dataframe(data, plot_type)
+            else:
+                # Generic fallback - try to extract segments data
+                segments = data.get("segments", [])
+                if segments:
+                    return pd.DataFrame(segments)
+                return None
                 
         except Exception as e:
-            print(f"❌ DataFrame extraction error: {e}")
+            print(f"⚠️ Error extracting DataFrame for {analysis_type}.{plot_type}: {e}")
             return None
-
-    def _create_plot_from_config(self, df: pd.DataFrame, plot_config: Dict[str, Any]) -> pn.pane.HoloViews:
-        """Create plot using registry plot configuration."""
-        
-        try:
-            plot_type = plot_config.get("plot_type", "line")
-            x_column = plot_config.get("x_column")
-            y_column = plot_config.get("y_column") 
-            title = plot_config.get("title", "Analysis Plot")
-            x_label = plot_config.get("x_label", "X")
-            y_label = plot_config.get("y_label", "Y")
-            
-            # Validate required columns exist
-            missing_cols = []
-            if x_column and x_column not in df.columns:
-                missing_cols.append(x_column)
-            if y_column and y_column not in df.columns:
-                missing_cols.append(y_column)
-            
-            if missing_cols:
-                return pn.pane.Markdown(f"**Missing columns:** {missing_cols}")
-            
-            # Create plot based on type
-            if plot_type == "line":
-                if not y_column:
-                    return pn.pane.Markdown("**Error:** Line plot requires y_column")
-                plot = df.hvplot.line(
-                    x=x_column, y=y_column,
-                    title=title,
-                    xlabel=x_label, ylabel=y_label,
-                    width=700, height=400
-                )
-            elif plot_type == "scatter":
-                if not y_column:
-                    return pn.pane.Markdown("**Error:** Scatter plot requires y_column")
-                plot = df.hvplot.scatter(
-                    x=x_column, y=y_column,
-                    title=title,
-                    xlabel=x_label, ylabel=y_label,
-                    width=700, height=400
-                )
-            elif plot_type == "histogram":
-                plot = df.hvplot.hist(
-                    y=x_column,  # For histogram, x_column is the data column
-                    title=title,
-                    xlabel=x_label, ylabel=y_label,
-                    width=700, height=400,
-                    bins=20
-                )
-            else:
-                return pn.pane.Markdown(f"**Unsupported plot type:** {plot_type}")
-            
-            return pn.pane.HoloViews(plot, sizing_mode='stretch_width')
-            
-        except Exception as e:
-            print(f"❌ Plot creation from config failed: {e}")
-            return pn.pane.Markdown(f"**Plot configuration error:** {str(e)}")
     
-    def update_plot_options(self, analysis_type: str):
-        """Update plot type selector options from registry."""
-        
-        try:
-            analysis_config = self.registry.get_analysis(analysis_type)
-            if not analysis_config or not analysis_config.plot_config:
-                self.plot_type_select.options = ["Default"]
-                return
-            
-            # Get plot names from registry plot_config
-            plot_options = list(analysis_config.plot_config.keys())
-            if plot_options:
-                self.plot_type_select.options = plot_options
-                self.plot_type_select.value = plot_options[0]  # Select first option
-                print(f"✅ Updated plot options for {analysis_type}: {plot_options}")
-            else:
-                self.plot_type_select.options = ["Default"]
-                
-        except Exception as e:
-            print(f"❌ Error updating plot options: {e}")
-            self.plot_type_select.options = ["Default"]
-    # ========================================
-    # HARDCODED ANALYSIS LOGIC REMOVED 
-    # ========================================
-    # DataFrame-first architecture: Analysis functions return DataFrames directly
-    # Registry plot configs specify exact column names for plotting
-    # No more data conversion methods needed
-
-    def _resolve_auto_detect_columns(self, df: pd.DataFrame, config: Dict[str, Any], 
-                                   analysis_type: str, plot_type: str) -> Dict[str, Any]:
-        """Resolve auto_detect_* placeholders with actual DataFrame columns."""
-        
-        resolved_config = config.copy()
-        available_columns = list(df.columns)
-        
-        # Define column preference mappings based on analysis type and common patterns
-        column_preferences = {
-            # Time-related columns (for x-axis in time series)
-            "time": ["time", "time_s", "elapsed_time", "sequence", "measurement_number", "index"],
-            
-            # Value columns (for y-axis in various plots)  
-            "value": ["resistance", "voltage", "potential_v", "current_a", "capacity_ah", "energy_wh", 
-                     "equilibrium_voltage", "duration_s", "mean", "std", "count", "value"],
-            
-            # Category columns (for grouping/coloring)
-            "category": ["resistance_type", "technique", "fundamental_technique", "fit_type", 
-                        "measurement_type", "metric", "analysis_type"],
-            
-            # Count columns (for bar charts)
-            "count": ["count", "frequency", "occurrence", "number"]
-        }
-        
-        # Resolve auto-detect placeholders
-        for key, value in config.items():
-            if isinstance(value, str) and value.startswith("auto_detect_"):
-                placeholder_type = value.replace("auto_detect_", "")
-                
-                # Find best matching column
-                if placeholder_type in column_preferences:
-                    for preferred_col in column_preferences[placeholder_type]:
-                        if preferred_col in available_columns:
-                            resolved_config[key] = preferred_col
-                            print(f"✅ Auto-detected {placeholder_type}: {preferred_col} for {plot_type}")
-                            break
-                    else:
-                        # Fallback: use first available column or remove the key
-                        if placeholder_type == "category" and available_columns:
-                            # For category, try to find a non-numeric column
-                            categorical_cols = [col for col in available_columns 
-                                              if df[col].dtype == 'object' or col in ['technique', 'type', 'method']]
-                            if categorical_cols:
-                                resolved_config[key] = categorical_cols[0]
-                                print(f"⚠️ Auto-detected fallback category: {categorical_cols[0]} for {plot_type}")
-                            else:
-                                # Remove by parameter for non-categorical plots if no category column found
-                                if key == "by":
-                                    del resolved_config[key]
-                                    print(f"⚠️ Removed category grouping for {plot_type} (no categorical columns)")
-                        elif available_columns:
-                            # For other types, use first available numeric-like column
-                            numeric_cols = [col for col in available_columns 
-                                          if col not in ['id', 'index'] and 
-                                          (df[col].dtype in ['float64', 'int64'] or 'time' in col.lower())]
-                            if numeric_cols:
-                                resolved_config[key] = numeric_cols[0]
-                                print(f"⚠️ Auto-detected fallback {placeholder_type}: {numeric_cols[0]} for {plot_type}")
-        
-        return resolved_config
-
-    # Legacy specialized extraction methods (kept for fallback compatibility)
     def _extract_basic_statistics_dataframe(self, data: Dict[str, Any], plot_type: str) -> Optional[pd.DataFrame]:
         """Extract DataFrame for basic statistics plotting."""
         
@@ -597,8 +445,6 @@ class PlottingManager:
             # Extract configuration parameters  
             plot_func = config.pop("plot_func")
             
-            # Auto-detect columns for generic plot configurations
-            config = self._resolve_auto_detect_columns(df, config, analysis_type, plot_type)
             
             # Get the hvplot method
             if plot_func == "bar":

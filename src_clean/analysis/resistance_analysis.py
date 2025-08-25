@@ -10,7 +10,7 @@ import json
 import pandas as pd
 
 
-def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
+def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
     """
     Calculate instantaneous resistance from galvanostatic segments.
     
@@ -74,45 +74,49 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
             resistance_data.append(resistance_info)
         
         if not resistance_data:
-            return {"error": "No resistance data found in segment analysis results"}
+            # Return empty DataFrame with proper columns for error case
+            return pd.DataFrame(columns=['segment_id', 'error_message'])
         
-        # Convert to DataFrame for analysis
-        df = pd.DataFrame(resistance_data)
+        # Create core DataFrame from segments
+        core_df = pd.DataFrame(galv_segments)
         
-        # Calculate summary statistics
-        summary = {}
+        # Create analysis DataFrame from resistance data
+        analysis_df = pd.DataFrame(resistance_data)
+        
+        # Rename 'id' to 'segment_id' for consistency before merge
+        core_df = core_df.rename(columns={'id': 'segment_id'})
+        
+        # Merge core + analysis columns
+        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        
+        # Add standard columns required by registry
+        df['analysis_type'] = 'resistance_analysis'
+        df['quality_score'] = df['calculation_quality'].map({'good': 1.0, 'invalid': 0.0})
+        
+        # Add summary statistics as columns for easy access
         for time_point in time_points:
             col_name = f'ir_{time_point}_ohm' if time_point != 'immediate' else 'ir_immediate_ohm'
             if col_name in df.columns:
                 values = df[col_name].dropna()
                 if len(values) > 0:
-                    summary[f'resistance_{time_point}'] = {
-                        'mean_ohm': float(values.mean()),
-                        'std_ohm': float(values.std()),
-                        'min_ohm': float(values.min()),
-                        'max_ohm': float(values.max()),
-                        'count': int(len(values))
-                    }
+                    df[f'{col_name}_mean'] = float(values.mean())
+                    df[f'{col_name}_std'] = float(values.std())
         
-        # Electrochemical insights
+        # Add electrochemical insights as columns
         insights = _interpret_resistance_data(resistance_data)
-        
-        return {
-            "analysis_type": "resistance_analysis", 
-            "segments": galv_segments,  # Pass through segments for compatibility
-            "resistance_data": resistance_data,
-            "summary": summary,
-            "insights": insights,
-            "time_points_analyzed": time_points,
-            "total_segments": len(galv_segments),
-            "valid_measurements": len([r for r in resistance_data if r['calculation_quality'] == 'good'])
-        }
+        for key, value in insights.items():
+            df[f'insight_{key}'] = value
+            
+        return df
         
     except Exception as e:
-        return {
-            "error": f"Resistance analysis failed: {str(e)}",
-            "analysis_type": "resistance_analysis"
-        }
+        # Return error as DataFrame
+        error_df = pd.DataFrame([{
+            'segment_id': None,
+            'error_message': f"Resistance analysis failed: {str(e)}",
+            'analysis_type': 'resistance_analysis'
+        }])
+        return error_df
 
 
 def _interpret_resistance_data(resistance_data: List[Dict[str, Any]]) -> Dict[str, str]:

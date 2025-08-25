@@ -37,6 +37,19 @@ class ResultsDisplay:
         # Current state
         self.current_results = {}
         self.current_analysis = "basic_statistics"
+    
+    def _safe_get(self, results, key, default=None):
+        """Safely get value from results (DataFrame or dict)."""
+        if hasattr(results, 'columns'):  # DataFrame
+            if key in results.attrs:
+                return results.attrs[key]
+            elif key in results.columns:
+                # For single-value columns, return the first value
+                return results[key].iloc[0] if len(results) > 0 else default
+            else:
+                return default
+        else:  # Dictionary
+            return results.get(key, default)
 
     def _create_results_panels(self):
         """Create results display panels."""
@@ -89,15 +102,16 @@ class ResultsDisplay:
         detailed_results = self.format_detailed_results(analysis_type, results)
         self.detailed_results_panel.object = detailed_results
 
-    def format_results(self, analysis_type: str, results: Dict[str, Any]):
+    def format_results(self, analysis_type: str, results):
         """Main results formatting using registry-based templates."""
 
-        if results.get("error"):
+        error_msg = self._safe_get(results, "error")
+        if error_msg:
             return f"""
             <div style='color: #d32f2f; padding: 15px; border: 1px solid #d32f2f; 
                         border-radius: 4px; background: #ffeaea;'>
                 <strong>❌ Analysis Error:</strong><br>
-                {results["error"]}
+                {error_msg}
             </div>
             """
 
@@ -121,8 +135,8 @@ class ResultsDisplay:
             # Extract key information from results
             analysis_name = analysis_config.name
             analysis_description = analysis_config.description
-            segments_analyzed = results.get('segments_analyzed', 0)
-            total_segments = results.get('total_segments', 0)
+            segments_analyzed = self._safe_get(results, 'segments_analyzed', 0)
+            total_segments = self._safe_get(results, 'total_segments', 0)
             
             # Get analysis-specific data
             analysis_data = self._extract_analysis_specific_data(analysis_type, results)
@@ -190,17 +204,24 @@ class ResultsDisplay:
             print(f"⚠️ Error extracting analysis data for {analysis_type}: {e}")
             return "<em>Error extracting analysis-specific data</em>"
     
-    def _extract_basic_statistics_data(self, results: Dict[str, Any]) -> str:
+    def _extract_basic_statistics_data(self, results) -> str:
         """Extract basic statistics specific data."""
         
-        segments = results.get("segments", [])
-        if not segments:
-            return "<em>No segment details available</em>"
-        
-        try:
+        # Handle DataFrame vs dict results
+        if hasattr(results, 'columns'):
+            # DataFrame format - use the DataFrame directly
+            if len(results) == 0:
+                return "<em>No segment data available</em>"
+            df = results
+        else:
+            # Legacy dict format
+            segments = results.get("segments", [])
+            if not segments:
+                return "<em>No segment details available</em>"
             import pandas as pd
             df = pd.DataFrame(segments)
-            
+        
+        try:
             # Technique breakdown
             technique_counts = df.groupby('fundamental_technique').size().to_dict()
             technique_durations = df.groupby('fundamental_technique')['duration_s'].mean().to_dict()
@@ -246,14 +267,22 @@ class ResultsDisplay:
             print(f"Error creating basic statistics data: {e}")
             return "<em>Error processing segment statistics</em>"
     
-    def _extract_resistance_data(self, results: Dict[str, Any]) -> str:
+    def _extract_resistance_data(self, results) -> str:
         """Extract resistance analysis specific data."""
         
-        resistance_data = results.get('resistance_data', [])
-        summary = results.get('summary', {})
-        
-        valid_measurements = results.get('valid_measurements', 0)
-        time_points = results.get('time_points_analyzed', ['Immediate', '10s', '30s'])
+        # Handle DataFrame vs dict results
+        if hasattr(results, 'columns'):
+            # DataFrame format - extract from DataFrame
+            valid_measurements = len(results[results['calculation_quality'] == 'good']) if 'calculation_quality' in results.columns else len(results)
+            # Get time points from column names
+            time_point_cols = [col for col in results.columns if col.startswith('ir_') and col.endswith('_ohm')]
+            time_points = [col.replace('ir_', '').replace('_ohm', '') for col in time_point_cols]
+        else:
+            # Legacy dict format
+            resistance_data = results.get('resistance_data', [])
+            summary = results.get('summary', {})
+            valid_measurements = results.get('valid_measurements', 0)
+            time_points = results.get('time_points_analyzed', ['Immediate', '10s', '30s'])
         
         return f"""
         <div style='margin: 10px 0;'>
