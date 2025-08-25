@@ -297,7 +297,15 @@ class RegistryValidator:
         if 'x_column' in plot_config:
             required_columns.append(plot_config['x_column'])
         if 'y_column' in plot_config:
-            required_columns.append(plot_config['y_column'])
+            y_column = plot_config['y_column']
+            if isinstance(y_column, list):
+                # Multi-y-column support: add all columns in list
+                required_columns.extend(y_column)
+            else:
+                # Single y-column
+                required_columns.append(y_column)
+        if 'by' in plot_config:
+            required_columns.append(plot_config['by'])
         
         # Check which columns are missing
         missing_columns = [col for col in required_columns 
@@ -337,24 +345,71 @@ class RegistryValidator:
         return list(set(suggestions))  # Remove duplicates
     
     def _create_sample_segments(self) -> Dict[str, List[Dict]]:
-        """Create sample segment data for testing different analysis types."""
+        """Create sample segment data for testing different analysis types with proper analytics_config schemas."""
         return {
             'basic': [
                 {'id': 1, 'fundamental_technique': 'Rest', 'duration_s': 100, 
-                 'start_potential_v': 3.5, 'end_potential_v': 3.4, 'start_time_s': 0}
+                 'start_potential_v': 3.5, 'end_potential_v': 3.4, 'start_time_s': 0,
+                 'start_current_a': 0.0, 'end_current_a': 0.0}
             ],
             'galvanostatic': [
                 {'id': 1, 'fundamental_technique': 'Galvanostatic', 
-                 'analysis_results': {'ir_immediate': 0.02}, 'start_time_s': 0}
+                 'analysis_results': {
+                     # Use analytics_config current_pulse schema field names
+                     'ir_immediate_ohm': 0.05,
+                     'ir_10s_ohm': 0.06, 
+                     'ir_30s_ohm': 0.07,
+                     'baseline_voltage_v': 3.7,
+                     'average_current_a': 0.1,
+                     'pulse_duration_s': 60.0
+                 }, 
+                 'start_time_s': 0, 'duration_s': 60,
+                 'start_current_a': 0.1, 'end_current_a': 0.1}
             ],
             'rest_with_analysis': [
                 {'id': 1, 'fundamental_technique': 'Rest', 'duration_s': 100,
-                 'analysis_results': {'v_eq': 3.4, 'tau': 50.0, 'r_squared': 0.95},
-                 'start_time_s': 0}
+                 'analysis_results': {
+                     # Use analytics_config exponential_fit + sqrt_fit schema field names
+                     'voltage_infinity': 3.4, 
+                     'voltage_amplitude': 0.1,
+                     'time_constant_s': 50.0, 
+                     'r_squared': 0.95,
+                     'rmse': 0.01,
+                     'current_infinity': 0.0,
+                     'current_amplitude': 0.001,
+                     # Also include sqrt_fit fields for auto-best selection
+                     'voltage_sqrt_amplitude': 0.05,
+                     'current_sqrt_amplitude': 0.0005
+                 },
+                 'start_time_s': 0, 'start_potential_v': 3.5, 'end_potential_v': 3.4}
             ],
             'potentiostatic': [
                 {'id': 1, 'fundamental_technique': 'Potentiostatic',
-                 'analysis_results': {'decay_constant': 50.0}, 'start_time_s': 0}
+                 'analysis_results': {
+                     # Use analytics_config exponential_fit schema field names for current decay
+                     'current_infinity': 0.001,
+                     'current_amplitude': 0.05,
+                     'time_constant_s': 25.0,
+                     'r_squared': 0.92,
+                     'rmse': 0.005
+                 }, 
+                 'start_time_s': 0, 'duration_s': 120,
+                 'start_current_a': 0.051, 'end_current_a': 0.001}
+            ],
+            'equilibrium_with_analysis': [
+                {'id': 1, 'fundamental_technique': 'Rest', 'duration_s': 300,
+                 'analysis_results': {
+                     # Use analytics_config exponential_fit schema for equilibrium
+                     'voltage_infinity': 3.45,
+                     'voltage_amplitude': 0.08,
+                     'time_constant_s': 120.0,
+                     'r_squared': 0.89,
+                     'rmse': 0.002,
+                     # Additional equilibrium-specific fields
+                     'is_stable': True,
+                     'drift_rate_mv_min': 0.5
+                 },
+                 'start_time_s': 0, 'start_potential_v': 3.53, 'end_potential_v': 3.45}
             ]
         }
     
@@ -365,7 +420,7 @@ class RegistryValidator:
             'basic_statistics': 'basic',
             'resistance_analysis': 'galvanostatic', 
             'kinetics_analysis': 'rest_with_analysis',
-            'equilibrium_analysis': 'basic',
+            'equilibrium_analysis': 'equilibrium_with_analysis',
             'current_decay_analysis': 'potentiostatic',
             'dqdv_analysis': 'basic'
         }

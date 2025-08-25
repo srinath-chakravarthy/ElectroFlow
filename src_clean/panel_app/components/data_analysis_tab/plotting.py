@@ -189,12 +189,13 @@ class PlottingManager:
             return None
 
     def _create_plot_from_config(self, df: pd.DataFrame, plot_config: Dict[str, Any]) -> pn.pane.HoloViews:
-        """Create plot using registry plot configuration."""
+        """Create plot using registry plot configuration with multi-series support."""
         
         try:
             plot_type = plot_config.get("plot_type", "line")
             x_column = plot_config.get("x_column")
             y_column = plot_config.get("y_column") 
+            by_column = plot_config.get("by")  # Group by column for series
             title = plot_config.get("title", "Analysis Plot")
             x_label = plot_config.get("x_label", "X")
             y_label = plot_config.get("y_label", "Y")
@@ -203,42 +204,70 @@ class PlottingManager:
             missing_cols = []
             if x_column and x_column not in df.columns:
                 missing_cols.append(x_column)
-            if y_column and y_column not in df.columns:
-                missing_cols.append(y_column)
+                
+            # Handle y_column as string or list (multi-y-column support)
+            if y_column:
+                if isinstance(y_column, list):
+                    # Multi-y-column: check all columns exist
+                    missing_y = [col for col in y_column if col not in df.columns]
+                    missing_cols.extend(missing_y)
+                else:
+                    # Single y-column: check exists
+                    if y_column not in df.columns:
+                        missing_cols.append(y_column)
+            
+            # Validate by column exists
+            if by_column and by_column not in df.columns:
+                missing_cols.append(by_column)
             
             if missing_cols:
                 return pn.pane.Markdown(f"**Missing columns:** {missing_cols}")
+            
+            # Build plot parameters
+            plot_params = {
+                'title': title,
+                'xlabel': x_label, 
+                'ylabel': y_label,
+                'width': 700, 
+                'height': 400
+            }
+            
+            # Add x column
+            if x_column:
+                plot_params['x'] = x_column
+                
+            # Add y column(s)
+            if y_column:
+                plot_params['y'] = y_column  # Works for both string and list
+                
+            # Add grouping column
+            if by_column:
+                plot_params['by'] = by_column
             
             # Create plot based on type
             if plot_type == "line":
                 if not y_column:
                     return pn.pane.Markdown("**Error:** Line plot requires y_column")
-                plot = df.hvplot.line(
-                    x=x_column, y=y_column,
-                    title=title,
-                    xlabel=x_label, ylabel=y_label,
-                    width=700, height=400
-                )
+                plot = df.hvplot.line(**plot_params)
+                
             elif plot_type == "scatter":
                 if not y_column:
                     return pn.pane.Markdown("**Error:** Scatter plot requires y_column")
-                plot = df.hvplot.scatter(
-                    x=x_column, y=y_column,
-                    title=title,
-                    xlabel=x_label, ylabel=y_label,
-                    width=700, height=400
-                )
+                plot = df.hvplot.scatter(**plot_params)
+                
             elif plot_type == "histogram":
-                plot = df.hvplot.hist(
-                    y=x_column,  # For histogram, x_column is the data column
-                    title=title,
-                    xlabel=x_label, ylabel=y_label,
-                    width=700, height=400,
-                    bins=20
-                )
+                # For histogram, use x_column as the data column
+                hist_params = plot_params.copy()
+                hist_params['y'] = x_column  # Histogram data column
+                if 'x' in hist_params:
+                    del hist_params['x']  # Remove x for histogram
+                hist_params['bins'] = 20
+                plot = df.hvplot.hist(**hist_params)
+                
             else:
                 return pn.pane.Markdown(f"**Unsupported plot type:** {plot_type}")
             
+            print(f"✅ Created multi-series plot: {plot_type}, y_columns: {y_column}, by: {by_column}")
             return pn.pane.HoloViews(plot, sizing_mode='stretch_width')
             
         except Exception as e:

@@ -5,10 +5,12 @@ Registry-compatible analysis function for current decay kinetics analysis.
 Replaces the get_electrochemical_current_decay_analysis() method and ElectrochemicalInsights integration.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 import pandas as pd
 import numpy as np
+
+from .json_field_extractor import get_json_field_extractor
 
 
 def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
@@ -79,13 +81,23 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
                     decay_percent = (1 - decay_ratio) * 100
                     decay_info['current_decay_percent'] = decay_percent
             
-            # Quality assessment
+            # Expert quality assessment and kinetic regime classification
             duration_ok = decay_info.get('duration_s', 0) >= min_duration
-            fit_ok = decay_info.get('r_squared', 0) >= min_r_squared
+            r_squared = decay_info.get('r_squared', 0)
+            fit_ok = r_squared >= min_r_squared
             
             decay_info['meets_duration_criteria'] = duration_ok
             decay_info['meets_fit_criteria'] = fit_ok
+            decay_info['fit_quality'] = _assess_decay_fit_quality(r_squared)
             decay_info['decay_quality'] = 'good' if (duration_ok and fit_ok) else 'poor'
+            
+            # Kinetic regime classification
+            tau_s = decay_info.get('tau_s')
+            decay_info['kinetic_regime'] = _classify_kinetic_regime(tau_s)
+            
+            # Decay completeness assessment
+            if decay_info.get('current_decay_percent') is not None:
+                decay_info['decay_completeness'] = _assess_decay_completeness(decay_info['current_decay_percent'])
             
             decay_data.append(decay_info)
         
@@ -133,54 +145,61 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
 
 def _extract_decay_fit_parameters(analysis_results: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Extract current decay fit parameters from JSON analysis_results.
+    Extract current decay fit parameters using JSONFieldExtractor with exponential_fit schema.
     
-    Looks for exponential decay fits: I(t) = I0 * exp(-t/tau) + I_ss
+    Uses analytics_config exponential_fit schema for current decay analysis.
     """
     
+    extractor = get_json_field_extractor()
+    
+    # Extract exponential fit fields using analytics_config schema
+    exp_fields = extractor.extract_all_fields(analysis_results, 'exponential_fit')
+    quality_score = extractor.extract_with_quality(analysis_results, 'exponential_fit')[1]
+    
     fit_data = {}
+    fit_data.update(exp_fields)
     
-    # Try to extract exponential decay parameters
-    if 'current_decay_fit' in analysis_results:
-        decay_fit = analysis_results['current_decay_fit']
-        fit_data.update({
-            'i0_a': decay_fit.get('I0'),  # Initial current
-            'i_ss_a': decay_fit.get('I_ss'),  # Steady-state current
-            'tau_s': decay_fit.get('tau'),  # Time constant
-            'r_squared': decay_fit.get('r_squared'),
-            'fit_type': 'exponential_decay'
-        })
+    # Map fields for current decay context if available
+    if exp_fields.get('current_infinity') is not None:
+        fit_data['i_ss_a'] = exp_fields['current_infinity']  # Steady-state current
     
-    # Try alternative JSON structures
-    elif 'decay_parameters' in analysis_results:
-        params = analysis_results['decay_parameters']
-        fit_data.update({
-            'i0_a': params.get('initial_current_a'),
-            'i_ss_a': params.get('steady_state_current_a'),
-            'tau_s': params.get('time_constant_s'),
-            'r_squared': params.get('fit_quality'),
-            'fit_type': 'exponential_decay'
-        })
-    
-    # Try flat JSON structure (direct key access)
-    else:
-        possible_keys = {
-            'I0': 'i0_a',
-            'I_ss': 'i_ss_a',
-            'tau': 'tau_s',
-            'decay_tau': 'tau_s',
-            'initial_current': 'i0_a',
-            'steady_state_current': 'i_ss_a',
-            'time_constant': 'tau_s',
-            'r_squared': 'r_squared'
-        }
+    if exp_fields.get('current_amplitude') is not None:
+        fit_data['i0_amplitude_a'] = exp_fields['current_amplitude']  # Initial decay amplitude
         
-        for json_key, internal_key in possible_keys.items():
-            if json_key in analysis_results:
-                fit_data[internal_key] = analysis_results[json_key]
+        # Calculate initial current (I0) if we have steady-state + amplitude
+        if fit_data.get('i_ss_a') is not None:
+            fit_data['i0_a'] = fit_data['i_ss_a'] + fit_data['i0_amplitude_a']
+    
+    # Use time_constant_s directly from exponential_fit schema
+    if exp_fields.get('time_constant_s') is not None:
+        fit_data['tau_s'] = exp_fields['time_constant_s']
+    
+    # Add fit metadata
+    if exp_fields:
+        fit_data['fit_type'] = 'exponential_decay'
+        fit_data['extraction_quality'] = quality_score
+    
+    # Additional fallback extraction for common current decay field names
+    fallback_fields = extractor.extract_with_fallbacks(
+        analysis_results, 
+        ['I0', 'I_ss', 'initial_current_a', 'steady_state_current_a']
+    )
+    
+    if fallback_fields is not None and not fit_data:
+        # Use fallback extraction if exponential_fit schema didn't work
+        for key in ['I0', 'initial_current_a']:
+            if key in analysis_results:
+                fit_data['i0_a'] = analysis_results[key]
+                break
         
-        if 'i0_a' in fit_data or 'tau_s' in fit_data:
+        for key in ['I_ss', 'steady_state_current_a']:
+            if key in analysis_results:
+                fit_data['i_ss_a'] = analysis_results[key]
+                break
+        
+        if fit_data:
             fit_data['fit_type'] = 'exponential_decay'
+            fit_data['extraction_method'] = 'fallback'
     
     return fit_data
 
@@ -253,30 +272,51 @@ def _interpret_decay_data(decay_data: List[Dict[str, Any]],
     insights = {}
     good_quality = [d for d in decay_data if d.get('decay_quality') == 'good']
     
-    # Quality assessment
+    # Enhanced quality assessment (from ECI 1.0)
     fit_success_rate = len(good_quality) / len(decay_data)
-    if fit_success_rate > 0.8:
-        insights["fit_quality"] = "Excellent current decay fits"
-    elif fit_success_rate > 0.5:
-        insights["fit_quality"] = "Good current decay fits"
-    else:
-        insights["fit_quality"] = "Poor current decay fits - check potentiostatic conditions"
     
-    # Time constant analysis
+    # Count high-quality fits using expert assessment
+    expert_good_fits = [d for d in decay_data 
+                       if d.get('fit_quality') in ['excellent', 'good']]
+    expert_success_rate = len(expert_good_fits) / len(decay_data)
+    
+    if expert_success_rate > 0.7:
+        insights["fit_quality"] = "Good exponential fits - reliable kinetic analysis"
+    else:
+        insights["fit_quality"] = "Variable fit quality - interpret kinetics cautiously"
+    
+    # Traditional assessment for compatibility
+    if fit_success_rate > 0.8:
+        insights["data_quality"] = "Excellent current decay fits"
+    elif fit_success_rate > 0.5:
+        insights["data_quality"] = "Good current decay fits"
+    else:
+        insights["data_quality"] = "Poor current decay fits - check potentiostatic conditions"
+    
+    # Enhanced time constant analysis with regime classification
     tau_values = [d.get('tau_s') for d in good_quality 
                  if d.get('tau_s') is not None]
     
     if tau_values:
         avg_tau = np.mean(tau_values)
         
-        if avg_tau < 1:
-            insights["decay_kinetics"] = f"Fast current decay (τ = {avg_tau:.2f} s) - rapid equilibration"
-        elif avg_tau < 10:
-            insights["decay_kinetics"] = f"Moderate current decay (τ = {avg_tau:.2f} s)"
+        # Enhanced kinetic regime interpretation (from ECI 1.0)  
+        if avg_tau < 10:
+            insights["decay_kinetics"] = "Fast current decay - charge transfer limited"
         elif avg_tau < 100:
-            insights["decay_kinetics"] = f"Slow current decay (τ = {avg_tau:.1f} s)"
+            insights["decay_kinetics"] = "Moderate current decay - mixed processes"
         else:
-            insights["decay_kinetics"] = f"Very slow current decay (τ = {avg_tau:.0f} s) - slow kinetics"
+            insights["decay_kinetics"] = "Slow current decay - diffusion limited"
+        
+        # Detailed time constant reporting
+        if avg_tau < 1:
+            insights["time_constant_analysis"] = f"Very fast decay (τ = {avg_tau:.2f} s) - rapid equilibration"
+        elif avg_tau < 10:
+            insights["time_constant_analysis"] = f"Fast decay (τ = {avg_tau:.1f} s)"
+        elif avg_tau < 100:
+            insights["time_constant_analysis"] = f"Moderate decay (τ = {avg_tau:.1f} s)"
+        else:
+            insights["time_constant_analysis"] = f"Slow decay (τ = {avg_tau:.0f} s) - slow kinetics"
     
     # Current magnitude analysis
     initial_currents = [abs(d.get('i0_a', 0)) for d in good_quality 
@@ -309,3 +349,54 @@ def _interpret_decay_data(decay_data: List[Dict[str, Any]],
             insights["decay_completeness"] = f"Poor current decay ({avg_decay:.1f}% reduction) - incomplete equilibration"
     
     return insights
+
+
+def _assess_decay_fit_quality(r_squared: float) -> str:
+    """
+    Assess decay fit quality based on R² value using expert thresholds.
+    
+    Uses same thresholds as kinetics analysis for consistency.
+    """
+    if r_squared >= 0.95:
+        return "excellent"
+    elif r_squared >= 0.90:
+        return "good"
+    elif r_squared >= 0.80:
+        return "fair"
+    else:
+        return "poor"
+
+
+def _classify_kinetic_regime(time_constant: Optional[float]) -> str:
+    """
+    Classify kinetic regime based on current decay time constant.
+    
+    Adapted from ElectrochemicalInsights 1.0 current decay classification.
+    """
+    if time_constant is None or time_constant <= 0:
+        return "unknown"
+    
+    if time_constant < 1:
+        return "very_fast_kinetics"
+    elif time_constant < 10:
+        return "fast_kinetics"
+    elif time_constant < 100:
+        return "moderate_kinetics"
+    else:
+        return "slow_kinetics"
+
+
+def _assess_decay_completeness(decay_percent: float) -> str:
+    """
+    Assess decay completeness based on current reduction percentage.
+    
+    Provides electrochemical interpretation of decay quality.
+    """
+    if decay_percent >= 90:
+        return "excellent"
+    elif decay_percent >= 70:
+        return "good"
+    elif decay_percent >= 50:
+        return "moderate"
+    else:
+        return "poor"

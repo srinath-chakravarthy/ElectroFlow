@@ -8,6 +8,9 @@ Replaces the _run_resistance_analysis() method and ElectrochemicalInsights integ
 from typing import List, Dict, Any
 import json
 import pandas as pd
+import numpy as np
+
+from .json_field_extractor import get_json_field_extractor
 
 
 def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
@@ -41,7 +44,8 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
         # Get time points to analyze
         time_points = settings.get('time_points', ['immediate', '10s'])
         
-        # Extract resistance data from analysis_results JSON
+        # Extract resistance data using JSONFieldExtractor with 'current_pulse' schema
+        extractor = get_json_field_extractor()
         resistance_data = []
         
         for segment in galv_segments:
@@ -49,27 +53,24 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
             if not analysis_results or not isinstance(analysis_results, dict):
                 continue
             
-            # Extract resistance values based on JSON structure
+            # Use JSONFieldExtractor to get all current_pulse fields automatically
+            extracted_fields = extractor.extract_all_fields(analysis_results, 'current_pulse')
+            
+            # Build resistance info with core segment data + extracted fields
             resistance_info = {
                 'segment_id': segment.get('id'),
                 'start_time_s': segment.get('start_time_s'),
                 'duration_s': segment.get('duration_s'),
-                'technique': segment.get('fundamental_technique'),
-                'baseline_voltage_v': analysis_results.get('baseline_voltage_v'),
-                'average_current_a': analysis_results.get('average_current_a')
+                'technique': segment.get('fundamental_technique')
             }
             
-            # Extract resistance at different time points
-            for time_point in time_points:
-                if time_point == 'immediate':
-                    resistance_info['ir_immediate_ohm'] = analysis_results.get('ir_immediate_ohm')
-                elif time_point == '10s':
-                    resistance_info['ir_10s_ohm'] = analysis_results.get('ir_10s_ohm')
-                elif time_point == '30s':
-                    resistance_info['ir_30s_ohm'] = analysis_results.get('ir_30s_ohm')
+            # Add all extracted fields from current_pulse schema
+            resistance_info.update(extracted_fields)
             
-            # Calculate quality metrics
-            resistance_info['calculation_quality'] = 'good' if resistance_info.get('ir_immediate_ohm') else 'invalid'
+            # Calculate quality metrics using expert assessment
+            ir_value = extracted_fields.get('ir_immediate_ohm')
+            current_change = abs(segment.get('end_current_a', 0) - segment.get('start_current_a', 0))
+            resistance_info['calculation_quality'] = _assess_resistance_quality(ir_value, current_change)
             
             resistance_data.append(resistance_info)
         
@@ -160,4 +161,37 @@ def _interpret_resistance_data(resistance_data: List[Dict[str, Any]]) -> Dict[st
     else:
         insights["data_quality"] = f"Poor data quality ({valid_count}/{total_count} valid)"
     
+    # Consistency analysis (from ECI 1.0)
+    if immediate_resistances and len(immediate_resistances) > 1:
+        resistance_std = np.std(immediate_resistances)
+        cv = resistance_std / avg_resistance if avg_resistance > 0 else 0
+        
+        if cv < 0.1:  # CV < 10%
+            insights["consistency"] = "Consistent resistance values across measurements"
+        elif cv < 0.2:  # CV < 20% 
+            insights["consistency"] = "Moderately consistent resistance values"
+        else:
+            insights["consistency"] = "Variable resistance - check measurement conditions"
+            
+        insights["coefficient_of_variation"] = f"CV: {cv:.1%}"
+    
     return insights
+
+
+def _assess_resistance_quality(resistance: float, current_change: float) -> str:
+    """
+    Assess resistance calculation quality using physics-based thresholds.
+    
+    Ported from ElectrochemicalInsights 1.0 _assess_resistance_quality() method.
+    """
+    if resistance is None:
+        return "invalid"
+    
+    if abs(current_change) < 1e-6:  # No current change
+        return "invalid"
+    elif abs(resistance) > 1000:  # > 1kΩ seems unrealistic for battery
+        return "poor"
+    elif abs(resistance) < 0.001:  # < 1mΩ seems too low
+        return "poor"
+    else:
+        return "good"

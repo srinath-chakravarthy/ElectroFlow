@@ -412,6 +412,14 @@ class AnalysisRegistry:
                     "title": "Resistance Distribution",
                     "x_label": "Resistance (Ω)",
                     "y_label": "Count"
+                },
+                "Multi-Series Resistance": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": ["ir_immediate_ohm", "ir_10s_ohm", "ir_30s_ohm"],
+                    "title": "All Resistance Types vs Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Resistance (Ω)"
                 }
             }
         ))
@@ -457,6 +465,15 @@ class AnalysisRegistry:
                     "title": "Kinetics Fit Quality Distribution",
                     "x_label": "R²",
                     "y_label": "Count"
+                },
+                "Fit Quality Groups": {
+                    "plot_type": "scatter",
+                    "x_column": "start_time_s",
+                    "y_column": "r_squared",
+                    "by": "fit_quality",
+                    "title": "R² by Fit Quality Groups",
+                    "x_label": "Time (s)",
+                    "y_label": "R² Value"
                 }
             }
         ))
@@ -538,7 +555,7 @@ class AnalysisRegistry:
                 "Decay Constant vs Time": {
                     "plot_type": "line",
                     "x_column": "start_time_s",
-                    "y_column": "decay_constant_s",
+                    "y_column": "tau_s",
                     "title": "Current Decay Constant Over Time",
                     "x_label": "Time (s)",
                     "y_label": "Decay Constant (s)"

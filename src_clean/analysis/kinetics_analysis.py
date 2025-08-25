@@ -5,10 +5,12 @@ Registry-compatible analysis function for relaxation kinetics analysis.
 Replaces the _run_kinetics_analysis() method and ElectrochemicalInsights integration.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 import pandas as pd
 import numpy as np
+
+from .json_field_extractor import get_json_field_extractor
 
 
 def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
@@ -34,7 +36,7 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         
         # Filter for REST technique segments
         rest_segments = [seg for seg in segments 
-                        if seg.get('fundamental_technique', '').lower() in ['rest', 'ocp']]
+                        if seg.get('fundamental_technique', '').lower() in ['rest', 'ocp', 'ocv']]
         
         if not rest_segments:
             return {"error": "No REST segments found for kinetics analysis"}
@@ -70,9 +72,13 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
                 kinetics_info['voltage_recovery_v'] = (kinetics_info['end_voltage_v'] - 
                                                      kinetics_info['start_voltage_v'])
             
-            # Quality assessment
+            # Quality assessment using expert methods
             r_squared = kinetics_info.get('r_squared', 0)
-            kinetics_info['fit_quality'] = 'good' if r_squared >= min_r_squared else 'poor'
+            kinetics_info['fit_quality'] = _assess_fit_quality(r_squared)
+            
+            # Diffusion regime assessment
+            time_constant = kinetics_info.get('time_constant_s')
+            kinetics_info['diffusion_regime'] = _assess_diffusion_regime(time_constant)
             
             kinetics_data.append(kinetics_info)
         
@@ -135,64 +141,62 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
 
 def _extract_fit_parameters(analysis_results: Dict[str, Any], fit_type: str) -> Dict[str, Any]:
     """
-    Extract fit parameters from JSON analysis_results.
+    Extract fit parameters using JSONFieldExtractor with exponential_fit and sqrt_fit schemas.
     
-    Handles different JSON structures and fit types (exponential, sqrt_t, auto_best).
+    Handles auto-best fit selection between exponential and sqrt(t) models.
     """
     
+    extractor = get_json_field_extractor()
     fit_data = {}
     
-    # Try to extract exponential fit parameters
-    if 'exponential_fit' in analysis_results:
-        exp_fit = analysis_results['exponential_fit']
-        fit_data.update({
-            'v_equilibrium_v': exp_fit.get('V_eq'),
-            'tau_s': exp_fit.get('tau'),
-            'r_squared': exp_fit.get('r_squared'),
-            'fit_type': 'exponential'
-        })
+    # Extract exponential fit fields using analytics_config schema
+    exp_fields = extractor.extract_all_fields(analysis_results, 'exponential_fit')
+    exp_fields_quality, exp_quality = extractor.extract_with_quality(analysis_results, 'exponential_fit')
     
-    # Try to extract sqrt(t) fit parameters  
-    if 'sqrt_t_fit' in analysis_results:
-        sqrt_fit = analysis_results['sqrt_t_fit']
-        fit_data.update({
-            'v_infinity_v': sqrt_fit.get('V_infinity'),
-            'a_coefficient': sqrt_fit.get('A'),
-            'r_squared': sqrt_fit.get('r_squared'),
-            'fit_type': 'sqrt_t'
-        })
+    # Extract sqrt fit fields using analytics_config schema  
+    sqrt_fields = extractor.extract_all_fields(analysis_results, 'sqrt_fit')
+    sqrt_fields_quality, sqrt_quality = extractor.extract_with_quality(analysis_results, 'sqrt_fit')
     
-    # Handle flat JSON structure (direct key access)
-    if not fit_data:
-        # Try direct key extraction
-        possible_keys = {
-            'V_eq': 'v_equilibrium_v',
-            'tau': 'tau_s', 
-            'V_infinity': 'v_infinity_v',
-            'A': 'a_coefficient',
-            'r_squared': 'r_squared'
-        }
+    # Auto-best fit selection based on R² and data quality
+    if fit_type == 'auto_best':
+        exp_r2 = exp_fields.get('r_squared', 0)
+        sqrt_r2 = sqrt_fields.get('r_squared', 0)
         
-        for json_key, internal_key in possible_keys.items():
-            if json_key in analysis_results:
-                fit_data[internal_key] = analysis_results[json_key]
-        
-        # Determine fit type based on available parameters
-        if 'v_equilibrium_v' in fit_data and 'tau_s' in fit_data:
+        # Choose best fit based on R² and quality
+        if exp_r2 > sqrt_r2 and exp_quality > 0.5:
+            fit_data.update(exp_fields)
             fit_data['fit_type'] = 'exponential'
-        elif 'v_infinity_v' in fit_data and 'a_coefficient' in fit_data:
+            fit_data['selection_reason'] = f'Exponential R²={exp_r2:.3f} > Sqrt R²={sqrt_r2:.3f}'
+        elif sqrt_quality > 0.5:
+            fit_data.update(sqrt_fields)  
             fit_data['fit_type'] = 'sqrt_t'
-    
-    # Auto-best fit selection
-    if fit_type == 'auto_best' and 'fit_type' not in fit_data:
-        # If both fits are available, choose the better one based on R²
-        exp_r2 = analysis_results.get('exponential_fit', {}).get('r_squared', 0)
-        sqrt_r2 = analysis_results.get('sqrt_t_fit', {}).get('r_squared', 0)
-        
-        if exp_r2 > sqrt_r2:
+            fit_data['selection_reason'] = f'Sqrt R²={sqrt_r2:.3f} > Exponential R²={exp_r2:.3f}'
+        elif exp_quality > sqrt_quality:
+            fit_data.update(exp_fields)
+            fit_data['fit_type'] = 'exponential'
+            fit_data['selection_reason'] = f'Exponential quality={exp_quality:.2f} better'
+        else:
+            fit_data.update(sqrt_fields)
+            fit_data['fit_type'] = 'sqrt_t'
+            fit_data['selection_reason'] = f'Sqrt quality={sqrt_quality:.2f} better'
+    elif fit_type == 'exponential':
+        fit_data.update(exp_fields)
+        fit_data['fit_type'] = 'exponential'
+    elif fit_type in ['sqrt_t', 'sqrt']:
+        fit_data.update(sqrt_fields)
+        fit_data['fit_type'] = 'sqrt_t'
+    else:
+        # Default to auto_best behavior
+        if exp_fields.get('r_squared', 0) > sqrt_fields.get('r_squared', 0):
+            fit_data.update(exp_fields)
             fit_data['fit_type'] = 'exponential'
         else:
+            fit_data.update(sqrt_fields)
             fit_data['fit_type'] = 'sqrt_t'
+    
+    # Add data quality scores for diagnostics
+    fit_data['extraction_quality_exp'] = exp_quality
+    fit_data['extraction_quality_sqrt'] = sqrt_quality
     
     return fit_data
 
@@ -255,13 +259,35 @@ def _interpret_kinetics_data(kinetics_data: List[Dict[str, Any]], settings: Dict
     insights = {}
     min_r_squared = settings.get('min_r_squared', 0.8)
     
-    # Fit quality assessment
-    high_quality_fits = [k for k in kinetics_data if k.get('r_squared', 0) >= min_r_squared]
+    # Diffusion regime counting (from ECI 1.0)
+    regimes = [k.get('diffusion_regime', 'unknown') for k in kinetics_data]
+    regime_counts = {regime: regimes.count(regime) for regime in set(regimes) if regime != 'unknown'}
+    
+    if regime_counts:
+        total_known = sum(regime_counts.values())
+        if regime_counts.get('diffusion_limited', 0) > total_known * 0.5:
+            insights['dominant_process'] = 'Diffusion-limited relaxation dominates'
+        elif regime_counts.get('fast_kinetics', 0) > total_known * 0.5:
+            insights['dominant_process'] = 'Fast charge transfer kinetics'  
+        else:
+            insights['dominant_process'] = 'Mixed kinetic and diffusion control'
+    
+    # Fit quality assessment with expert categorization
+    high_quality_fits = [k for k in kinetics_data 
+                        if k.get('fit_quality') in ['excellent', 'good']]
     fit_success_rate = len(high_quality_fits) / len(kinetics_data)
     
-    if fit_success_rate > 0.8:
+    # Enhanced quality assessment (from ECI 1.0)
+    if fit_success_rate > 0.7:
+        insights["data_quality"] = "High quality relaxation data suitable for analysis"
+    else:
+        insights["data_quality"] = "Moderate quality data, interpret with caution"
+    
+    # Traditional R² assessment for compatibility  
+    r2_high_quality = [k for k in kinetics_data if k.get('r_squared', 0) >= min_r_squared]
+    if len(r2_high_quality) > len(kinetics_data) * 0.8:
         insights["fit_quality"] = "Excellent fit quality - reliable kinetics analysis"
-    elif fit_success_rate > 0.5:
+    elif len(r2_high_quality) > len(kinetics_data) * 0.5:
         insights["fit_quality"] = "Good fit quality - generally reliable analysis"
     else:
         insights["fit_quality"] = "Poor fit quality - results should be interpreted carefully"
@@ -294,3 +320,36 @@ def _interpret_kinetics_data(kinetics_data: List[Dict[str, Any]], settings: Dict
             insights["voltage_recovery"] = f"Small voltage recovery: {avg_recovery:.3f} V"
     
     return insights
+
+
+def _assess_fit_quality(r_squared: float) -> str:
+    """
+    Assess fit quality based on R² value using expert thresholds.
+    
+    Ported from ElectrochemicalInsights 1.0 _assess_fit_quality() method.
+    """
+    if r_squared >= 0.95:
+        return "excellent"
+    elif r_squared >= 0.90:
+        return "good"
+    elif r_squared >= 0.80:
+        return "fair"
+    else:
+        return "poor"
+
+
+def _assess_diffusion_regime(time_constant: Optional[float]) -> str:
+    """
+    Assess diffusion regime based on time constant using electrochemical knowledge.
+    
+    Ported from ElectrochemicalInsights 1.0 _assess_diffusion_regime() method.
+    """
+    if time_constant is None or time_constant <= 0:
+        return "unknown"
+    
+    if time_constant < 10:
+        return "fast_kinetics"
+    elif time_constant < 100:
+        return "mixed_control"
+    else:
+        return "diffusion_limited"

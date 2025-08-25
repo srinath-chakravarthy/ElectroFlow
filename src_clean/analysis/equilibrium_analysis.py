@@ -5,10 +5,12 @@ Registry-compatible analysis function for equilibrium voltage analysis.
 Replaces the get_electrochemical_equilibrium_analysis() method and ElectrochemicalInsights integration.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 import pandas as pd
 import numpy as np
+
+from .json_field_extractor import get_json_field_extractor
 
 
 def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
@@ -53,18 +55,25 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
                 'end_voltage_v': segment.get('end_potential_v')
             }
             
-            # Extract equilibrium analysis from JSON
-            if 'equilibrium_voltage_v' in analysis_results:
-                equilibrium_info['equilibrium_voltage_v'] = analysis_results['equilibrium_voltage_v']
-            elif 'V_eq' in analysis_results:
-                equilibrium_info['equilibrium_voltage_v'] = analysis_results['V_eq']
+            # Extract equilibrium analysis using JSONFieldExtractor with exponential_fit schema
+            extractor = get_json_field_extractor()
+            extracted_fields = extractor.extract_all_fields(analysis_results, 'exponential_fit')
             
-            # Extract stability metrics
-            if 'is_stable' in analysis_results:
-                equilibrium_info['is_stable'] = analysis_results['is_stable']
+            # Add all extracted fields from exponential_fit schema
+            equilibrium_info.update(extracted_fields)
             
-            if 'drift_rate_mv_min' in analysis_results:
-                equilibrium_info['drift_rate_mv_min'] = analysis_results['drift_rate_mv_min']
+            # Map voltage_infinity to equilibrium_voltage_v for consistency
+            if extracted_fields.get('voltage_infinity') is not None:
+                equilibrium_info['equilibrium_voltage_v'] = extracted_fields['voltage_infinity']
+            
+            # Extract additional stability metrics if available
+            stability_fields = extractor.extract_with_fallbacks(
+                analysis_results, 
+                ['is_stable', 'drift_rate_mv_min', 'stability_achieved']
+            )
+            if stability_fields is not None:
+                equilibrium_info.update({k: v for k, v in analysis_results.items() 
+                                       if k in ['is_stable', 'drift_rate_mv_min', 'stability_achieved']})
             
             # Calculate voltage change if not available
             if equilibrium_info.get('start_voltage_v') and equilibrium_info.get('end_voltage_v'):
@@ -105,7 +114,14 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
         df['analysis_type'] = 'equilibrium_analysis'
         df['quality_score'] = df['equilibrium_quality'].map({'good': 1.0, 'poor': 0.0})
         
-        # Calculate summary statistics
+        # Calculate diffusion coefficients using Cottrell equation (from ECI 1.0)
+        diffusion_coeffs = _calculate_diffusion_coefficients(equilibrium_data)
+        for i, equilibrium_info in enumerate(equilibrium_data):
+            segment_id = equilibrium_info.get('segment_id')
+            if segment_id in diffusion_coeffs:
+                df.loc[df['segment_id'] == segment_id, 'diffusion_coefficient_cm2_s'] = diffusion_coeffs[segment_id]
+
+        # Calculate summary statistics with voltage evolution tracking
         summary = _calculate_equilibrium_summary(equilibrium_data, settings)
         
         # Add summary and insights as columns
@@ -212,7 +228,7 @@ def _interpret_equilibrium_data(equilibrium_data: List[Dict[str, Any]],
     else:
         insights["data_quality"] = "Poor equilibrium data quality - check measurement conditions"
     
-    # Equilibrium voltage analysis
+    # Voltage evolution analysis (from ECI 1.0)
     eq_voltages = [e.get('equilibrium_voltage_v') for e in good_quality 
                   if e.get('equilibrium_voltage_v') is not None]
     
@@ -228,6 +244,14 @@ def _interpret_equilibrium_data(equilibrium_data: List[Dict[str, Any]],
             insights["voltage_stability"] = "Good voltage stability"
         else:
             insights["voltage_stability"] = "Poor voltage stability - investigate system"
+        
+        # Voltage evolution tracking (from ECI 1.0)
+        if len(eq_voltages) > 1:
+            voltage_change = abs(eq_voltages[-1] - eq_voltages[0])
+            if voltage_change > 0.1:  # > 100mV change
+                insights["voltage_evolution"] = "Significant equilibrium voltage changes - indicates state evolution"
+            else:
+                insights["voltage_evolution"] = "Stable equilibrium voltage - consistent electrochemical state"
     
     # Drift rate analysis
     drift_rates = [e.get('drift_rate_mv_min') for e in good_quality 
@@ -260,3 +284,34 @@ def _interpret_equilibrium_data(equilibrium_data: List[Dict[str, Any]],
             insights["duration_assessment"] = f"Short equilibration time ({avg_duration/60:.1f} min) - may be incomplete"
     
     return insights
+
+
+def _calculate_diffusion_coefficients(equilibrium_data: List[Dict[str, Any]]) -> Dict[str, float]:
+    """
+    Calculate diffusion coefficients from time constants using Cottrell equation.
+    
+    Ported from ElectrochemicalInsights 1.0 _calculate_diffusion_coefficients() method.
+    
+    Args:
+        equilibrium_data: List of equilibrium analysis results with time constants
+        
+    Returns:
+        Dictionary mapping segment_id to diffusion coefficient in cm²/s
+    """
+    diffusion_coefficients = {}
+    
+    # Typical electrode dimensions for Li-ion cells
+    # These should ideally be extracted from cell metadata
+    characteristic_length_cm = 0.01  # 100 μm typical electrode thickness
+    
+    for equilibrium in equilibrium_data:
+        time_constant = equilibrium.get('time_constant_s')
+        segment_id = equilibrium.get('segment_id')
+        
+        if time_constant is not None and time_constant > 0 and segment_id is not None:
+            # Cottrell equation: D = L² / (π² * τ)
+            # Where: D = diffusion coefficient, L = characteristic length, τ = time constant
+            diffusion_coeff = (characteristic_length_cm ** 2) / (np.pi ** 2 * time_constant)
+            diffusion_coefficients[segment_id] = diffusion_coeff
+    
+    return diffusion_coefficients
