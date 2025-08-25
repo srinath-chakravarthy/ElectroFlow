@@ -14,6 +14,7 @@ This registry enables:
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Callable, Optional, Union
 from enum import Enum
+from datetime import datetime
 import pandas as pd
 
 from ..core.query_filters import QueryFilters, AggregationType
@@ -79,6 +80,10 @@ class AnalysisConfig:
     # === RESULTS FORMAT ===
     result_template: Optional[str] = None  # HTML template for results display
     export_formats: List[str] = field(default_factory=lambda: ["json"])  # Available export formats
+    
+    # === SCHEMA TRACKING (Auto-populated) ===
+    last_columns: Optional[List[str]] = None  # Last DataFrame columns returned
+    last_schema_update: Optional[datetime] = None  # When schema was last updated
     
     def validate_data(self, segments: List[Dict[str, Any]]) -> tuple[bool, str]:
         """
@@ -208,6 +213,11 @@ class AnalysisRegistry:
                     "segment_count": len(segments),
                     "settings_used": merged_settings
                 })
+                
+                # Auto-update schema tracking
+                config.last_columns = list(result.columns)
+                config.last_schema_update = datetime.now()
+                
                 return result
             else:
                 # Legacy dictionary format - add metadata normally  
@@ -244,6 +254,80 @@ class AnalysisRegistry:
         """Get plot configuration for an analysis."""
         config = self.get_analysis(analysis_id)
         return config.plot_config if config else {}
+    
+    # ===== REGISTRY VALIDATOR HELPER METHODS =====
+    
+    def validate_all_configs(self) -> Dict[str, List[str]]:
+        """
+        Validate all plot configurations against actual DataFrame schemas.
+        
+        Returns:
+            Dict mapping analysis_id to list of validation issues
+        """
+        from .registry_validator import RegistryValidator
+        validator = RegistryValidator()
+        results = validator.validate_all_configs()
+        
+        # Convert to simple format
+        issues = {}
+        for analysis_id, validation_results in results.items():
+            analysis_issues = []
+            for result in validation_results:
+                if not result.is_valid:
+                    analysis_issues.append(f"{result.plot_name}: Missing {result.missing_columns}")
+            issues[analysis_id] = analysis_issues
+        
+        return issues
+    
+    def get_available_columns(self, analysis_id: str) -> List[str]:
+        """
+        Get available DataFrame columns for an analysis by running it.
+        
+        Args:
+            analysis_id: Analysis type to check
+            
+        Returns:
+            List of column names available in the DataFrame  
+        """
+        from .registry_validator import RegistryValidator
+        validator = RegistryValidator()
+        return validator.get_available_columns(analysis_id)
+    
+    def add_plot_config(self, analysis_id: str, plot_name: str, 
+                       plot_type: str, x_column: str, y_column: Optional[str] = None,
+                       title: Optional[str] = None, x_label: Optional[str] = None,
+                       y_label: Optional[str] = None) -> bool:
+        """
+        Add new plot configuration to existing analysis.
+        
+        Args:
+            analysis_id: Analysis to add plot to
+            plot_name: Name for the new plot
+            plot_type: Type of plot ('line', 'scatter', 'histogram')
+            x_column: X-axis column name
+            y_column: Y-axis column name (optional for histograms)
+            title: Plot title (auto-generated if None)
+            x_label: X-axis label (auto-generated if None)  
+            y_label: Y-axis label (auto-generated if None)
+            
+        Returns:
+            True if successfully added, False otherwise
+        """
+        from .registry_validator import RegistryValidator
+        validator = RegistryValidator()
+        return validator.add_plot_config(analysis_id, plot_name, plot_type,
+                                       x_column, y_column, title, x_label, y_label)
+    
+    def generate_config_report(self) -> str:
+        """
+        Generate comprehensive markdown report of all registry configurations.
+        
+        Returns:
+            Markdown-formatted report string
+        """
+        from .registry_validator import RegistryValidator
+        validator = RegistryValidator()
+        return validator.generate_config_report()
     
     def _register_default_analyses(self):
         """Register the default analyses that replace existing specialized methods."""
@@ -362,10 +446,10 @@ class AnalysisRegistry:
                 "Voltage Recovery vs Time": {
                     "plot_type": "line",
                     "x_column": "start_time_s",
-                    "y_column": "voltage_recovery_v",
+                    "y_column": "end_voltage_v",
                     "title": "Voltage Recovery Over Time",
                     "x_label": "Time (s)",
-                    "y_label": "Voltage Recovery (V)"
+                    "y_label": "End Voltage (V)"
                 },
                 "Fit Quality Distribution": {
                     "plot_type": "histogram",

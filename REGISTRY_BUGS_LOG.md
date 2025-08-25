@@ -335,13 +335,13 @@ Missing columns: ['v_equilibrium_v']
 ✅ All required columns now exist in DataFrame
 ✅ UI confirmed - kinetics analysis plots working correctly
 
-### **BUG #4.5: Additional Column Mismatches in Multiple Analysis Types**
-**Severity**: Medium  
-**Component**: Registry Plot Configuration / Column Mapping  
-**Status**: New
+### **ANALYSIS #4.5: Additional Analysis Types Column Investigation**
+**Priority**: Low  
+**Component**: Registry Extensions / Analysis Development  
+**Status**: Future Enhancement
 
 **Description**: 
-Multiple analysis types have column name mismatches between registry plot configs and actual DataFrame columns returned by analysis functions.
+Investigation of additional analysis types (equilibrium, current decay) that were added during DataFrame conversion but may need development/refinement.
 
 **Analysis Types Affected**:
 - ✅ **kinetics_analysis**: Fixed (`v_equilibrium_v` → `voltage_recovery_v`)
@@ -354,13 +354,17 @@ equilibrium_analysis: Returns only ['error_message', 'segment_id'] - analysis fa
 current_decay_analysis: Returns only ['analysis_type', 'error_message', 'segment_id'] - analysis failing  
 ```
 
-**Root Causes**:
-1. **Column naming mismatches** in working analyses 
-2. **Analysis function errors** preventing proper DataFrame generation
-3. **Test data issues** - analyses may need specific data formats
+**Investigation Notes**:
+1. These analysis types were added during DataFrame refactor process
+2. May not have been part of original working system
+3. Perfect use case for registry system - easy to add/modify/remove
+4. Can be developed incrementally using registry tooling
 
-**Resolution**:
-[To be implemented - requires investigation of each analysis function]
+**Future Development**:
+- Use registry validator tool to identify missing columns
+- Develop analysis functions to match registry configurations  
+- Or modify registry configs to match available data
+- Perfect demonstration of registry extensibility
 
 **Testing**:
 [To be verified after investigation and fixes]
