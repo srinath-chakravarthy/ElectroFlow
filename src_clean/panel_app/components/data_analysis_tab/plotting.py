@@ -33,6 +33,7 @@ class PlottingManager:
         self.current_analysis_type = None
         self.current_data = None
         self.current_settings = None
+        self.last_options_analysis_type = None  # Track last analysis type for plot options
 
         # Get analysis registry for dynamic plotting
         self.registry = get_analysis_registry()
@@ -107,8 +108,13 @@ class PlottingManager:
             # Update plot options when analysis type changes
             self.update_plot_options(analysis_type)
 
-            # Handle errors
-            if data.get("error"):
+            # Handle errors (DataFrame-first architecture compatible)
+            if isinstance(data, pd.DataFrame):
+                # Check for error in DataFrame format
+                if 'error_message' in data.columns and not data['error_message'].isna().all():
+                    error_msg = data['error_message'].iloc[0]
+                    return pn.pane.Markdown(f"**Error:** {error_msg}")
+            elif isinstance(data, dict) and data.get("error"):
                 return pn.pane.Markdown(f"**Error:** {data['error']}")
 
             # Get current plot type from selector  
@@ -243,23 +249,37 @@ class PlottingManager:
         """Update plot type selector options from registry."""
         
         try:
+            # Check if analysis type has actually changed
+            analysis_type_changed = (self.last_options_analysis_type != analysis_type)
+            
             analysis_config = self.registry.get_analysis(analysis_type)
             if not analysis_config or not analysis_config.plot_config:
                 self.plot_type_select.options = ["Default"]
+                self.last_options_analysis_type = analysis_type
                 return
             
             # Get plot names from registry plot_config
             plot_options = list(analysis_config.plot_config.keys())
             if plot_options:
+                # Always update options
                 self.plot_type_select.options = plot_options
-                self.plot_type_select.value = plot_options[0]  # Select first option
-                print(f"✅ Updated plot options for {analysis_type}: {plot_options}")
+                
+                # Only reset value if analysis type changed or current value is invalid
+                if analysis_type_changed or self.plot_type_select.value not in plot_options:
+                    self.plot_type_select.value = plot_options[0]  # Select first option
+                    print(f"✅ Updated plot options for {analysis_type}: {plot_options} (reset to first)")
+                else:
+                    print(f"✅ Updated plot options for {analysis_type}: {plot_options} (kept current selection: {self.plot_type_select.value})")
             else:
                 self.plot_type_select.options = ["Default"]
+            
+            # Update tracking variable
+            self.last_options_analysis_type = analysis_type
                 
         except Exception as e:
             print(f"❌ Error updating plot options: {e}")
             self.plot_type_select.options = ["Default"]
+            self.last_options_analysis_type = analysis_type
     # ========================================
     # HARDCODED ANALYSIS LOGIC REMOVED 
     # ========================================
@@ -1411,9 +1431,14 @@ class PlottingManager:
         print(f"DEBUG: Plot type changed to: {event.new}")
         print(f"DEBUG: Current analysis type: {self.current_analysis_type}")
         print(f"DEBUG: Has current data: {self.current_data is not None}")
+        print(f"DEBUG: Current data type: {type(self.current_data)}")
+        print(f"DEBUG: Current settings: {self.current_settings is not None}")
         
-        # Regenerate plot with current data if available
-        if (self.current_analysis_type and self.current_data and self.current_settings):
+        # Regenerate plot with current data if available (DataFrame-first compatible)
+        has_data = (isinstance(self.current_data, pd.DataFrame) and not self.current_data.empty) or \
+                   (isinstance(self.current_data, dict) and bool(self.current_data))
+        
+        if (self.current_analysis_type and has_data and self.current_settings):
             try:
                 # Regenerate plot with new plot type
                 new_plot = self.create_plot(

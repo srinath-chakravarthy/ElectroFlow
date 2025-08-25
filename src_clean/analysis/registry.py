@@ -362,10 +362,10 @@ class AnalysisRegistry:
                 "Voltage Recovery vs Time": {
                     "plot_type": "line",
                     "x_column": "start_time_s",
-                    "y_column": "v_equilibrium_v",
+                    "y_column": "voltage_recovery_v",
                     "title": "Voltage Recovery Over Time",
                     "x_label": "Time (s)",
-                    "y_label": "Equilibrium Voltage (V)"
+                    "y_label": "Voltage Recovery (V)"
                 },
                 "Fit Quality Distribution": {
                     "plot_type": "histogram",

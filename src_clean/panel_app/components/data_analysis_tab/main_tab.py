@@ -28,7 +28,7 @@ class DataAnalysisTab(param.Parameterized):
     current_cell = param.String(default="", doc="Currently selected cell")
     selected_groups = param.List(default=[], doc="Selected groups for analysis")
     current_analysis = param.String(default="basic_statistics", doc="Current analysis type")
-    analysis_results = param.Dict(default={}, doc="Current analysis results")
+    analysis_results = param.Parameter(default=None, doc="Current analysis results (DataFrame or dict)")
 
     def __init__(self, api, **params):
         super().__init__(**params)
