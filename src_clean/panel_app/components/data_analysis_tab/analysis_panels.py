@@ -233,12 +233,12 @@ class AnalysisPanels:
             settings_widgets.append(quality_widget)
             widget_refs['quality_threshold'] = quality_widget
             
-        elif analysis_id in ["resistance_analysis", "equilibrium_analysis", "current_decay_analysis"]:
-            # Simple analyses with minimal settings
-            info_widget = pn.pane.HTML(
-                f"<em>Analysis '{analysis_name}' uses default settings.</em>"
-            )
-            settings_widgets.append(info_widget)
+        # Registry-driven settings for all analyses with schemas
+        elif analysis_config.settings_schema:
+            # Use registry schema to create widgets automatically
+            schema_widgets = self._create_widgets_from_schema(analysis_config.settings_schema, analysis_config.default_settings)
+            settings_widgets.extend(schema_widgets['widgets'])
+            widget_refs.update(schema_widgets['refs'])
         
         else:
             # Generic fallback for unknown analysis types
@@ -534,6 +534,79 @@ class AnalysisPanels:
                 selected_ids.append(str(group_id))
 
         return selected_ids
+
+    def _create_widgets_from_schema(self, settings_schema: Dict[str, Any], default_settings: Dict[str, Any]):
+        """Create Panel widgets from registry settings schema.
+        
+        This is the magic method that converts registry schema definitions
+        into actual UI widgets automatically.
+        """
+        widgets = []
+        widget_refs = {}
+        
+        for field_name, field_config in settings_schema.items():
+            field_type = field_config.get('type', 'string')
+            default_value = default_settings.get(field_name, field_config.get('default'))
+            
+            # Create widget based on schema type
+            if field_type == 'float':
+                widget = pn.widgets.FloatSlider(
+                    name=field_name.replace('_', ' ').title(),
+                    start=field_config.get('min', 0.0),
+                    end=field_config.get('max', 100.0), 
+                    value=float(default_value) if default_value is not None else field_config.get('min', 0.0),
+                    step=field_config.get('step', 0.1),
+                    width=300
+                )
+                
+            elif field_type == 'select':
+                options = field_config.get('options', [])
+                widget = pn.widgets.Select(
+                    name=field_name.replace('_', ' ').title(),
+                    options=options,
+                    value=default_value if default_value in options else (options[0] if options else None),
+                    width=300
+                )
+                
+            elif field_type == 'multiselect':
+                options = field_config.get('options', [])
+                default_list = default_value if isinstance(default_value, list) else [default_value] if default_value else []
+                widget = pn.widgets.CheckBoxGroup(
+                    name=field_name.replace('_', ' ').title(),
+                    options=options,
+                    value=default_list,
+                    width=300
+                )
+                
+            elif field_type == 'bool':
+                widget = pn.widgets.Checkbox(
+                    name=field_name.replace('_', ' ').title(),
+                    value=bool(default_value) if default_value is not None else False,
+                    width=300
+                )
+                
+            else:
+                # Default to text input for unknown types
+                widget = pn.widgets.TextInput(
+                    name=field_name.replace('_', ' ').title(),
+                    value=str(default_value) if default_value is not None else '',
+                    width=300
+                )
+            
+            # Add description if available
+            description = field_config.get('description', '')
+            if description:
+                desc_widget = pn.pane.HTML(
+                    f"<small style='color: #666; margin-left: 5px;'>{description}</small>",
+                    width=300
+                )
+                widgets.extend([widget, desc_widget])
+            else:
+                widgets.append(widget)
+            
+            widget_refs[field_name] = widget
+        
+        return {'widgets': widgets, 'refs': widget_refs}
 
     def get_filter_settings(self) -> Dict[str, Any]:
         """Get current filter settings."""

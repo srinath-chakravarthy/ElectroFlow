@@ -33,6 +33,11 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
         if not segments:
             return {"error": "No segments provided for equilibrium analysis"}
         
+        # Apply pre-analysis filters from settings
+        filtered_segments = _apply_pre_analysis_filters(segments, settings)
+        if not filtered_segments:
+            return pd.DataFrame(columns=['segment_id', 'error_message'])
+        
         # Get analysis settings
         min_duration = settings.get('min_duration_s', 60)  # Minimum duration for equilibrium
         max_drift_rate = settings.get('max_drift_rate_mv_per_min', 1.0)  # Maximum drift rate
@@ -40,7 +45,7 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
         # Extract equilibrium data from segments
         equilibrium_data = []
         
-        for segment in segments:
+        for segment in filtered_segments:
             analysis_results = segment.get('analysis_results', {})
             if not analysis_results or not isinstance(analysis_results, dict):
                 continue
@@ -100,8 +105,8 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
         if not equilibrium_data:
             return pd.DataFrame(columns=['segment_id', 'error_message'])
         
-        # Create core DataFrame from segments
-        core_df = pd.DataFrame(segments)
+        # Create core DataFrame from filtered segments
+        core_df = pd.DataFrame(filtered_segments)
         
         # Create analysis DataFrame
         analysis_df = pd.DataFrame(equilibrium_data)
@@ -315,3 +320,36 @@ def _calculate_diffusion_coefficients(equilibrium_data: List[Dict[str, Any]]) ->
             diffusion_coefficients[segment_id] = diffusion_coeff
     
     return diffusion_coefficients
+
+
+def _apply_pre_analysis_filters(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Apply pre-analysis filters to segments based on settings.
+    
+    Args:
+        segments: List of segment dictionaries
+        settings: Analysis settings including filters
+        
+    Returns:
+        Filtered list of segments
+    """
+    filtered_segments = segments.copy()
+    
+    # Filter by analysis_status
+    analysis_status_filter = settings.get('analysis_status_filter', ['completed', 'partial'])
+    if analysis_status_filter:
+        filtered_segments = [seg for seg in filtered_segments 
+                           if seg.get('analysis_status') in analysis_status_filter]
+    
+    # Filter by duration range
+    min_duration = settings.get('min_duration_filter_s', 0)
+    max_duration = settings.get('max_duration_filter_s', float('inf'))
+    
+    filtered_segments = [seg for seg in filtered_segments 
+                        if min_duration <= seg.get('duration_s', 0) <= max_duration]
+    
+    print(f"✅ Pre-analysis filtering: {len(segments)} → {len(filtered_segments)} segments")
+    if len(filtered_segments) < len(segments):
+        print(f"   Filtered out: {len(segments) - len(filtered_segments)} segments")
+        
+    return filtered_segments

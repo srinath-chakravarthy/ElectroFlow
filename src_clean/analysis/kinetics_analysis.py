@@ -41,6 +41,11 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         if not rest_segments:
             return {"error": "No REST segments found for kinetics analysis"}
         
+        # Apply pre-analysis filters from settings
+        filtered_segments = _apply_pre_analysis_filters(rest_segments, settings)
+        if not filtered_segments:
+            return pd.DataFrame(columns=['segment_id', 'error_message'])
+        
         # Get analysis settings
         fit_type = settings.get('fit_type', 'auto_best')
         min_r_squared = settings.get('min_r_squared', 0.8)
@@ -48,7 +53,7 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         # Extract kinetics data from analysis_results JSON
         kinetics_data = []
         
-        for segment in rest_segments:
+        for segment in filtered_segments:
             analysis_results = segment.get('analysis_results', {})
             if not analysis_results or not isinstance(analysis_results, dict):
                 continue
@@ -92,8 +97,8 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         else:
             high_quality_data = kinetics_data
         
-        # Create core DataFrame from segments
-        core_df = pd.DataFrame(rest_segments)
+        # Create core DataFrame from filtered segments
+        core_df = pd.DataFrame(filtered_segments)
         
         # Create analysis DataFrame from kinetics data
         analysis_df = pd.DataFrame(kinetics_data)
@@ -353,3 +358,36 @@ def _assess_diffusion_regime(time_constant: Optional[float]) -> str:
         return "mixed_control"
     else:
         return "diffusion_limited"
+
+
+def _apply_pre_analysis_filters(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Apply pre-analysis filters to segments based on settings.
+    
+    Args:
+        segments: List of segment dictionaries
+        settings: Analysis settings including filters
+        
+    Returns:
+        Filtered list of segments
+    """
+    filtered_segments = segments.copy()
+    
+    # Filter by analysis_status
+    analysis_status_filter = settings.get('analysis_status_filter', ['completed', 'partial'])
+    if analysis_status_filter:
+        filtered_segments = [seg for seg in filtered_segments 
+                           if seg.get('analysis_status') in analysis_status_filter]
+    
+    # Filter by duration range
+    min_duration = settings.get('min_duration_filter_s', 0)
+    max_duration = settings.get('max_duration_filter_s', float('inf'))
+    
+    filtered_segments = [seg for seg in filtered_segments 
+                        if min_duration <= seg.get('duration_s', 0) <= max_duration]
+    
+    print(f"✅ Pre-analysis filtering: {len(segments)} → {len(filtered_segments)} segments")
+    if len(filtered_segments) < len(segments):
+        print(f"   Filtered out: {len(segments) - len(filtered_segments)} segments")
+        
+    return filtered_segments

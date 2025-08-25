@@ -89,16 +89,12 @@ class DataAnalysisTab(param.Parameterized):
             width=200
         )
 
-        # Analysis type selector
+        # Analysis type selector (registry-driven)
+        analysis_options = self._get_registry_analysis_options()
         self.analysis_type_selector = pn.widgets.Select(
             name="Analysis Type",
-            options=[
-                ("Basic Statistics", "basic_statistics"),
-                ("Resistance Analysis", "resistance_analysis"),
-                ("Kinetics Analysis", "kinetics_analysis"),
-                ("dQ/dV Analysis", "dqdv_analysis")
-            ],
-            value="basic_statistics",
+            options=analysis_options,
+            value=analysis_options[0][1] if analysis_options else "basic_statistics",
             width=200
         )
 
@@ -339,7 +335,7 @@ class DataAnalysisTab(param.Parameterized):
         self.analysis_panels.show_settings_for_analysis(new_analysis)
 
         # Update available plot types
-        self.plotting_manager.update_available_plots(new_analysis)
+        self.plotting_manager.update_plot_options(new_analysis)
 
         # Update status
         self._update_status(f"Analysis type: {new_analysis}", "info")
@@ -545,6 +541,34 @@ class DataAnalysisTab(param.Parameterized):
            {icon} {message}
         </div>
         """
+
+    def _get_registry_analysis_options(self):
+        """Get analysis type options from registry."""
+        try:
+            from src_clean.analysis.registry import get_analysis_registry
+            registry = get_analysis_registry()
+            
+            # Get all registered analyses
+            options = []
+            for analysis_id, config in registry._analyses.items():
+                display_name = config.name
+                options.append((display_name, analysis_id))
+            
+            # Sort by display name for better UX
+            options.sort(key=lambda x: x[0])
+            
+            print(f"✅ Registry analysis options: {[opt[0] for opt in options]}")
+            return options
+            
+        except Exception as e:
+            print(f"⚠️ Failed to get registry analysis options: {e}")
+            # Fallback to hardcoded options
+            return [
+                ("Basic Statistics", "basic_statistics"),
+                ("Resistance Analysis", "resistance_analysis"),
+                ("Kinetics Analysis", "kinetics_analysis"),
+                ("dQ/dV Analysis", "dqdv_analysis")
+            ]
 
     # ===== PUBLIC INTERFACE =====
 

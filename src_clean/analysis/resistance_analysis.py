@@ -103,6 +103,13 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
                     df[f'{col_name}_mean'] = float(values.mean())
                     df[f'{col_name}_std'] = float(values.std())
         
+        # Add computed ratio columns for advanced plotting
+        if 'ir_immediate_ohm' in df.columns and 'ir_30s_ohm' in df.columns:
+            # Calculate instantaneous/30s resistance ratio 
+            df['resistance_ratio_immediate_30s'] = df['ir_immediate_ohm'] / df['ir_30s_ohm']
+            # Handle division by zero or invalid values
+            df['resistance_ratio_immediate_30s'] = df['resistance_ratio_immediate_30s'].replace([float('inf'), -float('inf')], None)
+        
         # Add electrochemical insights as columns
         insights = _interpret_resistance_data(resistance_data)
         for key, value in insights.items():

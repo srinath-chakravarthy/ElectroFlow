@@ -236,9 +236,26 @@ class PlottingManager:
             if x_column:
                 plot_params['x'] = x_column
                 
-            # Add y column(s)
+            # Add y column(s) and filter out null values
             if y_column:
                 plot_params['y'] = y_column  # Works for both string and list
+                
+                # Filter DataFrame to remove null values in y_column(s)
+                if isinstance(y_column, list):
+                    # Multiple y columns - keep rows where at least one y column has data
+                    mask = df[y_column].notna().any(axis=1)
+                else:
+                    # Single y column - keep rows where y column has data
+                    mask = df[y_column].notna()
+                
+                # Apply filter if there are null values
+                if not mask.all():
+                    df = df[mask].copy()
+                    print(f"✅ Filtered DataFrame: {mask.sum()} rows with non-null {y_column} data out of {len(mask)} total")
+                    
+                # Check if we have any data left after filtering
+                if df.empty:
+                    return pn.pane.Markdown(f"**No non-null data available for {y_column}**")
                 
             # Add grouping column
             if by_column:
@@ -267,7 +284,7 @@ class PlottingManager:
             else:
                 return pn.pane.Markdown(f"**Unsupported plot type:** {plot_type}")
             
-            print(f"✅ Created multi-series plot: {plot_type}, y_columns: {y_column}, by: {by_column}")
+            print(f"✅ Created plot: {plot_type}, y_columns: {y_column}, grouping: {by_column or 'None'}")
             return pn.pane.HoloViews(plot, sizing_mode='stretch_width')
             
         except Exception as e:
@@ -405,82 +422,7 @@ class PlottingManager:
             error_msg = pn.pane.Markdown(f"**Plot Update Error:** {str(e)}")
             self.plot_container.objects = [error_msg]
 
-    def _get_plot_display_name(self, analysis_type: str, plot_type: str) -> str:
-        """Get analysis-specific display name for plot types."""
-        
-        # Custom display names for each analysis type
-        display_names = {
-            "basic_statistics": {
-                "time_series": "Duration Timeline",
-                "xy_plot": "Technique Comparison", 
-                "histogram": "Distribution Analysis",
-                "bar_chart": "Technique Count"
-            },
-            "resistance_analysis": {
-                "time_series": "Temporal Resistance Evolution",
-                "xy_plot": "Resistance vs Voltage",
-                "histogram": "Resistance Distribution",
-                "bar_chart": "Resistance Summary"
-            },
-            "kinetics_analysis": {
-                "time_series": "Voltage Relaxation Over Time", 
-                "xy_plot": "Kinetics vs Voltage",
-                "histogram": "Kinetics Distribution",
-                "box_plot": "Kinetics Quality Analysis"
-            },
-            "equilibrium_analysis": {
-                "time_series": "Equilibrium Evolution",
-                "xy_plot": "Equilibrium vs Conditions",
-                "histogram": "Stability Distribution",
-                "box_plot": "Equilibrium Quality"
-            },
-            "current_decay_analysis": {
-                "time_series": "Current Decay Over Time",
-                "xy_plot": "Decay Rate vs Conditions"
-            },
-            "dqdv_analysis": {
-                "time_series": "dQ/dV Evolution",
-                "xy_plot": "dQ/dV vs Voltage",
-                "histogram": "Peak Distribution"
-            }
-        }
-        
-        # Get analysis-specific name or fallback to generic
-        analysis_names = display_names.get(analysis_type, {})
-        return analysis_names.get(plot_type, plot_type.replace('_', ' ').title())
     
-    def update_available_plots(self, analysis_type: str):
-        """Update available plot types based on analysis type using registry exclusively."""
-        
-        try:
-            # Get analysis configuration from registry
-            analysis_config = self.registry.get_analysis(analysis_type)
-            
-            if analysis_config and hasattr(analysis_config, 'available_plots'):
-                # Use registry-defined plot types
-                registry_plots = analysis_config.available_plots
-                options = [(self._get_plot_display_name(analysis_type, plot.value), plot.value) for plot in registry_plots]
-                
-                if not options:
-                    # Fallback to generic options
-                    options = [("Default View", "default")]
-                    
-                print(f"✅ Using registry plot options for {analysis_type}: {[opt[1] for opt in options]}")
-                
-            else:
-                # Registry-only system: No plot options available
-                options = [("No plots configured", "default")]
-                print(f"⚠️ No registry plot configuration found for {analysis_type}")
-            
-            self.plot_type_select.options = options
-            if options:
-                self.plot_type_select.value = options[0][1]
-                
-        except Exception as e:
-            print(f"❌ Error updating plot options for {analysis_type}: {e}")
-            # Ultimate fallback
-            self.plot_type_select.options = [("Default", "default")]
-            self.plot_type_select.value = "default"
 
     def _on_plot_type_changed(self, event):
         """Handle plot type selector changes - regenerate plot with new type."""

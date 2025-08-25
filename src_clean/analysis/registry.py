@@ -420,6 +420,38 @@ class AnalysisRegistry:
                     "title": "All Resistance Types vs Time",
                     "x_label": "Time (s)",
                     "y_label": "Resistance (Ω)"
+                },
+                "Resistance vs Voltage": {
+                    "plot_type": "scatter",
+                    "x_column": "start_potential_v",
+                    "y_column": ["ir_immediate_ohm", "ir_10s_ohm", "ir_30s_ohm"],
+                    "title": "All Resistance Types vs Starting Potential",
+                    "x_label": "Starting Potential (V)",
+                    "y_label": "Resistance (Ω)"
+                },
+                "Resistance vs Voltage (Instantaneous)": {
+                    "plot_type": "scatter",
+                    "x_column": "start_potential_v",
+                    "y_column": "ir_immediate_ohm",
+                    "title": "Instantaneous Resistance vs Starting Potential",
+                    "x_label": "Starting Potential (V)",
+                    "y_label": "Instantaneous Resistance (Ω)"
+                },
+                "Resistance Ratio vs Time": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": "resistance_ratio_immediate_30s",
+                    "title": "Resistance Ratio (Instantaneous/30s) vs Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Resistance Ratio (Instantaneous/30s)"
+                },
+                "Resistance Ratio vs Voltage": {
+                    "plot_type": "scatter",
+                    "x_column": "start_potential_v",
+                    "y_column": "resistance_ratio_immediate_30s",
+                    "title": "Resistance Ratio (Instantaneous/30s) vs Starting Potential",
+                    "x_label": "Starting Potential (V)",
+                    "y_label": "Resistance Ratio (Instantaneous/30s)"
                 }
             }
         ))
@@ -435,6 +467,26 @@ class AnalysisRegistry:
             requires_analysis_results=True,
             analysis_function=kinetics_analysis_function,
             settings_schema={
+                "analysis_status_filter": {
+                    "type": "multiselect",
+                    "options": ["completed", "partial", "failed"],
+                    "default": ["completed", "partial"],
+                    "description": "Filter segments by analysis status"
+                },
+                "min_duration_filter_s": {
+                    "type": "float",
+                    "min": 0,
+                    "max": 3600,
+                    "default": 1,
+                    "description": "Minimum segment duration (seconds)"
+                },
+                "max_duration_filter_s": {
+                    "type": "float",
+                    "min": 1,
+                    "max": 36000,
+                    "default": 3600,
+                    "description": "Maximum segment duration (seconds)"
+                },
                 "fit_type": {
                     "type": "select",
                     "options": ["exponential", "sqrt_t", "auto_best"],
@@ -447,7 +499,13 @@ class AnalysisRegistry:
                     "default": 0.8
                 }
             },
-            default_settings={"fit_type": "auto_best", "min_r_squared": 0.8},
+            default_settings={
+                "analysis_status_filter": ["completed", "partial"],
+                "min_duration_filter_s": 1,
+                "max_duration_filter_s": 3600,
+                "fit_type": "auto_best", 
+                "min_r_squared": 0.8
+            },
             available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT],
             default_plot=PlotType.TIME_SERIES,
             plot_config={
@@ -482,11 +540,33 @@ class AnalysisRegistry:
         self.register_analysis(AnalysisConfig(
             analysis_id="equilibrium_analysis",
             name="Equilibrium Analysis",
-            description="Equilibrium voltage analysis and stability assessment",
+            description="Time constants, diffusion coefficients, and equilibrium voltage analysis from REST segments",
             category=AnalysisCategory.THERMODYNAMICS,
+            required_techniques=["Rest"],
             min_segments=1,
+            requires_analysis_results=True,
             analysis_function=equilibrium_analysis_function,
             settings_schema={
+                "analysis_status_filter": {
+                    "type": "multiselect",
+                    "options": ["completed", "partial", "failed"],
+                    "default": ["completed", "partial"],
+                    "description": "Filter segments by analysis status"
+                },
+                "min_duration_filter_s": {
+                    "type": "float",
+                    "min": 0,
+                    "max": 3600,
+                    "default": 1,
+                    "description": "Minimum segment duration (seconds)"
+                },
+                "max_duration_filter_s": {
+                    "type": "float",
+                    "min": 1,
+                    "max": 36000,
+                    "default": 3600,
+                    "description": "Maximum segment duration (seconds)"
+                },
                 "min_duration_s": {
                     "type": "float",
                     "min": 1,
@@ -501,7 +581,13 @@ class AnalysisRegistry:
                     "description": "Maximum drift rate (mV/min)"
                 }
             },
-            default_settings={"min_duration_s": 60, "max_drift_rate_mv_per_min": 1.0},
+            default_settings={
+                "analysis_status_filter": ["completed", "partial"],
+                "min_duration_filter_s": 1,
+                "max_duration_filter_s": 3600,
+                "min_duration_s": 60, 
+                "max_drift_rate_mv_per_min": 1.0
+            },
             available_plots=[PlotType.TIME_SERIES, PlotType.XY_PLOT, PlotType.BOX_PLOT],
             default_plot=PlotType.TIME_SERIES,
             plot_config={
@@ -519,6 +605,38 @@ class AnalysisRegistry:
                     "title": "Voltage Drift Rate Distribution",
                     "x_label": "Drift Rate (mV/min)",
                     "y_label": "Count"
+                },
+                "Time Constants vs Time": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": "time_constant_s",
+                    "title": "Exponential Time Constants vs Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Time Constant (s)"
+                },
+                "Time Constants vs Voltage": {
+                    "plot_type": "scatter",
+                    "x_column": "start_potential_v",
+                    "y_column": "time_constant_s",
+                    "title": "Exponential Time Constants vs Starting Potential",
+                    "x_label": "Starting Potential (V)",
+                    "y_label": "Time Constant (s)"
+                },
+                "Diffusion Coefficients vs Time": {
+                    "plot_type": "line",
+                    "x_column": "start_time_s",
+                    "y_column": "diffusion_coefficient_cm2_s",
+                    "title": "Diffusion Coefficients vs Time",
+                    "x_label": "Time (s)",
+                    "y_label": "Diffusion Coefficient (cm²/s)"
+                },
+                "Diffusion Coefficients vs Voltage": {
+                    "plot_type": "scatter",
+                    "x_column": "start_potential_v",
+                    "y_column": "diffusion_coefficient_cm2_s",
+                    "title": "Diffusion Coefficients vs Starting Potential",
+                    "x_label": "Starting Potential (V)",
+                    "y_label": "Diffusion Coefficient (cm²/s)"
                 }
             }
         ))
