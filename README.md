@@ -1,11 +1,12 @@
 # Electrochemical Analysis Suite
 
-A comprehensive web-based application for electrochemical battery data analysis and management with a revolutionary **registry-driven analysis system**. Designed for small-scale battery research (30-60 cells) with world-class developer experience, rapid analysis development, and universal instrument support.
+A comprehensive web-based application for electrochemical battery data analysis and management with **ElectrochemicalInsights 2.0** - featuring auto-discovery field extraction, expert algorithmic intelligence, and revolutionary registry-driven development. Designed for small-scale battery research (30-60 cells) with world-class developer experience, rapid analysis development, and universal instrument support.
 
 ## 🚀 Features
 
-- **🎯 Registry-Driven Analysis System**: Revolutionary development platform - 30 minutes per new analysis (was 2+ days)
-- **🛠️ Comprehensive Developer Tooling**: Automatic schema validation, column discovery, plot configuration management
+- **🎯 ElectrochemicalInsights 2.0**: Auto-discovery + expert algorithms + multi-series plotting - 30 minutes per new analysis
+- **🛠️ JSONFieldExtractor**: Auto-discovery field extraction using analytics_config schemas - zero hard-coded field names
+- **🧠 Expert Intelligence**: Physics-based assessment with Cottrell equation calculations and quality metrics
 - **🌐 Modern Web Interface**: Professional Panel web application with responsive design
 - **🔋 Complete Cell Management**: Rich metadata tracking with automatic directory creation
 - **📊 Interactive Visualization**: HoloViews plots with dynamic decimation and technique-specific coloring
@@ -17,7 +18,7 @@ A comprehensive web-based application for electrochemical battery data analysis 
 - **🔧 CASCADE Operations**: Complete file system and database cleanup with atomic transactions
 - **🖥️ Multi-Interface Support**: Web UI, CLI, Python API, and Jupyter integration
 
-## ✅ Current Implementation Status (v5.0.0)
+## ✅ Current Implementation Status (v6.0.0 - ECI 2.0)
 
 ### 🎉 Registry-Driven Analysis System (PRODUCTION COMPLETE ✅)
 - **RegistryValidator**: Complete validation framework with column discovery and plot addition capabilities
