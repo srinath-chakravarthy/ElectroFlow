@@ -27,7 +27,7 @@ from src_clean.core.exceptions import (
 from src_clean.parsers import get_parser_factory, auto_parse_dual_files
 from src_clean.analysis import FundamentalAnalytics
 from src_clean.backend.lazy_data_service import get_lazy_data_service
-from src_clean.analysis.electrochemical_insights import get_electrochemical_insights
+from src_clean.analysis.registry import get_analysis_registry
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class BackendAPI:
         self.migration_manager = DataMigrationManager()
         self.analytics_engine = FundamentalAnalytics()
         self.lazy_data_service = get_lazy_data_service()
-        self.electrochemical_insights = get_electrochemical_insights()
+        self.analysis_registry = get_analysis_registry()
         
         logger.info(f"Backend API initialized - Data: {self.data_dir}, DB: {self.db_path}")
         if logger.isEnabledFor(logging.DEBUG):
@@ -2128,8 +2128,10 @@ class BackendAPI:
             if not all_segments:
                 return {'error': 'No segments found for specified groups'}
             
-            # Extract relaxation kinetics using electrochemical insights
-            analysis_result = self.electrochemical_insights.get_rest_relaxation_kinetics(all_segments)
+            # Extract relaxation kinetics using registry analysis
+            kinetics_function = self.analysis_registry.get_analysis_function('kinetics_analysis')
+            df_result = kinetics_function(all_segments, {})
+            analysis_result = {'kinetics_data': df_result}
             
             # Add group context
             analysis_result['group_ids'] = group_ids
@@ -2161,8 +2163,10 @@ class BackendAPI:
             if not all_segments:
                 return {'error': 'No segments found for specified groups'}
             
-            # Calculate resistance using electrochemical insights
-            analysis_result = self.electrochemical_insights.get_instantaneous_resistance_analysis(all_segments)
+            # Calculate resistance using registry analysis
+            resistance_function = self.analysis_registry.get_analysis_function('resistance_analysis')
+            df_result = resistance_function(all_segments, {})
+            analysis_result = {'resistance_data': df_result}
             
             # Add group context
             analysis_result['group_ids'] = group_ids
@@ -2194,8 +2198,10 @@ class BackendAPI:
             if not all_segments:
                 return {'error': 'No segments found for specified groups'}
             
-            # Analyze equilibrium voltage using electrochemical insights
-            analysis_result = self.electrochemical_insights.get_equilibrium_voltage_analysis(all_segments)
+            # Analyze equilibrium voltage using registry analysis
+            equilibrium_function = self.analysis_registry.get_analysis_function('equilibrium_analysis')
+            df_result = equilibrium_function(all_segments, {})
+            analysis_result = {'equilibrium_data': df_result}
             
             # Add group context
             analysis_result['group_ids'] = group_ids
@@ -2227,8 +2233,10 @@ class BackendAPI:
             if not all_segments:
                 return {'error': 'No segments found for specified groups'}
             
-            # Analyze current decay using electrochemical insights
-            analysis_result = self.electrochemical_insights.get_current_decay_kinetics(all_segments)
+            # Analyze current decay using registry analysis
+            decay_function = self.analysis_registry.get_analysis_function('current_decay_analysis')
+            df_result = decay_function(all_segments, {})
+            analysis_result = {'current_decay_data': df_result}
             
             # Add group context
             analysis_result['group_ids'] = group_ids
