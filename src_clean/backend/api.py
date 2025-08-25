@@ -349,6 +349,9 @@ class BackendAPI:
                 # Add segments
                 self.db.add_segments(file_id, segments)
                 
+                # NEW: Update experiment accumulation for entire cell
+                self._update_cell_experiment_accumulation(cell['id'])
+                
                 # Write parquet file
                 data_file.universal_data.write_parquet(parquet_path)
                 
@@ -467,6 +470,89 @@ class BackendAPI:
         except Exception:
             return "unknown"
     
+    def _update_cell_experiment_accumulation(self, cell_id: int):
+        """
+        Update experiment accumulation for all segments in cell.
+        This is the core method that maintains cross-file accumulation.
+        """
+        try:
+            # Get files ordered chronologically by acquisition timestamp
+            files = self.db.get_cell_files_ordered_by_timestamp(cell_id)
+            
+            if not files:
+                logger.debug(f"No files found for cell {cell_id}")
+                return
+            
+            # Running offsets for experiment accumulation
+            charge_offset = 0.0
+            discharge_offset = 0.0
+            energy_charge_offset = 0.0
+            energy_discharge_offset = 0.0
+            time_offset = 0.0
+            
+            logger.debug(f"Updating experiment accumulation for cell {cell_id} with {len(files)} files")
+            
+            for file_info in files:
+                file_id = file_info['file_id']
+                
+                # Get final cumulative values from this file's last segment
+                final_values = self.db.get_file_final_cumulative_values(file_id)
+                
+                # Update ALL segments in this file with current experiment offsets
+                updated_count = self.db.update_segments_experiment_accumulation(
+                    file_id,
+                    charge_offset,
+                    discharge_offset,
+                    energy_charge_offset,
+                    energy_discharge_offset,
+                    time_offset
+                )
+                
+                logger.debug(f"Updated {updated_count} segments in file {file_id} with offsets: "
+                           f"charge={charge_offset:.3f}, discharge={discharge_offset:.3f}, "
+                           f"time={time_offset:.1f}s")
+                
+                # Update offsets for next file (chronologically later)
+                charge_offset += final_values['charge_cumulative_ah']
+                discharge_offset += abs(final_values['discharge_cumulative_ah'])  # Convert to positive
+                energy_charge_offset += final_values['energy_charge_cumulative_wh']
+                energy_discharge_offset += abs(final_values['energy_discharge_cumulative_wh'])
+                time_offset += final_values['total_duration_s']
+            
+            logger.info(f"Completed experiment accumulation update for cell {cell_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to update experiment accumulation for cell {cell_id}: {e}")
+            # Don't raise - let the main operation continue
+    
+    def recalculate_cell_experiment_accumulation(self, cell_name: str) -> ProcessingResult:
+        """
+        Recalculate experiment accumulation for all files in a cell.
+        This is a database-only operation for maintenance/repair.
+        """
+        try:
+            cell = self.get_cell_by_name(cell_name)
+            if not cell:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Cell '{cell_name}' not found"
+                )
+            
+            logger.info(f"Recalculating experiment accumulation for cell '{cell_name}'")
+            self._update_cell_experiment_accumulation(cell['id'])
+            
+            return ProcessingResult(
+                success=True,
+                message=f"Recalculated experiment accumulation for cell '{cell_name}'"
+            )
+            
+        except Exception as e:
+            error_info = format_error_for_user(e)
+            return ProcessingResult(
+                success=False,
+                error=f"Failed to recalculate accumulation for '{cell_name}': {error_info['message']}"
+            )
+    
     # =============================================================================
     # DATA ACCESS
     # =============================================================================
@@ -582,6 +668,9 @@ class BackendAPI:
             db_success = self.db.delete_file(file_id)
             
             if db_success:
+                # NEW: Update experiment accumulation for remaining files in cell
+                self._update_cell_experiment_accumulation(file_info['cell_id'])
+                
                 message_parts = [f"Deleted file {file_id}"]
                 if deleted_files:
                     message_parts.append(f"Removed {len(deleted_files)} files from disk")

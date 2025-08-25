@@ -82,6 +82,16 @@ class AnalyticsConfigRegistry:
             'energy_wh': {'type': 'float', 'unit': 'Wh', 'source': 'core_metrics', 'description': 'Segment energy (signed)'},
             'point_count': {'type': 'int', 'unit': '', 'source': 'core_metrics', 'description': 'Number of data points'},
             
+            # File-level cumulative tracking (computed by parser)
+            'capacity_cumulative_ah': {'type': 'float', 'unit': 'Ah', 'source': 'database', 'description': 'File-level cumulative capacity (signed)'},
+            'energy_cumulative_wh': {'type': 'float', 'unit': 'Wh', 'source': 'database', 'description': 'File-level cumulative energy (signed)'},
+            'charge_cumulative_ah': {'type': 'float', 'unit': 'Ah', 'source': 'database', 'description': 'File-level cumulative charge capacity'},
+            'discharge_cumulative_ah': {'type': 'float', 'unit': 'Ah', 'source': 'database', 'description': 'File-level cumulative discharge capacity'},
+            'energy_charge_cumulative_wh': {'type': 'float', 'unit': 'Wh', 'source': 'database', 'description': 'File-level cumulative charge energy'},
+            'energy_discharge_cumulative_wh': {'type': 'float', 'unit': 'Wh', 'source': 'database', 'description': 'File-level cumulative discharge energy'},
+            'capacity_absolute_cumulative_ah': {'type': 'float', 'unit': 'Ah', 'source': 'database', 'description': 'File-level cumulative absolute capacity'},
+            'energy_absolute_cumulative_wh': {'type': 'float', 'unit': 'Wh', 'source': 'database', 'description': 'File-level cumulative absolute energy'},
+            
             # Analysis metadata
             'analysis_status': {'type': 'str', 'unit': '', 'source': 'database', 'description': 'Analysis completion status'},
             'analysis_results': {'type': 'json', 'unit': '', 'source': 'technique_analyzer', 'description': 'Detailed analysis results'},
@@ -96,7 +106,14 @@ class AnalyticsConfigRegistry:
             'cumulative_time_s': {'type': 'float', 'unit': 's', 'source': 'group_analytics', 'description': 'Absolute time from first measurement'},
             'cumulative_duration_s': {'type': 'float', 'unit': 's', 'source': 'group_analytics', 'description': 'Total experiment duration'},
             'cumulative_abs_capacity_ah': {'type': 'float', 'unit': 'Ah', 'source': 'group_analytics', 'description': 'Total capacity throughput'},
-            'cumulative_cycle_count': {'type': 'int', 'unit': '', 'source': 'group_analytics', 'description': 'Cumulative cycle number'}
+            'cumulative_cycle_count': {'type': 'int', 'unit': '', 'source': 'group_analytics', 'description': 'Cumulative cycle number'},
+            
+            # NEW: Cross-file experiment accumulation (charge/discharge separated)
+            'exp_charge_cap_ah': {'type': 'float', 'unit': 'Ah', 'source': 'database', 'description': 'Experiment-level cumulative charge capacity'},
+            'exp_discharge_cap_ah': {'type': 'float', 'unit': 'Ah', 'source': 'database', 'description': 'Experiment-level cumulative discharge capacity'},
+            'exp_charge_energy_wh': {'type': 'float', 'unit': 'Wh', 'source': 'database', 'description': 'Experiment-level cumulative charge energy'},
+            'exp_discharge_energy_wh': {'type': 'float', 'unit': 'Wh', 'source': 'database', 'description': 'Experiment-level cumulative discharge energy'},
+            'exp_time_cumulative_s': {'type': 'float', 'unit': 's', 'source': 'database', 'description': 'Experiment-level cumulative time'}
         }
     
     def _get_analysis_result_schemas(self) -> Dict[str, Dict[str, Any]]:

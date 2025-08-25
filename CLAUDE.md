@@ -6,6 +6,26 @@
 **Last Updated:** August 25, 2025  
 **Status:** Production-ready registry system with settings automation, schema-to-widget UI generation, and comprehensive plotting fixes complete
 
+## Interactive Coding Workflow
+
+**IMPORTANT RULE**: For all prompts involving coding and debugging, follow this interactive workflow:
+
+1. **Understand** - Read documentation and source code to understand the current system
+2. **Report** - Summarize understanding of the problem and current implementation 
+3. **Plan** - Create detailed implementation plan with specific steps
+4. **Get Confirmation** - Wait for user approval before proceeding
+5. **Code** - Implement the solution with proper testing
+
+### Additional Guidelines:
+
+- **Follow Existing Patterns** - Always mimic existing code style, libraries, and architectural patterns in the codebase
+- **User Override Authority** - User can override workflow and request autonomous coding for specific parts of a plan
+- **Context & Fatigue Reporting** - Report to user if context is insufficient or if I'm experiencing performance limitations
+- **New Method Confirmation** - Adding new debugging methods (unless trivial) requires user confirmation before implementation
+- **Registry-First Approach** - For analysis features, use the registry system and existing 30-minute development workflow
+
+This ensures collaborative development and prevents unwanted changes to the production system.
+
 ## Project Overview
 
 A modular, instrument-agnostic **web application** for R&D electrochemical data analysis. Successfully processes VersaStudio files with universal technique mapping, featuring automatic analytics, complete group management backend, and production-ready Panel web interface with designed 3-tab architecture.

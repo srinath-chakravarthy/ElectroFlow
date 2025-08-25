@@ -42,9 +42,11 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
             return {"error": "No REST segments found for kinetics analysis"}
         
         # Apply pre-analysis filters from settings
-        filtered_segments = _apply_pre_analysis_filters(rest_segments, settings)
-        if not filtered_segments:
-            return pd.DataFrame(columns=['segment_id', 'error_message'])
+        # TODO: Debug filtering issues - temporarily disabled
+        # filtered_segments = _apply_pre_analysis_filters(rest_segments, settings)
+        # if not filtered_segments:
+        #     return pd.DataFrame(columns=['segment_id', 'error_message'])
+        filtered_segments = rest_segments  # Use all REST segments for now
         
         # Get analysis settings
         fit_type = settings.get('fit_type', 'auto_best')

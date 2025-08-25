@@ -217,6 +217,8 @@ class DatabaseManager:
                 'energy_cumulative_wh', 'charge_cumulative_ah', 'discharge_cumulative_ah',
                 'energy_charge_cumulative_wh', 'energy_discharge_cumulative_wh',
                 'capacity_absolute_cumulative_ah', 'energy_absolute_cumulative_wh',
+                'exp_charge_cap_ah', 'exp_discharge_cap_ah', 
+                'exp_charge_energy_wh', 'exp_discharge_energy_wh', 'exp_time_cumulative_s',
                 'analysis_status', 'analysis_results'
             }
             
@@ -243,6 +245,11 @@ class DatabaseManager:
                     'energy_discharge_cumulative_wh': 'REAL DEFAULT 0.0',
                     'capacity_absolute_cumulative_ah': 'REAL DEFAULT 0.0',
                     'energy_absolute_cumulative_wh': 'REAL DEFAULT 0.0',
+                    'exp_charge_cap_ah': 'REAL DEFAULT 0.0',
+                    'exp_discharge_cap_ah': 'REAL DEFAULT 0.0',
+                    'exp_charge_energy_wh': 'REAL DEFAULT 0.0',
+                    'exp_discharge_energy_wh': 'REAL DEFAULT 0.0',
+                    'exp_time_cumulative_s': 'REAL DEFAULT 0.0',
                     'analysis_status': 'TEXT DEFAULT "pending"',
                     'analysis_results': 'TEXT DEFAULT "{}"'
                 }
@@ -504,6 +511,76 @@ class DatabaseManager:
             except Exception as e:
                 conn.rollback()
                 raise TransactionError("delete_file", str(e))
+    
+    def get_file_final_cumulative_values(self, file_id: str) -> Dict[str, float]:
+        """Get final cumulative values from the last segment of a file."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT charge_cumulative_ah, discharge_cumulative_ah,
+                       energy_charge_cumulative_wh, energy_discharge_cumulative_wh,
+                       end_time_s, start_time_s
+                FROM segments 
+                WHERE file_id = ?
+                ORDER BY end_time_s DESC, segment_index DESC
+                LIMIT 1
+            """, (file_id,))
+            
+            row = cursor.fetchone()
+            if row:
+                start_time = cursor.execute("""
+                    SELECT start_time_s FROM segments 
+                    WHERE file_id = ? 
+                    ORDER BY start_time_s ASC, segment_index ASC 
+                    LIMIT 1
+                """, (file_id,)).fetchone()
+                
+                return {
+                    'charge_cumulative_ah': float(row[0] or 0),
+                    'discharge_cumulative_ah': float(row[1] or 0),
+                    'energy_charge_cumulative_wh': float(row[2] or 0),
+                    'energy_discharge_cumulative_wh': float(row[3] or 0),
+                    'total_duration_s': float(row[4] or 0) - float(start_time[0] or 0) if start_time else 0.0
+                }
+            return {
+                'charge_cumulative_ah': 0.0,
+                'discharge_cumulative_ah': 0.0,
+                'energy_charge_cumulative_wh': 0.0,
+                'energy_discharge_cumulative_wh': 0.0,
+                'total_duration_s': 0.0
+            }
+    
+    def update_segments_experiment_accumulation(self, file_id: str, 
+                                              charge_offset: float, discharge_offset: float,
+                                              energy_charge_offset: float, energy_discharge_offset: float,
+                                              time_offset: float):
+        """Update experiment accumulation for all segments in a file."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE segments SET
+                    exp_charge_cap_ah = charge_cumulative_ah + ?,
+                    exp_discharge_cap_ah = ABS(discharge_cumulative_ah) + ?,
+                    exp_charge_energy_wh = energy_charge_cumulative_wh + ?,
+                    exp_discharge_energy_wh = ABS(energy_discharge_cumulative_wh) + ?,
+                    exp_time_cumulative_s = start_time_s + ?
+                WHERE file_id = ?
+            """, (charge_offset, discharge_offset, energy_charge_offset, energy_discharge_offset, time_offset, file_id))
+            
+            updated_count = cursor.rowcount
+            conn.commit()  # Explicit commit to ensure changes are persisted
+            logger.debug(f"Updated {updated_count} segments with experiment accumulation for file {file_id}")
+            return updated_count
+    
+    def get_cell_files_ordered_by_timestamp(self, cell_id: int) -> List[Dict[str, Any]]:
+        """Get cell files ordered chronologically by acquisition timestamp."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT file_id, acquisition_start, original_filename
+                FROM files 
+                WHERE cell_id = ?
+                ORDER BY acquisition_start ASC, created_at ASC
+            """, (cell_id,))
+            
+            return [dict(row) for row in cursor.fetchall()]
     
     # =============================================================================
     # SEGMENT OPERATIONS

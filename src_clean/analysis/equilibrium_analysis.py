@@ -34,9 +34,11 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
             return {"error": "No segments provided for equilibrium analysis"}
         
         # Apply pre-analysis filters from settings
-        filtered_segments = _apply_pre_analysis_filters(segments, settings)
-        if not filtered_segments:
-            return pd.DataFrame(columns=['segment_id', 'error_message'])
+        # TODO: Debug filtering issues - temporarily disabled
+        # filtered_segments = _apply_pre_analysis_filters(segments, settings)
+        # if not filtered_segments:
+        #     return pd.DataFrame(columns=['segment_id', 'error_message'])
+        filtered_segments = segments  # Use all segments for now
         
         # Get analysis settings
         min_duration = settings.get('min_duration_s', 60)  # Minimum duration for equilibrium
