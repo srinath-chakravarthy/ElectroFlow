@@ -2396,6 +2396,168 @@ class BackendAPI:
             logger.error(f"Failed to cleanup query {query_id}: {e}")
             return False
 
+    # =============================================================================
+    # ADVANCED RESEARCH TAB METHODS
+    # =============================================================================
+
+    def get_available_research_cells(self) -> List[str]:
+        """Get list of cells available for advanced research analytics."""
+        try:
+            cells = self.get_cells()
+            return [cell['name'] for cell in cells if cell['name']]
+        except Exception as e:
+            logger.error(f"Failed to get research cells: {e}")
+            return []
+
+    def get_research_dataset_for_perspective(self, cells: List[str] = None, 
+                                           temperature: float = None) -> pl.DataFrame:
+        """Get comprehensive dataset optimized for Perspective analysis."""
+        try:
+            logger.info(f"Loading research dataset for cells: {cells}, temperature: {temperature}")
+            
+            # Get segments with comprehensive data for all cells or filtered cells
+            if cells:
+                # Filter by specific cells
+                segments_data = []
+                for cell_name in cells:
+                    cell_segments = self.get_cell_segments(cell_name)
+                    if cell_segments:
+                        segments_data.extend(cell_segments)
+            else:
+                # Get all cells
+                all_cells = self.get_cells()
+                segments_data = []
+                for cell in all_cells:
+                    cell_segments = self.get_cell_segments(cell['name'])
+                    if cell_segments:
+                        segments_data.extend(cell_segments)
+            
+            if not segments_data:
+                logger.warning("No segments data found for research dataset")
+                return pl.DataFrame()
+            
+            # Convert to Polars DataFrame
+            df = pl.DataFrame(segments_data)
+            
+            # Add computed columns for research analysis
+            if len(df) > 0:
+                df = df.with_columns([
+                    # Time-based columns
+                    (pl.col("duration_s") / 3600).alias("duration_hours"),
+                    (pl.col("end_time_s") - pl.col("start_time_s")).alias("segment_duration_s"),
+                    
+                    # Power and energy density columns
+                    (pl.col("energy_wh") / pl.col("duration_s") * 3600).alias("avg_power_w"),
+                    pl.when(pl.col("capacity_ah") > 0)
+                    .then(pl.col("energy_wh") / pl.col("capacity_ah"))
+                    .otherwise(None)
+                    .alias("energy_density_wh_per_ah"),
+                    
+                    # Efficiency columns
+                    pl.when(pl.col("capacity_cumulative_ah") > 0)
+                    .then(pl.col("discharge_cumulative_ah") / pl.col("capacity_cumulative_ah") * 100)
+                    .otherwise(None)
+                    .alias("coulombic_efficiency_pct"),
+                ])
+            
+            # Apply temperature filter if specified
+            if temperature is not None and "temperature" in df.columns:
+                df = df.filter(pl.col("temperature") == temperature)
+            
+            logger.info(f"Research dataset loaded: {len(df)} segments")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get research dataset: {e}")
+            return pl.DataFrame()
+
+    def get_research_data_summary(self, cells: List[str] = None) -> Dict[str, Any]:
+        """Get summary statistics for dataset selection."""
+        try:
+            # Get basic counts
+            if cells:
+                total_segments = 0
+                total_files = 0
+                for cell_name in cells:
+                    cell_segments = self.get_cell_segments(cell_name)
+                    if cell_segments:
+                        total_segments += len(cell_segments)
+                        # Count unique files
+                        unique_files = set()
+                        for seg in cell_segments:
+                            if seg.get('file_id'):
+                                unique_files.add(seg['file_id'])
+                        total_files += len(unique_files)
+                
+                cell_count = len(cells)
+            else:
+                all_cells = self.get_cells()
+                cell_count = len(all_cells)
+                
+                total_segments = 0
+                total_files = 0
+                for cell in all_cells:
+                    cell_segments = self.get_cell_segments(cell['name'])
+                    if cell_segments:
+                        total_segments += len(cell_segments)
+                        unique_files = set()
+                        for seg in cell_segments:
+                            if seg.get('file_id'):
+                                unique_files.add(seg['file_id'])
+                        total_files += len(unique_files)
+            
+            # Get time range
+            try:
+                # Use LazyDataService for efficient time range query
+                query_id = self.lazy_data_service.create_segments_query(
+                    cell_filters=cells if cells else None
+                )
+                if query_id:
+                    query_info = self.lazy_data_service.get_query_info(query_id)
+                    # Note: This is a placeholder - LazyDataService would need enhancement 
+                    # for time range calculation
+                    time_range = "Available"
+                else:
+                    time_range = "Unknown"
+            except Exception:
+                time_range = "Unknown"
+            
+            # Get available techniques
+            try:
+                dataset = self.get_research_dataset_for_perspective(cells)
+                if len(dataset) > 0 and "technique_name" in dataset.columns:
+                    techniques = dataset.get_column("technique_name").unique().to_list()
+                else:
+                    techniques = []
+            except Exception:
+                techniques = []
+            
+            summary = {
+                'cell_count': cell_count,
+                'total_segments': total_segments,
+                'total_files': total_files,
+                'time_range': time_range,
+                'techniques': techniques,
+                'data_scale': 'Large' if total_segments > 1000 else 'Medium' if total_segments > 100 else 'Small',
+                'estimated_rows': total_segments  # Each segment = 1 row in research view
+            }
+            
+            logger.info(f"Research data summary: {summary}")
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Failed to get research data summary: {e}")
+            return {
+                'cell_count': 0,
+                'total_segments': 0, 
+                'total_files': 0,
+                'time_range': 'Error',
+                'techniques': [],
+                'data_scale': 'Unknown',
+                'estimated_rows': 0,
+                'error': str(e)
+            }
+
 # =============================================================================
 # GLOBAL INSTANCE
 # =============================================================================

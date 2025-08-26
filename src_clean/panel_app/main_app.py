@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from backend import get_backend_api
-from panel_app.components import StatusBar, GroupManagementTab, DataAnalysisTabWrapper
+from panel_app.components import StatusBar, GroupManagementTab, DataAnalysisTabWrapper, AdvancedResearchTabWrapper
 from panel_app.components.cell_file_management import CellFileManagement
 class ElectrochemicalApp(param.Parameterized):
     """
@@ -46,6 +46,7 @@ class ElectrochemicalApp(param.Parameterized):
         self.status_bar = self._create_status_bar()
         self.group_management_tab = GroupManagementTab(api=self.api)
         self.data_analysis_tab = DataAnalysisTabWrapper(api=self.api)
+        self.advanced_research_tab = AdvancedResearchTabWrapper(api=self.api)
 
         # Setup component connections
         self._setup_connections()
@@ -324,11 +325,15 @@ class ElectrochemicalApp(param.Parameterized):
         # Tab 3: Data Analysis (NEW - Phase 1 implementation)
         tab3_content = self.data_analysis_tab.panel
 
+        # Tab 4: Advanced Research Analytics with Perspective
+        tab4_content = self.advanced_research_tab.panel
+
         # Create tabs with tab switching refresh logic
         tabs = pn.Tabs(
             ("🔋 Cell & File Management", tab1_content),
             ("🔗 Group Management", tab2_content),
             ("📊 Data Analysis", tab3_content),
+            ("🔬 Advanced Research", tab4_content),
             dynamic=True,
             sizing_mode='stretch_width'
         )
