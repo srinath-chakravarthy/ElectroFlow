@@ -13,7 +13,7 @@ import numpy as np
 from .json_field_extractor import get_json_field_extractor
 
 
-def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
+def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], include_segment_data: bool = True) -> pd.DataFrame:
     """
     Analyze current decay kinetics from potentiostatic segments.
     
@@ -24,9 +24,11 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
     Args:
         segments: List of segment dictionaries with analysis_results JSON
         settings: Analysis settings including fit criteria
+        include_segment_data: If True (default), include all segment columns.
+                            If False, return only segment_id + analytics columns.
         
     Returns:
-        Dictionary with current decay analysis results
+        DataFrame with current decay analysis results
     """
     
     try:
@@ -104,17 +106,19 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
         if not decay_data:
             return pd.DataFrame(columns=['segment_id', 'error_message'])
         
-        # Create core DataFrame from segments
-        core_df = pd.DataFrame(potentiostatic_segments)
-        
         # Create analysis DataFrame
         analysis_df = pd.DataFrame(decay_data)
         
-        # Rename 'id' to 'segment_id' for consistency before merge
-        core_df = core_df.rename(columns={'id': 'segment_id'})
-        
-        # Merge core + analysis columns
-        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        if include_segment_data:
+            # Create core DataFrame from segments (full segment data)
+            core_df = pd.DataFrame(potentiostatic_segments)
+            # Rename 'id' to 'segment_id' for consistency before merge
+            core_df = core_df.rename(columns={'id': 'segment_id'})
+            # Merge core + analysis columns
+            df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        else:
+            # Return only segment_id + analytics columns for clean joining
+            df = analysis_df.copy()
         df['analysis_type'] = 'current_decay_analysis'
         df['quality_score'] = df['decay_quality'].map({'good': 1.0, 'poor': 0.0})
         

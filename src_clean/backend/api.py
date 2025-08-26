@@ -2409,13 +2409,13 @@ class BackendAPI:
             logger.error(f"Failed to get research cells: {e}")
             return []
 
-    def get_research_dataset_for_perspective(self, cells: List[str] = None, 
-                                           temperature: float = None) -> pl.DataFrame:
-        """Get comprehensive dataset optimized for Perspective analysis."""
+    def get_clean_segment_data_for_perspective(self, cells: List[str] = None, 
+                                             temperature: float = None) -> pl.DataFrame:
+        """Get clean segment data without complex JSON fields for Perspective compatibility."""
         try:
-            logger.info(f"Loading research dataset for cells: {cells}, temperature: {temperature}")
+            logger.info(f"Loading clean segment data for cells: {cells}, temperature: {temperature}")
             
-            # Get segments with comprehensive data for all cells or filtered cells
+            # Get segments data for all cells or filtered cells
             if cells:
                 # Filter by specific cells
                 segments_data = []
@@ -2433,43 +2433,175 @@ class BackendAPI:
                         segments_data.extend(cell_segments)
             
             if not segments_data:
-                logger.warning("No segments data found for research dataset")
+                logger.warning("No segments found for perspective dataset")
                 return pl.DataFrame()
             
-            # Convert to Polars DataFrame
-            df = pl.DataFrame(segments_data)
+            # Remove complex JSON fields that cause Perspective issues
+            clean_segments_data = []
+            for segment in segments_data:
+                clean_segment = {k: v for k, v in segment.items() 
+                               if k not in ['segment_metadata', 'analysis_results', 'groups']}
+                clean_segments_data.append(clean_segment)
             
-            # Add computed columns for research analysis
-            if len(df) > 0:
-                df = df.with_columns([
-                    # Time-based columns
-                    (pl.col("duration_s") / 3600).alias("duration_hours"),
-                    (pl.col("end_time_s") - pl.col("start_time_s")).alias("segment_duration_s"),
-                    
-                    # Power and energy density columns
-                    (pl.col("energy_wh") / pl.col("duration_s") * 3600).alias("avg_power_w"),
-                    pl.when(pl.col("capacity_ah") > 0)
-                    .then(pl.col("energy_wh") / pl.col("capacity_ah"))
-                    .otherwise(None)
-                    .alias("energy_density_wh_per_ah"),
-                    
-                    # Efficiency columns
-                    pl.when(pl.col("capacity_cumulative_ah") > 0)
-                    .then(pl.col("discharge_cumulative_ah") / pl.col("capacity_cumulative_ah") * 100)
-                    .otherwise(None)
-                    .alias("coulombic_efficiency_pct"),
-                ])
+            # Convert to Polars DataFrame
+            df = pl.DataFrame(clean_segments_data)
+            
+            # Add computed columns for better research analysis
+            df = df.with_columns([
+                # Time-based columns
+                (pl.col("duration_s") / 3600).alias("duration_hours"),
+                
+                # Power and efficiency calculations
+                (pl.col("energy_wh") / pl.col("duration_s") * 3600).alias("avg_power_w"),
+                pl.when(pl.col("capacity_ah") > 0)
+                .then(pl.col("energy_wh") / pl.col("capacity_ah"))
+                .otherwise(None)
+                .alias("energy_density_wh_per_ah"),
+                
+                # Efficiency columns
+                pl.when(pl.col("capacity_cumulative_ah") > 0)
+                .then(pl.col("discharge_cumulative_ah") / pl.col("capacity_cumulative_ah") * 100)
+                .otherwise(None)
+                .alias("coulombic_efficiency_pct"),
+            ])
             
             # Apply temperature filter if specified
             if temperature is not None and "temperature" in df.columns:
                 df = df.filter(pl.col("temperature") == temperature)
             
-            logger.info(f"Research dataset loaded: {len(df)} segments")
+            logger.info(f"Clean segment data loaded: {len(df)} segments")
             return df
             
         except Exception as e:
-            logger.error(f"Failed to get research dataset: {e}")
+            logger.error(f"Failed to get clean segment data: {e}")
             return pl.DataFrame()
+
+    def get_research_dataset_for_perspective(self, cells: List[str] = None, 
+                                           temperature: float = None) -> pl.DataFrame:
+        """Get comprehensive dataset with full analytics pipeline for Perspective analysis."""
+        try:
+            logger.info(f"Loading comprehensive research dataset for cells: {cells}, temperature: {temperature}")
+            
+            # Step 1: Get clean segment data (no JSON fields)
+            clean_segments_df = self.get_clean_segment_data_for_perspective(cells, temperature)
+            
+            if clean_segments_df.is_empty():
+                logger.warning("No clean segments found for comprehensive dataset")
+                return clean_segments_df
+            
+            # Convert to pandas for analytics processing
+            segments_data = []
+            if cells:
+                for cell_name in cells:
+                    cell_segments = self.get_cell_segments(cell_name)
+                    if cell_segments:
+                        segments_data.extend(cell_segments)
+            else:
+                all_cells = self.get_cells()
+                for cell in all_cells:
+                    cell_segments = self.get_cell_segments(cell['name'])
+                    if cell_segments:
+                        segments_data.extend(cell_segments)
+            
+            if not segments_data:
+                return clean_segments_df
+            
+            # Step 2: Run analytics pipeline
+            analytics_results = self._run_comprehensive_analytics_pipeline(segments_data)
+            
+            # Step 3: Convert clean segments to pandas for joining
+            pandas_clean_df = clean_segments_df.to_pandas()
+            
+            # Step 4: Join all analytics results
+            final_df = pandas_clean_df.copy()
+            
+            for analysis_name, analysis_df in analytics_results.items():
+                if not analysis_df.empty:
+                    final_df = final_df.merge(
+                        analysis_df,
+                        left_on='id',
+                        right_on='segment_id', 
+                        how='left',
+                        suffixes=('', f'_{analysis_name}_dup')
+                    )
+                    # Drop duplicate segment_id column from join
+                    if 'segment_id' in final_df.columns:
+                        final_df = final_df.drop('segment_id', axis=1)
+            
+            # Convert back to Polars
+            result_df = pl.DataFrame(final_df)
+            
+            logger.info(f"Comprehensive dataset loaded: {len(result_df)} rows × {len(result_df.columns)} columns")
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"Failed to get comprehensive research dataset: {e}")
+            return pl.DataFrame()
+
+    def _run_comprehensive_analytics_pipeline(self, segments_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Run all registered analytics on segments and return results for joining."""
+        try:
+            import pandas as pd
+            from src_clean.analysis.registry import get_analysis_registry
+            
+            registry = get_analysis_registry()
+            analytics_results = {}
+            
+            logger.info(f"Running comprehensive analytics on {len(segments_data)} segments")
+            
+            # Get all available analysis types
+            analysis_types = [
+                'current_decay_analysis',
+                'kinetics_analysis',
+                # Add more as we update them with include_segment_data parameter
+            ]
+            
+            for analysis_name in analysis_types:
+                try:
+                    logger.debug(f"Running {analysis_name}...")
+                    
+                    if analysis_name == 'current_decay_analysis':
+                        from src_clean.analysis.current_decay_analysis import current_decay_analysis_function
+                        df = current_decay_analysis_function(segments_data, {}, include_segment_data=False)
+                    elif analysis_name == 'kinetics_analysis':
+                        from src_clean.analysis.kinetics_analysis import kinetics_analysis_function
+                        df = kinetics_analysis_function(segments_data, {}, include_segment_data=False)
+                    else:
+                        logger.warning(f"Analysis {analysis_name} not yet updated for include_segment_data")
+                        continue
+                    
+                    # Add analytics_ prefix to non-segment_id columns
+                    if isinstance(df, pd.DataFrame) and not df.empty:
+                        # Rename columns to add analytics prefix
+                        rename_dict = {}
+                        for col in df.columns:
+                            if col not in ['segment_id']:
+                                rename_dict[col] = f'analytics_{analysis_name}_{col}'
+                        
+                        if rename_dict:
+                            df = df.rename(columns=rename_dict)
+                        
+                        analytics_results[analysis_name] = df
+                        logger.info(f"✅ {analysis_name}: {len(df)} rows, {len(df.columns)} columns")
+                    else:
+                        logger.warning(f"⚠️  {analysis_name}: No results or invalid DataFrame")
+                        
+                except Exception as e:
+                    logger.error(f"❌ {analysis_name} failed: {e}")
+                    # Create error DataFrame
+                    segment_ids = [seg.get('id') for seg in segments_data if seg.get('id')]
+                    error_df = pd.DataFrame({
+                        'segment_id': segment_ids,
+                        f'analytics_{analysis_name}_error': [str(e)] * len(segment_ids)
+                    })
+                    analytics_results[analysis_name] = error_df
+            
+            logger.info(f"Analytics pipeline completed: {len(analytics_results)} analysis types")
+            return analytics_results
+            
+        except Exception as e:
+            logger.error(f"Analytics pipeline failed: {e}")
+            return {}
 
     def get_research_data_summary(self, cells: List[str] = None) -> Dict[str, Any]:
         """Get summary statistics for dataset selection."""

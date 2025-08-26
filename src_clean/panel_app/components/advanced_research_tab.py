@@ -310,8 +310,8 @@ class AdvancedResearchTab(param.Parameterized):
             # Get temperature filter
             temp_filter = None if self.current_temperature_filter == "All" else float(self.current_temperature_filter.replace('°C', ''))
             
-            # Load dataset from backend
-            dataset = self.api.get_research_dataset_for_perspective(
+            # Load clean dataset from backend (no JSON fields for Perspective compatibility)
+            dataset = self.api.get_clean_segment_data_for_perspective(
                 cells=self.selected_cells,
                 temperature=temp_filter
             )

@@ -13,7 +13,7 @@ import numpy as np
 from .json_field_extractor import get_json_field_extractor
 
 
-def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
+def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], include_segment_data: bool = True) -> pd.DataFrame:
     """
     Analyze relaxation kinetics from REST phase segments.
     
@@ -25,9 +25,11 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
     Args:
         segments: List of segment dictionaries with analysis_results JSON
         settings: Analysis settings including fit_type and quality thresholds
+        include_segment_data: If True (default), include all segment columns.
+                            If False, return only segment_id + analytics columns.
         
     Returns:
-        Dictionary with kinetics analysis results
+        DataFrame with kinetics analysis results
     """
     
     try:
@@ -99,17 +101,19 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         else:
             high_quality_data = kinetics_data
         
-        # Create core DataFrame from filtered segments
-        core_df = pd.DataFrame(filtered_segments)
-        
         # Create analysis DataFrame from kinetics data
         analysis_df = pd.DataFrame(kinetics_data)
         
-        # Rename 'id' to 'segment_id' for consistency before merge
-        core_df = core_df.rename(columns={'id': 'segment_id'})
-        
-        # Merge core + analysis columns
-        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        if include_segment_data:
+            # Create core DataFrame from filtered segments (full segment data)
+            core_df = pd.DataFrame(filtered_segments)
+            # Rename 'id' to 'segment_id' for consistency before merge
+            core_df = core_df.rename(columns={'id': 'segment_id'})
+            # Merge core + analysis columns
+            df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        else:
+            # Return only segment_id + analytics columns for clean joining
+            df = analysis_df.copy()
         
         # Add standard columns required by registry
         df['analysis_type'] = 'kinetics_analysis'
