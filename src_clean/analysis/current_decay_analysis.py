@@ -13,7 +13,7 @@ import numpy as np
 from .json_field_extractor import get_json_field_extractor
 
 
-def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], include_segment_data: bool = True) -> pd.DataFrame:
+def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], **kwargs) -> pd.DataFrame:
     """
     Analyze current decay kinetics from potentiostatic segments.
     
@@ -25,12 +25,12 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
         segments: List of segment dictionaries with analysis_results JSON
         settings: Analysis settings including fit criteria
         include_segment_data: If True (default), include all segment columns.
-                            If False, return only segment_id + analytics columns.
+                            If False, return only id + analytics columns.
         
     Returns:
         DataFrame with current decay analysis results
     """
-    
+    include_segment_data = kwargs.get('include_segment_data', True)
     try:
         if not segments:
             return {"error": "No segments provided for current decay analysis"}
@@ -57,13 +57,13 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
             
             # Extract current decay information
             decay_info = {
-                'segment_id': segment.get('id'),
-                'start_time_s': segment.get('start_time_s'),
-                'duration_s': segment.get('duration_s'),
-                'technique': segment.get('fundamental_technique'),
-                'start_current_a': segment.get('start_current_a'),
-                'end_current_a': segment.get('end_current_a'),
-                'applied_voltage_v': segment.get('start_potential_v')  # Potentiostatic voltage
+                'id': segment.get('id'),
+                # 'start_time_s': segment.get('start_time_s'),
+                # 'duration_s': segment.get('duration_s'),
+                # 'technique': segment.get('fundamental_technique'),
+                # 'start_current_a': segment.get('start_current_a'),
+                # 'end_current_a': segment.get('end_current_a'),
+                # 'applied_voltage_v': segment.get('start_potential_v')  # Potentiostatic voltage
             }
             
             # Extract decay fit parameters from JSON
@@ -71,9 +71,9 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
             decay_info.update(fit_data)
             
             # Calculate decay metrics if current data available
-            if decay_info.get('start_current_a') and decay_info.get('end_current_a'):
-                start_current = abs(decay_info['start_current_a'])  # Use absolute current
-                end_current = abs(decay_info['end_current_a'])
+            if segment.get('start_current_a') and segment.get('end_current_a'):
+                start_current = abs(segment['start_current_a'])  # Use absolute current
+                end_current = abs(segment['end_current_a'])
                 
                 if start_current > 0:
                     decay_ratio = end_current / start_current
@@ -84,7 +84,7 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
                     decay_info['current_decay_percent'] = decay_percent
             
             # Expert quality assessment and kinetic regime classification
-            duration_ok = decay_info.get('duration_s', 0) >= min_duration
+            duration_ok = segment.get('duration_s', 0) >= min_duration
             r_squared = decay_info.get('r_squared', 0)
             fit_ok = r_squared >= min_r_squared
             
@@ -104,7 +104,7 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
             decay_data.append(decay_info)
         
         if not decay_data:
-            return pd.DataFrame(columns=['segment_id', 'error_message'])
+            return pd.DataFrame(columns=['id', 'error_message'])
         
         # Create analysis DataFrame
         analysis_df = pd.DataFrame(decay_data)
@@ -112,12 +112,10 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
         if include_segment_data:
             # Create core DataFrame from segments (full segment data)
             core_df = pd.DataFrame(potentiostatic_segments)
-            # Rename 'id' to 'segment_id' for consistency before merge
-            core_df = core_df.rename(columns={'id': 'segment_id'})
-            # Merge core + analysis columns
-            df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+            # Merge core + analysis columns using 'id'
+            df = pd.merge(core_df, analysis_df, on='id', suffixes=('', '_analysis'))
         else:
-            # Return only segment_id + analytics columns for clean joining
+            # Return only id + analytics columns for clean joining
             df = analysis_df.copy()
         df['analysis_type'] = 'current_decay_analysis'
         df['quality_score'] = df['decay_quality'].map({'good': 1.0, 'poor': 0.0})
@@ -140,7 +138,7 @@ def current_decay_analysis_function(segments: List[Dict[str, Any]], settings: Di
         
     except Exception as e:
         error_df = pd.DataFrame([{
-            'segment_id': None,
+            'id': None,
             'error_message': f"Current decay analysis failed: {str(e)}",
             'analysis_type': 'current_decay_analysis'
         }])

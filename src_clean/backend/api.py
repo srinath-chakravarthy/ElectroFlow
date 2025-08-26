@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import polars as pl
+import pandas as pd
 
 from src_clean.core import DatabaseManager, format_error_for_user, is_user_error
 from src_clean.core.data_models import DataFile
@@ -2515,21 +2516,76 @@ class BackendAPI:
             # Step 4: Join all analytics results
             final_df = pandas_clean_df.copy()
             
+            # Simple merge using 'id' column (no more segment_id conflicts!)
+            logger.info(f"Starting merge with {len(analytics_results)} analytics results")
             for analysis_name, analysis_df in analytics_results.items():
                 if not analysis_df.empty:
+                    logger.info(f"Merging {analysis_name}: {analysis_df.shape}")
+                    logger.info(f"  Analysis has 'id': {'id' in analysis_df.columns}")
+                    logger.info(f"  Base DataFrame has 'id': {'id' in final_df.columns}")
+                    
+                    # Check for overlapping columns (excluding 'id')
+                    overlap_cols = [col for col in analysis_df.columns if col in final_df.columns and col != 'id']
+                    if overlap_cols:
+                        logger.warning(f"  Overlapping columns: {overlap_cols}")
+                    
                     final_df = final_df.merge(
                         analysis_df,
-                        left_on='id',
-                        right_on='segment_id', 
+                        on='id',  # Clean merge using matching id columns
                         how='left',
-                        suffixes=('', f'_{analysis_name}_dup')
+                        suffixes=('', f'_{analysis_name}')  # Add analysis name suffix for conflicts
                     )
-                    # Drop duplicate segment_id column from join
-                    if 'segment_id' in final_df.columns:
-                        final_df = final_df.drop('segment_id', axis=1)
+                    
+                    logger.info(f"After merge: {final_df.shape}")
             
-            # Convert back to Polars
-            result_df = pl.DataFrame(final_df)
+            # Clean NaN values for Perspective compatibility - avoid Polars conversion issues
+            logger.info(f"Cleaning NaN values from {len(final_df)} rows, {len(final_df.columns)} columns")
+            
+            # Instead of converting back to Polars, return pandas DataFrame directly
+            # to avoid type conversion issues
+            for col in final_df.columns:
+                # if col.startswith('analytics_') and final_df[col].isnull().any():
+                if final_df[col].isnull().any():
+
+                    # Get the actual data type by examining non-null values
+                    non_null_values = final_df[col].dropna()
+                    
+                    if len(non_null_values) == 0:
+                        # All values are null, keep as float to avoid conversion issues
+                        final_df[col] = final_df[col].fillna(0.0)
+                        logger.debug(f"Column {col}: All null, filled with 0.0")
+                        
+                    elif non_null_values.dtype in ['float64', 'float32']:
+                        # Numeric column - fill with 0.0
+                        final_df[col] = final_df[col].fillna(0.0)
+                        logger.debug(f"Column {col}: Float, filled with 0.0")
+                        
+                    elif non_null_values.dtype in ['int64', 'int32']:
+                        # Integer column - fill with 0
+                        final_df[col] = final_df[col].fillna(0)
+                        logger.debug(f"Column {col}: Integer, filled with 0")
+                        
+                    elif non_null_values.dtype == 'bool' or 'is_high_quality' in col or col.endswith('_flag') or col.endswith('_bool'):
+                        # Boolean column - fill with False, keep as bool
+                        final_df[col] = final_df[col].fillna(False).astype('bool')
+                        logger.debug(f"Column {col}: Boolean, filled with False")
+                        
+                    else:
+                        # For string/object columns - keep as strings, Perspective handles them well
+                        final_df[col] = final_df[col].astype('object').fillna('N/A')
+                        logger.debug(f"Column {col}: String/Object type, filled with 'N/A'")
+            
+            # Return pandas DataFrame directly - convert to Polars later if needed
+            logger.info(f"Analytics pipeline complete: {len(final_df)} rows × {len(final_df.columns)} columns")
+            logger.info(f"Analytics columns: {len([c for c in final_df.columns if c.startswith('analytics_')])}")
+            
+            # Convert to Polars using from_pandas for better type inference
+            try:
+                result_df = pl.from_pandas(final_df)
+            except Exception as conversion_error:
+                logger.warning(f"Polars conversion failed: {conversion_error}, returning clean data only")
+                # Fallback to clean data without analytics
+                return clean_segments_df
             
             logger.info(f"Comprehensive dataset loaded: {len(result_df)} rows × {len(result_df.columns)} columns")
             return result_df
@@ -2541,7 +2597,6 @@ class BackendAPI:
     def _run_comprehensive_analytics_pipeline(self, segments_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Run all registered analytics on segments and return results for joining."""
         try:
-            import pandas as pd
             from src_clean.analysis.registry import get_analysis_registry
             
             registry = get_analysis_registry()
@@ -2549,40 +2604,49 @@ class BackendAPI:
             
             logger.info(f"Running comprehensive analytics on {len(segments_data)} segments")
             
-            # Get all available analysis types
-            analysis_types = [
-                'current_decay_analysis',
-                'kinetics_analysis',
-                # Add more as we update them with include_segment_data parameter
-            ]
+            # Get all available analysis types from registry automatically  
+            available_analysis = registry.get_analysis_options()
+            analysis_types = [analysis_id for _, analysis_id in available_analysis if analysis_id != 'basic_statistics']
+            
+            # All analytics enabled with clean id-based merging!
+            # analysis_types = ['kinetics_analysis']  # Debug mode - now working!
+            
+            logger.info(f"Running {len(analysis_types)} analytics from registry: {analysis_types}")
             
             for analysis_name in analysis_types:
                 try:
                     logger.debug(f"Running {analysis_name}...")
                     
-                    if analysis_name == 'current_decay_analysis':
-                        from src_clean.analysis.current_decay_analysis import current_decay_analysis_function
-                        df = current_decay_analysis_function(segments_data, {}, include_segment_data=False)
-                    elif analysis_name == 'kinetics_analysis':
-                        from src_clean.analysis.kinetics_analysis import kinetics_analysis_function
-                        df = kinetics_analysis_function(segments_data, {}, include_segment_data=False)
-                    else:
-                        logger.warning(f"Analysis {analysis_name} not yet updated for include_segment_data")
-                        continue
-                    
-                    # Add analytics_ prefix to non-segment_id columns
+                    # # Execute analysis - call functions directly to use include_segment_data=False
+                    # if analysis_name == 'kinetics_analysis':
+                    #     from src_clean.analysis.kinetics_analysis import kinetics_analysis_function
+                    #     df = kinetics_analysis_function(segments_data, {}, include_segment_data=False)
+                    # elif analysis_name == 'current_decay_analysis':
+                    #     from src_clean.analysis.current_decay_analysis import current_decay_analysis_function
+                    #     df = current_decay_analysis_function(segments_data, {}, include_segment_data=False)
+                    # elif analysis_name == 'resistance_analysis':
+                    #     from src_clean.analysis.resistance_analysis import resistance_analysis_function
+                    #     df = resistance_analysis_function(segments_data, {}, include_segment_data=False)
+                    # elif analysis_name == 'equilibrium_analysis':
+                    #     from src_clean.analysis.equilibrium_analysis import equilibrium_analysis_function
+                    #     df = equilibrium_analysis_function(segments_data, {}, include_segment_data=False)
+                    # else:
+                    #     # For other analyses, use registry (will include full segment data)
+                    df = registry.execute_analysis(analysis_name, segments_data, {}, include_segment_data=False)
+
+
+                    # Store results if valid
                     if isinstance(df, pd.DataFrame) and not df.empty:
-                        # Rename columns to add analytics prefix
-                        rename_dict = {}
-                        for col in df.columns:
-                            if col not in ['segment_id']:
-                                rename_dict[col] = f'analytics_{analysis_name}_{col}'
-                        
-                        if rename_dict:
-                            df = df.rename(columns=rename_dict)
-                        
-                        analytics_results[analysis_name] = df
                         logger.info(f"✅ {analysis_name}: {len(df)} rows, {len(df.columns)} columns")
+                        logger.debug(f"  Columns: {list(df.columns)[:10]}...")
+                        logger.debug(f"  Has 'id' column: {'id' in df.columns}")
+                        prefix = analysis_name + "_"
+                        # Create a dictionary to map old names to new names
+                        new_column_names = {col: f"{prefix}{col}" for col in df.columns if col != 'id'}
+
+                        # Rename the columns using the dictionary
+                        df = df.rename(columns=new_column_names)
+                        analytics_results[analysis_name] = df
                     else:
                         logger.warning(f"⚠️  {analysis_name}: No results or invalid DataFrame")
                         

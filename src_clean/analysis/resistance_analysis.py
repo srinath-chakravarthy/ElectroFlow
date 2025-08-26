@@ -13,7 +13,7 @@ import numpy as np
 from .json_field_extractor import get_json_field_extractor
 
 
-def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
+def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], **kwargs) -> pd.DataFrame:
     """
     Calculate instantaneous resistance from galvanostatic segments.
     
@@ -29,7 +29,7 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
     Returns:
         Dictionary with resistance analysis results
     """
-    
+    include_segment_data = kwargs.get('include_segment_data', True)
     try:
         if not segments:
             return {"error": "No segments provided for resistance analysis"}
@@ -58,10 +58,10 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
             
             # Build resistance info with core segment data + extracted fields
             resistance_info = {
-                'segment_id': segment.get('id'),
-                'start_time_s': segment.get('start_time_s'),
-                'duration_s': segment.get('duration_s'),
-                'technique': segment.get('fundamental_technique')
+                'id': segment.get('id')
+                # 'start_time_s': segment.get('start_time_s'),
+                # 'duration_s': segment.get('duration_s'),
+                # 'technique': segment.get('fundamental_technique')
             }
             
             # Add all extracted fields from current_pulse schema
@@ -76,19 +76,19 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
         
         if not resistance_data:
             # Return empty DataFrame with proper columns for error case
-            return pd.DataFrame(columns=['segment_id', 'error_message'])
-        
-        # Create core DataFrame from segments
-        core_df = pd.DataFrame(galv_segments)
+            return pd.DataFrame(columns=['id', 'error_message'])
         
         # Create analysis DataFrame from resistance data
         analysis_df = pd.DataFrame(resistance_data)
         
-        # Rename 'id' to 'segment_id' for consistency before merge
-        core_df = core_df.rename(columns={'id': 'segment_id'})
-        
-        # Merge core + analysis columns
-        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        if include_segment_data:
+            # Create core DataFrame from segments (full segment data)
+            core_df = pd.DataFrame(galv_segments)
+            # Merge core + analysis columns using 'id'
+            df = pd.merge(core_df, analysis_df, on='id', suffixes=('', '_analysis'))
+        else:
+            # Return only id + analytics columns for clean joining
+            df = analysis_df.copy()
         
         # Add standard columns required by registry
         df['analysis_type'] = 'resistance_analysis'
@@ -120,7 +120,7 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
     except Exception as e:
         # Return error as DataFrame
         error_df = pd.DataFrame([{
-            'segment_id': None,
+            'id': None,
             'error_message': f"Resistance analysis failed: {str(e)}",
             'analysis_type': 'resistance_analysis'
         }])

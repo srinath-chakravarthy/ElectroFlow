@@ -13,7 +13,7 @@ import numpy as np
 from .json_field_extractor import get_json_field_extractor
 
 
-def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], include_segment_data: bool = True) -> pd.DataFrame:
+def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], **kwargs) -> pd.DataFrame:
     """
     Analyze relaxation kinetics from REST phase segments.
     
@@ -26,12 +26,12 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         segments: List of segment dictionaries with analysis_results JSON
         settings: Analysis settings including fit_type and quality thresholds
         include_segment_data: If True (default), include all segment columns.
-                            If False, return only segment_id + analytics columns.
+                            If False, return only id + analytics columns.
         
     Returns:
         DataFrame with kinetics analysis results
     """
-    
+    include_segment_data = kwargs.get('include_segment_data', True)
     try:
         if not segments:
             return {"error": "No segments provided for kinetics analysis"}
@@ -64,12 +64,12 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
             
             # Extract relaxation kinetics based on JSON structure
             kinetics_info = {
-                'segment_id': segment.get('id'),
-                'start_time_s': segment.get('start_time_s'),
-                'duration_s': segment.get('duration_s'),
-                'technique': segment.get('fundamental_technique'),
-                'start_voltage_v': segment.get('start_potential_v'),
-                'end_voltage_v': segment.get('end_potential_v')
+                'id': segment.get('id')
+                # 'start_time_s': segment.get('start_time_s'),
+                # 'duration_s': segment.get('duration_s'),
+                # 'technique': segment.get('fundamental_technique'),
+                # 'start_voltage_v': segment.get('start_potential_v'),
+                # 'end_voltage_v': segment.get('end_potential_v')
             }
             
             # Extract fit parameters - try different JSON structures
@@ -77,9 +77,9 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
             kinetics_info.update(fit_data)
             
             # Calculate derived parameters
-            if kinetics_info.get('start_voltage_v') and kinetics_info.get('end_voltage_v'):
-                kinetics_info['voltage_recovery_v'] = (kinetics_info['end_voltage_v'] - 
-                                                     kinetics_info['start_voltage_v'])
+            if segment.get('start_voltage_v') and segment.get('end_voltage_v'):
+                kinetics_info['voltage_recovery_v'] = (segment['end_voltage_v'] -
+                                                     segment['start_voltage_v'])
             
             # Quality assessment using expert methods
             r_squared = kinetics_info.get('r_squared', 0)
@@ -93,7 +93,7 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         
         if not kinetics_data:
             # Return empty DataFrame with proper columns for error case
-            return pd.DataFrame(columns=['segment_id', 'error_message'])
+            return pd.DataFrame(columns=['id', 'error_message'])
         
         # Filter by quality if requested
         if min_r_squared > 0:
@@ -107,12 +107,10 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         if include_segment_data:
             # Create core DataFrame from filtered segments (full segment data)
             core_df = pd.DataFrame(filtered_segments)
-            # Rename 'id' to 'segment_id' for consistency before merge
-            core_df = core_df.rename(columns={'id': 'segment_id'})
-            # Merge core + analysis columns
-            df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+            # Merge core + analysis columns using 'id'
+            df = pd.merge(core_df, analysis_df, on='id', suffixes=('', '_analysis'))
         else:
-            # Return only segment_id + analytics columns for clean joining
+            # Return only id + analytics columns for clean joining
             df = analysis_df.copy()
         
         # Add standard columns required by registry
@@ -143,7 +141,7 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
     except Exception as e:
         # Return error as DataFrame
         error_df = pd.DataFrame([{
-            'segment_id': None,
+            'id': None,
             'error_message': f"Kinetics analysis failed: {str(e)}",
             'analysis_type': 'kinetics_analysis'
         }])

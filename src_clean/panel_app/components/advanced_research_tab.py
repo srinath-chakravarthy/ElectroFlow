@@ -310,8 +310,8 @@ class AdvancedResearchTab(param.Parameterized):
             # Get temperature filter
             temp_filter = None if self.current_temperature_filter == "All" else float(self.current_temperature_filter.replace('°C', ''))
             
-            # Load clean dataset from backend (no JSON fields for Perspective compatibility)
-            dataset = self.api.get_clean_segment_data_for_perspective(
+            # Load comprehensive dataset with full analytics pipeline (NaN handling implemented)
+            dataset = self.api.get_research_dataset_for_perspective(
                 cells=self.selected_cells,
                 temperature=temp_filter
             )
@@ -322,9 +322,31 @@ class AdvancedResearchTab(param.Parameterized):
             
             # Convert Polars to Pandas for Perspective
             pandas_df = dataset.to_pandas()
+
+            # Separate analytics and non-analytics columns
+            analytics_columns = [col for col in pandas_df.columns if '_analytics_' in col]
+            non_analytics_columns = [col for col in pandas_df.columns if not '_analytics_' in col]
+
+            # Patterns to hide from analytics columns
+            analytics_patterns_to_hide = ['start_time_s', '_technique', 'start_voltage_v', 'end_voltage_v', 'voltage_amplitude', 'analysis_type', 'duration']
+            analytics_columns_to_hide = [col for col in analytics_columns if any(pattern in col for pattern in analytics_patterns_to_hide)]
+
+            # Patterns to hide from base columns  
+            base_patterns_to_hide = ['file', '_index', 'technique_id', 'fundamental_technique', '_row', 'created_at', 'point_count']
+            base_columns_to_hide = [col for col in non_analytics_columns if any(pattern in col for pattern in base_patterns_to_hide)]
+
+            # Combine all columns to hide
+            columns_to_hide = analytics_columns_to_hide + base_columns_to_hide
+
+            # Keep only columns that aren't in hide list
+            display_columns = [col for col in pandas_df.columns if col not in columns_to_hide]
+            filtered_df = pandas_df[display_columns]
             
-            # Update perspective viewer
-            self.perspective_viewer.object = pandas_df
+            logger.info(f"Display optimization: {len(pandas_df.columns)} → {len(display_columns)} columns")
+            logger.info(f"Hidden columns: {len(columns_to_hide)} ({', '.join(columns_to_hide[:5])}{'...' if len(columns_to_hide) > 5 else ''})")
+            
+            # Update perspective viewer with filtered data
+            self.perspective_viewer.object = filtered_df
             self.current_dataset = dataset
             
             # Update status and buttons
@@ -332,9 +354,10 @@ class AdvancedResearchTab(param.Parameterized):
             self.perspective_ready = True
             self.dataset_info_btn.disabled = False
             
-            # Update data info
-            rows, cols = pandas_df.shape
-            self._update_data_info(f"Dataset: {rows:,} rows × {cols} columns")
+            # Update data info - show both original and filtered counts
+            rows, orig_cols = pandas_df.shape
+            filtered_cols = len(display_columns)
+            self._update_data_info(f"Dataset: {rows:,} rows × {filtered_cols} display columns (of {orig_cols} total)")
             self._update_perspective_status("Dataset loaded successfully", "success")
             self._update_status(f"Dataset loaded: {rows:,} rows", "success")
             

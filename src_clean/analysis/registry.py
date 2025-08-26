@@ -65,7 +65,7 @@ class AnalysisConfig:
     requires_analysis_results: bool = False  # Needs JSON analysis_results
     
     # === ANALYSIS FUNCTION ===
-    analysis_function: Callable[[List[Dict[str, Any]], Dict[str, Any]], Dict[str, Any]] = None
+    analysis_function: Callable[..., Dict[str, Any]] = None
     data_preparation: Optional[Callable] = None  # Optional data preprocessing
     
     # === UI CONFIGURATION ===
@@ -177,7 +177,7 @@ class AnalysisRegistry:
         return config.validate_data(segments)
     
     def execute_analysis(self, analysis_id: str, segments: List[Dict[str, Any]], 
-                        settings: Dict[str, Any]) -> Dict[str, Any]:
+                        settings: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         Execute analysis with given data and settings.
         
@@ -202,7 +202,7 @@ class AnalysisRegistry:
         
         try:
             # Execute analysis function
-            result = config.analysis_function(segments, merged_settings)
+            result = config.analysis_function(segments, merged_settings, **kwargs)
             
             # Handle DataFrame returns (new format) vs Dict returns (legacy)
             if hasattr(result, 'columns'):  # It's a DataFrame
@@ -341,7 +341,7 @@ class AnalysisRegistry:
         
         # Basic Statistics Analysis
         self.register_analysis(AnalysisConfig(
-            analysis_id="basic_statistics",
+            analysis_id="basic_statistics_analytics",
             name="Basic Statistics", 
             description="Statistical summary of segment metrics (mean, std, min, max)",
             category=AnalysisCategory.BASIC_STATISTICS,
@@ -379,7 +379,7 @@ class AnalysisRegistry:
         
         # Resistance Analysis  
         self.register_analysis(AnalysisConfig(
-            analysis_id="resistance_analysis",
+            analysis_id="resistance_analytics",
             name="Resistance Analysis",
             description="Instantaneous resistance calculations from galvanostatic data",
             category=AnalysisCategory.ELECTROCHEMICAL,
@@ -458,7 +458,7 @@ class AnalysisRegistry:
         
         # Kinetics Analysis
         self.register_analysis(AnalysisConfig(
-            analysis_id="kinetics_analysis", 
+            analysis_id="kinetics_analytics",
             name="Kinetics Analysis",
             description="Relaxation kinetics from REST phase analysis",
             category=AnalysisCategory.KINETICS,
@@ -538,7 +538,7 @@ class AnalysisRegistry:
         
         # Equilibrium Analysis
         self.register_analysis(AnalysisConfig(
-            analysis_id="equilibrium_analysis",
+            analysis_id="equilibrium_analytics",
             name="Equilibrium Analysis",
             description="Time constants, diffusion coefficients, and equilibrium voltage analysis from REST segments",
             category=AnalysisCategory.THERMODYNAMICS,
@@ -643,7 +643,7 @@ class AnalysisRegistry:
         
         # Current Decay Analysis
         self.register_analysis(AnalysisConfig(
-            analysis_id="current_decay_analysis",
+            analysis_id="current_decay_analytics",
             name="Current Decay Analysis",
             description="Potentiostatic current decay kinetics analysis",
             category=AnalysisCategory.KINETICS,
@@ -689,38 +689,38 @@ class AnalysisRegistry:
         ))
         
         # dQ/dV Analysis (placeholder - not implemented yet)
-        self.register_analysis(AnalysisConfig(
-            analysis_id="dqdv_analysis",
-            name="dQ/dV Analysis", 
-            description="Differential capacity analysis (coming soon)",
-            category=AnalysisCategory.THERMODYNAMICS,
-            min_segments=1,
-            analysis_function=lambda segments, settings: pd.DataFrame([{
-                'segment_id': None,
-                'error_message': "dQ/dV analysis not implemented yet. Coming in future version.",
-                'analysis_type': 'dqdv_analysis',
-                'placeholder': True
-            }]),
-            available_plots=[PlotType.TIME_SERIES],
-            default_plot=PlotType.TIME_SERIES,
-            plot_config={
-                "Placeholder Plot 1": {
-                    "plot_type": "line",
-                    "x_column": "segment_id",
-                    "y_column": "placeholder",
-                    "title": "dQ/dV Analysis (Coming Soon)",
-                    "x_label": "Segment ID",
-                    "y_label": "Placeholder"
-                },
-                "Placeholder Plot 2": {
-                    "plot_type": "histogram",
-                    "x_column": "placeholder",
-                    "title": "dQ/dV Distribution (Coming Soon)",
-                    "x_label": "Placeholder",
-                    "y_label": "Count"
-                }
-            }
-        ))
+        # self.register_analysis(AnalysisConfig(
+        #     analysis_id="dqdv_analysis",
+        #     name="dQ/dV Analysis",
+        #     description="Differential capacity analysis (coming soon)",
+        #     category=AnalysisCategory.THERMODYNAMICS,
+        #     min_segments=1,
+        #     analysis_function=lambda segments, settings: pd.DataFrame([{
+        #         'segment_id': None,
+        #         'error_message': "dQ/dV analysis not implemented yet. Coming in future version.",
+        #         'analysis_type': 'dqdv_analysis',
+        #         'placeholder': True
+        #     }]),
+        #     available_plots=[PlotType.TIME_SERIES],
+        #     default_plot=PlotType.TIME_SERIES,
+        #     plot_config={
+        #         "Placeholder Plot 1": {
+        #             "plot_type": "line",
+        #             "x_column": "segment_id",
+        #             "y_column": "placeholder",
+        #             "title": "dQ/dV Analysis (Coming Soon)",
+        #             "x_label": "Segment ID",
+        #             "y_label": "Placeholder"
+        #         },
+        #         "Placeholder Plot 2": {
+        #             "plot_type": "histogram",
+        #             "x_column": "placeholder",
+        #             "title": "dQ/dV Distribution (Coming Soon)",
+        #             "x_label": "Placeholder",
+        #             "y_label": "Count"
+        #         }
+        #     }
+        # ))
 
 
 # === GLOBAL REGISTRY INSTANCE ===
@@ -748,10 +748,10 @@ def get_analysis_options() -> List[tuple[str, str]]:
     return registry.get_analysis_options()
 
 def execute_analysis(analysis_id: str, segments: List[Dict[str, Any]], 
-                    settings: Dict[str, Any] = None) -> Dict[str, Any]:
+                    settings: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
     """Execute analysis (convenience function)."""
     registry = get_analysis_registry()
-    return registry.execute_analysis(analysis_id, segments, settings or {})
+    return registry.execute_analysis(analysis_id, segments, settings or {}, **kwargs)
 
 def validate_analysis_request(analysis_id: str, segments: List[Dict[str, Any]]) -> tuple[bool, str]:
     """Validate analysis request (convenience function)."""

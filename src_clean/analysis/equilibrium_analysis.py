@@ -13,7 +13,7 @@ import numpy as np
 from .json_field_extractor import get_json_field_extractor
 
 
-def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
+def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict[str, Any], **kwargs) -> pd.DataFrame:
     """
     Analyze equilibrium voltage from segment data.
     
@@ -28,7 +28,7 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
     Returns:
         Dictionary with equilibrium analysis results
     """
-    
+    include_segment_data = kwargs.get('include_segment_data', True)
     try:
         if not segments:
             return {"error": "No segments provided for equilibrium analysis"}
@@ -54,12 +54,12 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
             
             # Extract equilibrium information
             equilibrium_info = {
-                'segment_id': segment.get('id'),
-                'start_time_s': segment.get('start_time_s'),
-                'duration_s': segment.get('duration_s'),
-                'technique': segment.get('fundamental_technique'),
-                'start_voltage_v': segment.get('start_potential_v'),
-                'end_voltage_v': segment.get('end_potential_v')
+                'id': segment.get('id'),
+                # 'start_time_s': segment.get('start_time_s'),
+                # 'duration_s': segment.get('duration_s'),
+                # 'technique': segment.get('fundamental_technique'),
+                # 'start_voltage_v': segment.get('start_potential_v'),
+                # 'end_voltage_v': segment.get('end_potential_v')
             }
             
             # Extract equilibrium analysis using JSONFieldExtractor with exponential_fit schema
@@ -83,19 +83,19 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
                                        if k in ['is_stable', 'drift_rate_mv_min', 'stability_achieved']})
             
             # Calculate voltage change if not available
-            if equilibrium_info.get('start_voltage_v') and equilibrium_info.get('end_voltage_v'):
-                voltage_change = equilibrium_info['end_voltage_v'] - equilibrium_info['start_voltage_v']
+            if segment.get('start_voltage_v') and segment.get('end_voltage_v'):
+                voltage_change = segment['end_voltage_v'] - segment['start_voltage_v']
                 equilibrium_info['voltage_change_v'] = voltage_change
                 
                 # Estimate drift rate if not available
-                if 'drift_rate_mv_min' not in equilibrium_info and equilibrium_info.get('duration_s'):
-                    duration_min = equilibrium_info['duration_s'] / 60.0
+                if 'drift_rate_mv_min' not in equilibrium_info and segment.get('duration_s'):
+                    duration_min = segment['duration_s'] / 60.0
                     if duration_min > 0:
                         drift_rate_mv_min = abs(voltage_change * 1000 / duration_min)  # mV/min
                         equilibrium_info['drift_rate_mv_min'] = drift_rate_mv_min
             
             # Assess equilibrium quality
-            duration_ok = equilibrium_info.get('duration_s', 0) >= min_duration
+            duration_ok = segment.get('duration_s', 0) >= min_duration
             drift_ok = equilibrium_info.get('drift_rate_mv_min', float('inf')) <= max_drift_rate
             
             equilibrium_info['meets_duration_criteria'] = duration_ok
@@ -105,28 +105,28 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
             equilibrium_data.append(equilibrium_info)
         
         if not equilibrium_data:
-            return pd.DataFrame(columns=['segment_id', 'error_message'])
-        
-        # Create core DataFrame from filtered segments
-        core_df = pd.DataFrame(filtered_segments)
+            return pd.DataFrame(columns=['id', 'error_message'])
         
         # Create analysis DataFrame
         analysis_df = pd.DataFrame(equilibrium_data)
         
-        # Rename 'id' to 'segment_id' for consistency before merge
-        core_df = core_df.rename(columns={'id': 'segment_id'})
-        
-        # Merge core + analysis columns
-        df = pd.merge(core_df, analysis_df, on='segment_id', suffixes=('', '_analysis'))
+        if include_segment_data:
+            # Create core DataFrame from filtered segments (full segment data)
+            core_df = pd.DataFrame(filtered_segments)
+            # Merge core + analysis columns using 'id'
+            df = pd.merge(core_df, analysis_df, on='id', suffixes=('', '_analysis'))
+        else:
+            # Return only id + analytics columns for clean joining
+            df = analysis_df.copy()
         df['analysis_type'] = 'equilibrium_analysis'
         df['quality_score'] = df['equilibrium_quality'].map({'good': 1.0, 'poor': 0.0})
         
         # Calculate diffusion coefficients using Cottrell equation (from ECI 1.0)
         diffusion_coeffs = _calculate_diffusion_coefficients(equilibrium_data)
         for i, equilibrium_info in enumerate(equilibrium_data):
-            segment_id = equilibrium_info.get('segment_id')
+            segment_id = equilibrium_info.get('id')
             if segment_id in diffusion_coeffs:
-                df.loc[df['segment_id'] == segment_id, 'diffusion_coefficient_cm2_s'] = diffusion_coeffs[segment_id]
+                df.loc[df['id'] == segment_id, 'diffusion_coefficient_cm2_s'] = diffusion_coeffs[segment_id]
 
         # Calculate summary statistics with voltage evolution tracking
         summary = _calculate_equilibrium_summary(equilibrium_data, settings)
@@ -148,7 +148,7 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
         
     except Exception as e:
         error_df = pd.DataFrame([{
-            'segment_id': None,
+            'id': None,
             'error_message': f"Equilibrium analysis failed: {str(e)}",
             'analysis_type': 'equilibrium_analysis'
         }])
@@ -313,7 +313,7 @@ def _calculate_diffusion_coefficients(equilibrium_data: List[Dict[str, Any]]) ->
     
     for equilibrium in equilibrium_data:
         time_constant = equilibrium.get('time_constant_s')
-        segment_id = equilibrium.get('segment_id')
+        segment_id = equilibrium.get('id')
         
         if time_constant is not None and time_constant > 0 and segment_id is not None:
             # Cottrell equation: D = L² / (π² * τ)
