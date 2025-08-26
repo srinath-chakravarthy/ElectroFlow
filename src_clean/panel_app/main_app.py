@@ -15,7 +15,8 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from backend import get_backend_api
-from panel_app.components import CellManager, FileUploader, DataViewer, StatusBar, GroupManagementTab, DataAnalysisTabWrapper
+from panel_app.components import StatusBar, GroupManagementTab, DataAnalysisTabWrapper
+from panel_app.components.cell_file_management import CellFileManagement
 class ElectrochemicalApp(param.Parameterized):
     """
     Professional Panel application for electrochemical data analysis.
@@ -41,9 +42,7 @@ class ElectrochemicalApp(param.Parameterized):
         self.api = get_backend_api()
 
         # Create professional components
-        self.cell_manager = CellManager(api=self.api)
-        self.file_uploader = FileUploader(api=self.api)
-        self.data_viewer = DataViewer(api=self.api)
+        self.cell_file_management = CellFileManagement(api=self.api)
         self.status_bar = self._create_status_bar()
         self.group_management_tab = GroupManagementTab(api=self.api)
         self.data_analysis_tab = DataAnalysisTabWrapper(api=self.api)
@@ -211,59 +210,15 @@ class ElectrochemicalApp(param.Parameterized):
 
     def _setup_connections(self):
         """Setup professional component connections."""
-        # Cell selection updates file uploader
-        self.cell_manager.param.watch(
-            self._on_cell_selected, 'selected_cell'
+        # Status updates from CellFileManagement component
+        self.cell_file_management.param.watch(
+            self._on_status_update, 'status_message'
         )
+        
+        # Cell and file selections are now handled internally by CellFileManagement
+        # No external connections needed for Tab 1
 
-        # File selection updates data viewer
-        self.file_uploader.param.watch(
-            self._on_file_selected, 'selected_file'
-        )
-
-        # Status updates from all components
-        for component in [self.cell_manager, self.file_uploader, self.data_viewer]:
-            component.param.watch(
-                self._on_status_update, 'status_message'
-            )
-
-    def _on_cell_selected(self, event):
-        """Handle cell selection with professional feedback."""
-        cell_name = event.new
-
-        # Handle tuple case from Select widget
-        if isinstance(cell_name, tuple):
-            cell_name = cell_name[1] if len(cell_name) > 1 else cell_name[0]
-        elif not isinstance(cell_name, str):
-            cell_name = str(cell_name) if cell_name is not None else ""
-
-        self.current_cell = cell_name
-        self.file_uploader.set_current_cell(cell_name)
-
-        if cell_name:
-            self._update_main_status(f"Selected cell: {cell_name}", "success")
-        else:
-            self._update_main_status("No cell selected", "info")
-
-    def _on_file_selected(self, event):
-        """Handle file selection with professional feedback."""
-        file_id = event.new
-
-        # Handle tuple case from Select widget
-        if isinstance(file_id, tuple):
-            file_id = file_id[1] if len(file_id) > 1 else file_id[0]
-        elif not isinstance(file_id, str):
-            file_id = str(file_id) if file_id is not None else ""
-
-        self.current_file = file_id
-        self.data_viewer.load_file_data(file_id)
-
-        if file_id:
-            # Extract readable filename from ID
-            display_name = file_id.split('_')[0] if '_' in file_id else file_id
-            self._update_main_status(f"Loaded file: {display_name}", "success")
-        else:
-            self._update_main_status("No file selected", "info")
+    # Cell and file selection methods removed - handled internally by CellFileManagement
 
     def _on_status_update(self, event):
         """Handle status updates from components."""
@@ -360,23 +315,8 @@ class ElectrochemicalApp(param.Parameterized):
         </div>
         """, sizing_mode='stretch_width', margin=(0, 0))
 
-        # Tab 1: Cell & File Management (existing 3-column layout)
-        tab1_content = pn.Row(
-            pn.Column(
-                self.cell_manager.panel,
-                width=350, min_width=350, max_width=350
-            ),
-            pn.Column(
-                self.file_uploader.panel,
-                width=350, min_width=350, max_width=350
-            ),
-            pn.Column(
-                self.data_viewer.panel,
-                min_width=400
-            ),
-            sizing_mode='stretch_width',
-            margin=(0, 0)
-        )
+        # Tab 1: Cell & File Management (unified 2-panel layout with modals)
+        tab1_content = self.cell_file_management.panel
 
         # Tab 2: Group Management (new)
         tab2_content = self.group_management_tab.panel

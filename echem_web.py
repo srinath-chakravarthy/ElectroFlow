@@ -41,7 +41,7 @@ def main():
     port = args.port
 
     # Configure Panel
-    # pn.extension('bokeh')
+    pn.extension('tabulator', 'modal', 'filedropper')
     
     # Create the application
     app = ElectrochemicalApp()
@@ -80,7 +80,7 @@ def main():
 
 def run_in_jupyter():
     """Alternative entry point for Jupyter/PyCharm environments."""
-    pn.extension('bokeh')
+    pn.extension('tabulator', 'modal', 'filedropper')
     app = ElectrochemicalApp()
     return app.servable()
 

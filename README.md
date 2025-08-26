@@ -117,10 +117,11 @@ python echem_web.py --dev
 **Access Interface**: Open browser to `http://localhost:5007`
 
 ### Web Interface Workflow
-1. **Create Cell**: Enter cell details (chemistry, capacity, electrode materials)
-2. **Upload Files**: Select paired .par + .par.csv files with temperature setting
-3. **View Data**: Automatic plot type detection (Voltage/Current vs Time, Nyquist plots)
-4. **Analyze Results**: Interactive visualization with data preview tables
+1. **Cell Management**: Unified 2-panel interface with cell table and file management
+2. **Create Cell**: Modal form with complete cell details (chemistry, capacity, electrode materials)
+3. **Upload Files**: Modal file dropper with paired .par + .par.csv selection and progress tracking
+4. **View Data**: Integrated DataViewer with automatic plot detection and interactive visualization
+5. **Analyze Results**: Real-time plotting updates when selecting files from the table
 
 ## 🔧 Alternative Interfaces
 

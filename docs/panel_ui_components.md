@@ -257,7 +257,7 @@ The main CSS is embedded in `main_app.py` and can be customized:
 ### Component Extension
 Each component is designed for easy extension:
 - Add new plot types in `DataViewer._get_available_plot_types()`
-- Add cell metadata fields in `CellManager._create_components()`
+- Add cell metadata fields in `CellFileManagement._create_components()`
 - Add status types in `StatusBar.status_configs`
 
 ## Usage Examples

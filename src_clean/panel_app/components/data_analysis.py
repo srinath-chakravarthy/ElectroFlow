@@ -16,7 +16,7 @@ class DataAnalysisTabWrapper:
     Wrapper class for integration with main Panel app.
     Provides clean interface consistent with other tabs.
     
-    This follows the same pattern as other tabs (CellManager, FileUploader, etc.)
+    This follows the same pattern as other tabs (CellFileManagement, etc.)
     """
     
     def __init__(self, api):
