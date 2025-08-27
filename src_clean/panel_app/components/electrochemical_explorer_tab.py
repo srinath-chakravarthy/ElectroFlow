@@ -228,7 +228,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             self.refresh_cells_btn,
             self.cell_status_html,
             
-            pn.Divider(),
+            pn.pane.HTML("<hr style='margin:10px 0;'>"),
             
             # Analysis Selection Section  
             pn.pane.HTML("<h5>Analysis Configuration</h5>"),
@@ -593,16 +593,16 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         # Layout modal content
         modal_content = pn.Column(
             header,
-            pn.Divider(),
+            pn.pane.HTML("<hr style='margin:10px 0;'>"),
             pn.pane.HTML("<h5>Axis Configuration</h5>"),
             self.x_axis_select,
             self.y_axis_multiselect,
-            pn.Divider(), 
+            pn.pane.HTML("<hr style='margin:10px 0;'>"), 
             pn.pane.HTML("<h5>Plot Settings</h5>"),
             self.plot_type_select,
             self.show_units_checkbox,
             self.auto_scale_checkbox,
-            pn.Divider(),
+            pn.pane.HTML("<hr style='margin:10px 0;'>"),
             pn.Row(generate_btn, cancel_btn, margin=(10, 5)),
             sizing_mode='stretch_width',
             margin=(10, 10)
