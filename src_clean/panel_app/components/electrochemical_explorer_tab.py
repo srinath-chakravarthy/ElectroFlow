@@ -605,13 +605,13 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             self.y_axis_select.options = y_options
             
             # Set smart defaults
-            self.x_axis_select.value = "start_time_s"  # Default to time
+            if x_options:
+                self.x_axis_select.value = "start_time_s"  # Default to time
+                self.current_plot.x_axis = "start_time_s"
+                
             if y_options:
                 self.y_axis_select.value = y_options[0][1]  # Default to first metric
-                
-            # Update PlotState
-            self.current_plot.x_axis = self.x_axis_select.value
-            self.current_plot.y_axis = self.y_axis_select.value
+                self.current_plot.y_axis = y_options[0][1]  # Use the actual column name
             
             logger.debug(f"Populated axis options: {len(x_options)} X-axis, {len(y_options)} Y-axis options")
             
@@ -638,7 +638,11 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         """Handle X-axis selection change."""
         try:
             x_axis = event.new
-            self.current_plot.x_axis = x_axis
+            # Ensure we have a string value, not a tuple
+            if isinstance(x_axis, (tuple, list)):
+                x_axis = x_axis[1] if len(x_axis) > 1 else x_axis[0]
+            
+            self.current_plot.x_axis = str(x_axis) if x_axis else ""
             self._update_generate_button_state()
             logger.debug(f"X-axis changed to: {x_axis}")
         except Exception as e:
@@ -648,7 +652,11 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         """Handle Y-axis selection change."""
         try:
             y_axis = event.new
-            self.current_plot.y_axis = y_axis
+            # Ensure we have a string value, not a tuple
+            if isinstance(y_axis, (tuple, list)):
+                y_axis = y_axis[1] if len(y_axis) > 1 else y_axis[0]
+            
+            self.current_plot.y_axis = str(y_axis) if y_axis else ""
             self._update_generate_button_state()
             logger.debug(f"Y-axis changed to: {y_axis}")
         except Exception as e:
