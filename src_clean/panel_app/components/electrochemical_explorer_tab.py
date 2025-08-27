@@ -22,6 +22,48 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+class PlotState(param.Parameterized):
+    """
+    Self-contained state for a single plot with its own configuration.
+    
+    Each plot manages its own analysis type, axis selections, ranges, and units.
+    This enables clean multi-plot support where each plot is independent.
+    """
+    
+    # Analysis configuration
+    analysis_type = param.String(default="", doc="Selected analysis type (e.g., 'resistance_analytics')")
+    analysis_name = param.String(default="", doc="Display name of selected analysis")
+    
+    # Axis configuration
+    x_axis = param.String(default="start_time_s", doc="Selected X-axis column")
+    y_axis = param.String(default="", doc="Selected Y-axis column")  
+    
+    # View controls (for Phase D)
+    x_range_start = param.Number(default=None, allow_None=True, doc="X-axis range start")
+    x_range_end = param.Number(default=None, allow_None=True, doc="X-axis range end")
+    
+    # Units metadata (for Phase D)
+    x_unit = param.String(default="", doc="X-axis unit (e.g., 's', 'V')")
+    y_unit = param.String(default="", doc="Y-axis unit (e.g., 'Ω', 'A')")
+    
+    # Plot configuration
+    plot_type = param.String(default="line", doc="Plot type (line, scatter, histogram)")
+    show_units = param.Boolean(default=True, doc="Show units in axis labels")
+    
+    def reset(self):
+        """Reset plot state to defaults."""
+        self.analysis_type = ""
+        self.analysis_name = ""
+        self.x_axis = "start_time_s" 
+        self.y_axis = ""
+        self.x_range_start = None
+        self.x_range_end = None
+        self.x_unit = ""
+        self.y_unit = ""
+        self.plot_type = "line"
+        self.show_units = True
+
 class ElectrochemicalExplorerTab(param.Parameterized):
     """
     Electrochemical Data Explorer Tab with cell-first workflow.
@@ -47,6 +89,11 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         self.current_dataset = None
         self.available_columns = {}
         self.registry_columns = {}
+        
+        # Plot state management (Phase B)
+        self.current_plot = PlotState()  # Single plot for Phase B
+        self.available_x_columns = []    # Available X-axis options
+        self.available_y_columns = []    # Available Y-axis options
         
         # Get registry for column discovery
         from src_clean.analysis.registry import get_analysis_registry
@@ -166,15 +213,62 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             margin=(5, 5)
         )
     
+    def _create_config_bar_controls(self):
+        """Create individual controls for the config bar."""
+        
+        # X-axis selection
+        self.x_axis_select = pn.widgets.Select(
+            name="X-Axis",
+            options=[("Select analysis first", "")],
+            width=150,
+            margin=(2, 5)
+        )
+        
+        # Y-axis selection  
+        self.y_axis_select = pn.widgets.Select(
+            name="Y-Axis",
+            options=[("Select analysis first", "")],
+            width=150, 
+            margin=(2, 5)
+        )
+        
+        # Plot type selection
+        self.plot_type_radio = pn.widgets.RadioButtonGroup(
+            name="Plot Type",
+            options=["Line", "Scatter", "Bar"],
+            value="Line",
+            button_type="primary",
+            width=200,
+            margin=(2, 5)
+        )
+        
+        # Generate plot button
+        self.generate_plot_btn = pn.widgets.Button(
+            name="📊 Generate Plot",
+            button_type="success",
+            width=120,
+            margin=(2, 5),
+            disabled=True
+        )
+    
     def _create_right_panel_components(self):
         """Create right panel with config bar and plot area."""
         
-        # Top configuration bar (120px fixed height)
+        # Create config bar controls
+        self._create_config_bar_controls()
+        
+        # Top configuration bar (120px fixed height) with actual controls
         self.config_bar = pn.Row(
-            pn.pane.HTML(
-                "<div style='padding:10px; background:#f8f9fa; border-radius:5px;'>"
-                "<p><b>📊 Plot Configuration</b> - Select analysis to configure</p>"
-                "</div>"
+            pn.Column(
+                pn.pane.HTML("<h5>📊 Plot Configuration</h5>"),
+                pn.Row(
+                    self.x_axis_select,
+                    self.y_axis_select,
+                    self.plot_type_radio,
+                    self.generate_plot_btn,
+                    margin=(5, 2)
+                ),
+                margin=(5, 5)
             ),
             height=120,
             sizing_mode='stretch_width',
@@ -286,6 +380,12 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         # Analysis selection callbacks
         self.analysis_category_radio.param.watch(self._on_analysis_category_changed, 'value')
         self.analysis_select.param.watch(self._on_analysis_changed, 'value')
+        
+        # Config bar callbacks
+        self.x_axis_select.param.watch(self._on_x_axis_changed, 'value')
+        self.y_axis_select.param.watch(self._on_y_axis_changed, 'value') 
+        self.plot_type_radio.param.watch(self._on_plot_type_changed, 'value')
+        self.generate_plot_btn.on_click(self._on_generate_plot_click)
     
     def _refresh_cells(self):
         """Refresh available cells from backend."""
@@ -455,23 +555,272 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Failed to handle analysis change to {analysis_id}: {e}")
     
     def _update_config_bar(self, analysis_id, config):
-        """Update the top configuration bar for the selected analysis."""
+        """Update the config bar with column options for the selected analysis."""
         try:
-            # For now, just show analysis info - will be enhanced in Phase B
-            config_html = f"""
-            <div style='padding:10px;'>
-                <h4>📊 {config.name}</h4>
-                <p><strong>Description:</strong> {config.description}</p>
-                <p><strong>Applicable to:</strong> {', '.join(config.applicable_techniques)}</p>
-                <p><em>Plot configuration controls will be added in Phase B</em></p>
-            </div>
-            """
+            # Update PlotState with selected analysis
+            self.current_plot.analysis_type = analysis_id
+            self.current_plot.analysis_name = config.name
             
-            self.config_bar.clear()
-            self.config_bar.append(pn.pane.HTML(config_html, sizing_mode='stretch_width'))
+            # Get available columns for this analysis
+            self._populate_axis_options(analysis_id, config)
+            
+            # Enable generate button if both axes are selected
+            self._update_generate_button_state()
+            
+            logger.info(f"Config bar updated for {config.name}")
             
         except Exception as e:
             logger.error(f"Failed to update config bar: {e}")
+    
+    def _populate_axis_options(self, analysis_id, config):
+        """Populate X and Y axis dropdown options for the selected analysis."""
+        try:
+            # Default X-axis options (common time/potential columns)
+            x_options = [
+                ("Time (s)", "start_time_s"),
+                ("Duration (s)", "duration_s"),
+                ("Start Potential (V)", "start_potential_v"),
+                ("End Potential (V)", "end_potential_v"),
+                ("Capacity (Ah)", "capacity_ah"),
+                ("Energy (Wh)", "energy_wh")
+            ]
+            
+            # Y-axis options from analysis output columns (metrics category)
+            y_options = []
+            if config.output_columns and "metrics" in config.output_columns:
+                metrics = config.output_columns["metrics"]
+                for col in metrics:
+                    # Add analysis prefix for display
+                    display_name = col.replace("_", " ").title()
+                    # Get unit from registry if available
+                    unit = self.registry.get_column_unit(analysis_id, col)
+                    if unit:
+                        display_name = f"{display_name} ({unit})"
+                    
+                    prefixed_col = f"{analysis_id}_{col}"
+                    y_options.append((display_name, prefixed_col))
+            
+            # Update dropdown options
+            self.x_axis_select.options = x_options
+            self.y_axis_select.options = y_options
+            
+            # Set smart defaults
+            self.x_axis_select.value = "start_time_s"  # Default to time
+            if y_options:
+                self.y_axis_select.value = y_options[0][1]  # Default to first metric
+                
+            # Update PlotState
+            self.current_plot.x_axis = self.x_axis_select.value
+            self.current_plot.y_axis = self.y_axis_select.value
+            
+            logger.debug(f"Populated axis options: {len(x_options)} X-axis, {len(y_options)} Y-axis options")
+            
+        except Exception as e:
+            logger.error(f"Failed to populate axis options: {e}")
+    
+    def _update_generate_button_state(self):
+        """Enable/disable generate button based on configuration completeness."""
+        try:
+            # Enable if we have analysis, X-axis, and Y-axis selected
+            has_analysis = bool(self.current_plot.analysis_type)
+            has_x_axis = bool(self.current_plot.x_axis)
+            has_y_axis = bool(self.current_plot.y_axis) 
+            has_cells = bool(self.selected_cells)
+            
+            self.generate_plot_btn.disabled = not (has_analysis and has_x_axis and has_y_axis and has_cells)
+            
+        except Exception as e:
+            logger.error(f"Failed to update button state: {e}")
+    
+    # === CONFIG BAR CALLBACK METHODS ===
+    
+    def _on_x_axis_changed(self, event):
+        """Handle X-axis selection change."""
+        try:
+            x_axis = event.new
+            self.current_plot.x_axis = x_axis
+            self._update_generate_button_state()
+            logger.debug(f"X-axis changed to: {x_axis}")
+        except Exception as e:
+            logger.error(f"Failed to handle X-axis change: {e}")
+    
+    def _on_y_axis_changed(self, event):
+        """Handle Y-axis selection change."""
+        try:
+            y_axis = event.new
+            self.current_plot.y_axis = y_axis
+            self._update_generate_button_state()
+            logger.debug(f"Y-axis changed to: {y_axis}")
+        except Exception as e:
+            logger.error(f"Failed to handle Y-axis change: {e}")
+    
+    def _on_plot_type_changed(self, event):
+        """Handle plot type selection change."""
+        try:
+            plot_type = event.new.lower()  # Convert "Line" -> "line"
+            self.current_plot.plot_type = plot_type
+            logger.debug(f"Plot type changed to: {plot_type}")
+        except Exception as e:
+            logger.error(f"Failed to handle plot type change: {e}")
+    
+    def _on_generate_plot_click(self, event):
+        """Handle generate plot button click."""
+        try:
+            logger.info(f"Generating plot: {self.current_plot.analysis_name}")
+            
+            # Load data if not already loaded
+            if self.current_dataset is None:
+                self._load_dataset_for_plotting()
+            
+            # Generate plot using PlotState
+            self._generate_plot_from_state()
+            
+        except Exception as e:
+            logger.error(f"Failed to generate plot: {e}")
+            self._show_plot_error(f"Plot generation failed: {str(e)}")
+    
+    def _load_dataset_for_plotting(self):
+        """Load comprehensive dataset for plotting."""
+        try:
+            logger.info("Loading dataset for plotting...")
+            
+            # Use existing API method to get comprehensive dataset
+            dataset = self.api.get_research_dataset_for_perspective(
+                cells=self.selected_cells
+            )
+            
+            if isinstance(dataset, pl.DataFrame):
+                self.current_dataset = dataset.to_pandas()
+            else:
+                self.current_dataset = dataset
+                
+            logger.info(f"Dataset loaded: {len(self.current_dataset)} rows × {len(self.current_dataset.columns)} columns")
+            
+        except Exception as e:
+            logger.error(f"Failed to load dataset: {e}")
+            raise
+    
+    def _generate_plot_from_state(self):
+        """Generate plot using current PlotState configuration."""
+        try:
+            # Validate we have data and configuration
+            if self.current_dataset is None or len(self.current_dataset) == 0:
+                self._show_plot_error("No data available for plotting")
+                return
+                
+            if not self.current_plot.x_axis or not self.current_plot.y_axis:
+                self._show_plot_error("Please select both X and Y axes")
+                return
+            
+            # Check if columns exist in dataset
+            if self.current_plot.x_axis not in self.current_dataset.columns:
+                self._show_plot_error(f"X-axis column '{self.current_plot.x_axis}' not found in data")
+                return
+                
+            if self.current_plot.y_axis not in self.current_dataset.columns:
+                self._show_plot_error(f"Y-axis column '{self.current_plot.y_axis}' not found in data")
+                return
+            
+            # Generate plot based on plot type
+            df = self.current_dataset
+            x_col = self.current_plot.x_axis
+            y_col = self.current_plot.y_axis
+            plot_type = self.current_plot.plot_type
+            
+            # Get units for axis labels
+            x_unit = self._get_column_unit(x_col)
+            y_unit = self._get_column_unit(y_col) 
+            x_label = f"{x_col.replace('_', ' ').title()}"
+            y_label = f"{y_col.replace('_', ' ').title()}"
+            if x_unit:
+                x_label += f" ({x_unit})"
+            if y_unit:
+                y_label += f" ({y_unit})"
+            
+            # Create plot using hvplot
+            if plot_type == "line":
+                plot = df.hvplot.line(
+                    x=x_col, y=y_col,
+                    title=f"{self.current_plot.analysis_name}: {y_label} vs {x_label}",
+                    xlabel=x_label,
+                    ylabel=y_label,
+                    width=700, height=400
+                )
+            elif plot_type == "scatter":
+                plot = df.hvplot.scatter(
+                    x=x_col, y=y_col,
+                    title=f"{self.current_plot.analysis_name}: {y_label} vs {x_label}",
+                    xlabel=x_label,
+                    ylabel=y_label, 
+                    width=700, height=400
+                )
+            elif plot_type == "bar":
+                # For bar plots, we might need to aggregate data
+                plot = df.hvplot.bar(
+                    x=x_col, y=y_col,
+                    title=f"{self.current_plot.analysis_name}: {y_label} vs {x_label}",
+                    xlabel=x_label,
+                    ylabel=y_label,
+                    width=700, height=400
+                )
+            else:
+                # Default to line
+                plot = df.hvplot.line(x=x_col, y=y_col, width=700, height=400)
+            
+            # Update plot area with generated plot
+            self.plot_area.clear()
+            self.plot_area.append(plot)
+            
+            logger.info(f"Plot generated successfully: {plot_type} plot with {len(df)} data points")
+            
+        except Exception as e:
+            logger.error(f"Failed to generate plot from state: {e}")
+            self._show_plot_error(f"Plot generation error: {str(e)}")
+    
+    def _get_column_unit(self, column_name):
+        """Get unit for a column (checking registry first, then fallback)."""
+        try:
+            # Try to get unit from registry if it's an analysis column
+            if self.current_plot.analysis_type and column_name.startswith(self.current_plot.analysis_type):
+                unit = self.registry.get_column_unit(self.current_plot.analysis_type, column_name)
+                if unit:
+                    return unit
+            
+            # Fallback: extract unit from common column patterns
+            unit_map = {
+                "time_s": "s",
+                "start_time_s": "s", 
+                "duration_s": "s",
+                "potential_v": "V",
+                "start_potential_v": "V",
+                "end_potential_v": "V",
+                "current_a": "A",
+                "capacity_ah": "Ah",
+                "energy_wh": "Wh",
+                "resistance_ohm": "Ω"
+            }
+            
+            for pattern, unit in unit_map.items():
+                if pattern in column_name.lower():
+                    return unit
+                    
+            return ""
+            
+        except Exception as e:
+            logger.debug(f"Failed to get unit for {column_name}: {e}")
+            return ""
+    
+    def _show_plot_error(self, error_message):
+        """Display error message in plot area."""
+        error_html = f"""
+        <div style='padding:50px; text-align:center; background:#ffebee; border-radius:8px; margin:20px;'>
+            <h3 style='color:#d32f2f;'>❌ Plot Generation Error</h3>
+            <p>{error_message}</p>
+            <p><small>Check your data selection and analysis configuration</small></p>
+        </div>
+        """
+        self.plot_area.clear()
+        self.plot_area.append(pn.pane.HTML(error_html))
     
     def _get_available_techniques(self, selected_cells):
         """Get available techniques from selected cells."""
