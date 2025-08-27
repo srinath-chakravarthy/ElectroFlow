@@ -37,7 +37,8 @@ class PlotState(param.Parameterized):
     
     # Axis configuration
     x_axis = param.String(default="start_time_s", doc="Selected X-axis column")
-    y_axis = param.String(default="", doc="Selected Y-axis column")  
+    y_axis = param.String(default="", doc="Selected Y-axis column")
+    group_by = param.String(default="", doc="Column to group/color by")
     
     # View controls (for Phase D)
     x_range_start = param.Number(default=None, allow_None=True, doc="X-axis range start")
@@ -57,6 +58,7 @@ class PlotState(param.Parameterized):
         self.analysis_name = ""
         self.x_axis = "start_time_s" 
         self.y_axis = ""
+        self.group_by = ""
         self.x_range_start = None
         self.x_range_end = None
         self.x_unit = ""
@@ -232,13 +234,21 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             margin=(2, 5)
         )
         
-        # Plot type selection
+        # Group/Color By selection
+        self.group_by_select = pn.widgets.Select(
+            name="Group/Color By",
+            options=[("None", "")],
+            width=120,
+            margin=(2, 5)
+        )
+        
+        # Plot type selection (will be dynamically updated)
         self.plot_type_radio = pn.widgets.RadioButtonGroup(
             name="Plot Type",
-            options=["Line", "Scatter", "Bar"],
+            options=["Line", "Scatter"],  # Default for metrics
             value="Line",
             button_type="primary",
-            width=200,
+            width=180,
             margin=(2, 5)
         )
         
@@ -264,6 +274,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 pn.Row(
                     self.x_axis_select,
                     self.y_axis_select,
+                    self.group_by_select,
                     self.plot_type_radio,
                     self.generate_plot_btn,
                     margin=(5, 2)
@@ -383,7 +394,8 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         
         # Config bar callbacks
         self.x_axis_select.param.watch(self._on_x_axis_changed, 'value')
-        self.y_axis_select.param.watch(self._on_y_axis_changed, 'value') 
+        self.y_axis_select.param.watch(self._on_y_axis_changed, 'value')
+        self.group_by_select.param.watch(self._on_group_by_changed, 'value')
         self.plot_type_radio.param.watch(self._on_plot_type_changed, 'value')
         self.generate_plot_btn.on_click(self._on_generate_plot_click)
     
@@ -564,6 +576,9 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             # Get available columns for this analysis
             self._populate_axis_options(analysis_id, config)
             
+            # Populate group by options
+            self._populate_group_by_options()
+            
             # Enable generate button if both axes are selected
             self._update_generate_button_state()
             
@@ -632,6 +647,98 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         except Exception as e:
             logger.error(f"Failed to update button state: {e}")
     
+    def _populate_group_by_options(self):
+        """Populate group by dropdown with available categorical columns."""
+        try:
+            options = [("None", "")]
+            
+            # Core grouping options (always available)
+            core_options = [
+                ("Cell", "cell_name"),
+                ("Temperature", "temperature"), 
+                ("Technique", "fundamental_technique"),
+                ("File/Experiment", "file_name")
+            ]
+            options.extend(core_options)
+            
+            # Add analysis insights columns (categorical by design)
+            if self.current_plot.analysis_type:
+                config = self.registry.get_analysis(self.current_plot.analysis_type)
+                if config and config.output_columns and "insights" in config.output_columns:
+                    insights = config.output_columns["insights"]
+                    for col in insights:
+                        display_name = col.replace("_", " ").title()
+                        prefixed_col = f"{self.current_plot.analysis_type}_{col}"
+                        options.append((display_name, prefixed_col))
+            
+            # Update dropdown
+            self.group_by_select.options = options
+            logger.debug(f"Populated {len(options)} group by options")
+            
+        except Exception as e:
+            logger.error(f"Failed to populate group by options: {e}")
+    
+    def _update_plot_type_options_for_column(self, column_name):
+        """Update plot type options based on column category."""
+        try:
+            if not column_name or not self.current_plot.analysis_type:
+                return
+            
+            # Determine column category
+            category = self._get_column_category(column_name)
+            
+            # Update plot type options based on category
+            if category == "metrics":
+                # Metrics: Time-series and correlations
+                new_options = ["Line", "Scatter"]
+                default_value = "Line"
+            elif category == "quality": 
+                # Quality: Distribution analysis
+                new_options = ["Histogram", "Box Plot", "Violin Plot"]
+                default_value = "Histogram"
+            elif category == "insights":
+                # Insights: Categorical comparisons
+                new_options = ["Bar Chart", "Count Plot"]  
+                default_value = "Bar Chart"
+            else:
+                # Default: Assume metrics
+                new_options = ["Line", "Scatter"]
+                default_value = "Line"
+            
+            # Update radio button options
+            self.plot_type_radio.options = new_options
+            self.plot_type_radio.value = default_value
+            self.current_plot.plot_type = default_value.lower().replace(" ", "_")
+            
+            logger.debug(f"Updated plot types for {category} column: {new_options}")
+            
+        except Exception as e:
+            logger.error(f"Failed to update plot type options: {e}")
+    
+    def _get_column_category(self, column_name):
+        """Determine if a column is metrics, quality, or insights."""
+        try:
+            if not self.current_plot.analysis_type:
+                return "metrics"  # Default
+            
+            config = self.registry.get_analysis(self.current_plot.analysis_type)
+            if not config or not config.output_columns:
+                return "metrics"
+                
+            # Check each category
+            for category, columns in config.output_columns.items():
+                # Column might have analysis prefix, so check both ways
+                clean_column = column_name.replace(f"{self.current_plot.analysis_type}_", "")
+                if clean_column in columns or column_name in columns:
+                    return category
+            
+            # Default to metrics if not found
+            return "metrics"
+            
+        except Exception as e:
+            logger.error(f"Failed to get column category for {column_name}: {e}")
+            return "metrics"
+    
     # === CONFIG BAR CALLBACK METHODS ===
     
     def _on_x_axis_changed(self, event):
@@ -649,7 +756,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Failed to handle X-axis change: {e}")
     
     def _on_y_axis_changed(self, event):
-        """Handle Y-axis selection change."""
+        """Handle Y-axis selection change and update plot types accordingly."""
         try:
             y_axis = event.new
             # Ensure we have a string value, not a tuple
@@ -657,10 +764,27 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 y_axis = y_axis[1] if len(y_axis) > 1 else y_axis[0]
             
             self.current_plot.y_axis = str(y_axis) if y_axis else ""
+            
+            # Update plot type options based on column category
+            self._update_plot_type_options_for_column(y_axis)
+            
             self._update_generate_button_state()
             logger.debug(f"Y-axis changed to: {y_axis}")
         except Exception as e:
             logger.error(f"Failed to handle Y-axis change: {e}")
+    
+    def _on_group_by_changed(self, event):
+        """Handle group by selection change."""
+        try:
+            group_by = event.new
+            # Ensure we have a string value, not a tuple
+            if isinstance(group_by, (tuple, list)):
+                group_by = group_by[1] if len(group_by) > 1 else group_by[0]
+            
+            self.current_plot.group_by = str(group_by) if group_by else ""
+            logger.debug(f"Group by changed to: {group_by}")
+        except Exception as e:
+            logger.error(f"Failed to handle group by change: {e}")
     
     def _on_plot_type_changed(self, event):
         """Handle plot type selection change."""
