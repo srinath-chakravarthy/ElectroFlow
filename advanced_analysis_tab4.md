@@ -1,307 +1,277 @@
-# Advanced Tab Perspective Implementation Plan
+# Advanced Tab Implementation Plan - Merged Phase 1+2
 
 ## Executive Summary
 
-After extensive analysis of Tab 3 registry development complexity vs. user research needs, we've decided to **test a Perspective-powered advanced analytics approach**. This leverages the existing robust backend (LazyDataService, accumulation tracking, analysis results) with Perspective's interactive capabilities to create an unlimited research workbench.
+**Objective**: Create a functional Advanced Research Analytics tab that combines basic UI structure (Phase 1) with real data integration (Phase 2) to enable immediate electrochemical data exploration using Perspective.
 
-## Key Decision: Test Perspective Approach
+**Strategy**: Build a working exploration tool immediately rather than static placeholders, leveraging existing LazyDataService and Panel UI patterns.
 
-### Why This Makes Sense
-- **File management**: Already excellent (Tab 1 complete)
-- **Group management**: Good control when needed (Tab 2 functional) 
-- **Registry system**: Built but complex - may not be needed for research workflows
-- **Perspective power**: Unlimited interactive analysis with minimal development
+**Implementation Path**: Add as `src_clean/panel_app/components/advanced_research_tab.py` following existing tab patterns, integrated with main Panel application.
 
-### Architecture Philosophy
-> "Give Perspective everything, let users explore freely with minimal domain-specific pre-filtering"
+## Merged Phase 1+2 Implementation Scope
 
-## Current System Strengths to Leverage
+### Core Components to Build
 
-### Backend Infrastructure ✅
-- **LazyDataService**: Multi-file queries with filter chaining
-- **Accumulation tracking**: Cross-file experiment progression stored at segment level
-- **Analysis results**: Sophisticated electrochemical insights (kinetics, resistance, quality metrics)
-- **Universal schema**: 29-column instrument-agnostic data format
-- **Arrow integration**: Zero-copy data transfer to Perspective
+#### 1. Advanced Research Tab Class
+**File**: `src_clean/panel_app/components/advanced_research_tab.py`
+**Pattern**: Follow existing tab structure from `group_management_tab.py`
 
-### Data Scale Reality
-```
-Actual dataset size:
-├── ~10,000 segments (metadata + analysis results)
-├── ~10,000,000 raw data points (time-series measurements)  
-├── Rich context: cell metadata, file metadata, temperature
-└── Analysis results: resistance, kinetics, fitting coefficients
+```python
+class AdvancedResearchTab:
+    """
+    Advanced analytics with Perspective integration.
+    Merged Phase 1+2: Functional foundation with real data.
+    """
+    def __init__(self, api):
+        self.api = api
+        self.lazy_service = get_lazy_data_service()
+        self._create_components()
+        self._setup_layout()
+        self._setup_callbacks()
 ```
 
-## Proposed Tab Implementation: Left-Right Pane Structure
-
-### Layout Design
+#### 2. Three-Panel Layout Structure
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ 🔬 Advanced Research Analytics                          │
-├───────────────────┬─────────────────────────────────────┤
-│                   │                                     │
-│   CELL & TEMP     │        PERSPECTIVE WORKSPACE        │
-│   SELECTION       │                                     │
-│     (Left)        │            (Right)                  │
-│                   │                                     │
-│ 🔋 Cells:         │  📊 Interactive Analysis:           │
-│ ☑️ Cell_A         │  • Drag columns to explore          │
-│ ☑️ Cell_B         │  • Create custom expressions        │
-│ ☑️ Cell_C         │  • Multiple chart types             │
-│ □  Cell_D         │  • Real-time filtering              │
-│                   │  • Publication-quality plots        │
-│ 🌡️ Temperature:   │                                     │
-│ [All ▼]           │                                     │
-│ or                │                                     │
-│ [25°C ▼]          │                                     │
-│                   │                                     │
-│ [🔍 LOAD DATA]    │                                     │
-│                   │                                     │
-│ 📊 Dataset Info:  │                                     │
-│ Rows: 2.3M        │                                     │
-│ Cells: 3          │                                     │
-│ Temp: All         │                                     │
-│                   │                                     │
-└───────────────────┴─────────────────────────────────────┘
+├─────────────┬─────────────┬─────────────────────────────┤
+│             │             │                             │
+│ DATA        │ QUICK       │     PERSPECTIVE             │
+│ SELECTION   │ ACTIONS     │     WORKSPACE               │
+│ (320px)     │ (200px)     │     (remaining width)       │
+│             │             │                             │
+│ ☑️ Cell_A   │ 📊 Load     │ Interactive Analysis:       │
+│ ☑️ Cell_B   │ 🔄 Refresh  │ • Drag columns to explore   │
+│ ☑️ Cell_C   │ 📋 Info     │ • Custom expressions        │
+│             │             │ • Multiple chart types      │
+│ 🌡️ Temp:    │ Status:     │ • Real-time filtering       │
+│ [All ▼]     │ Ready ✅    │ • Export capabilities       │
+│             │             │                             │
+└─────────────┴─────────────┴─────────────────────────────┘
 ```
 
-## Master Arrow Table Design
+#### 3. Data Selection Panel (Left)
+**Components**:
+- `pn.widgets.Tabulator` for cell selection (supports many cells, checkbox selection)
+- `pn.widgets.Select` for temperature filtering  
+- Info display showing data scale (segments, files, time range)
+- Professional card styling matching existing tabs
 
-### Complete Electrochemical Dataset
-The master table combines all data layers for unlimited analysis:
+#### 4. Quick Actions Panel (Middle)
+**Components**:
+- `pn.widgets.Button` for "Load Dataset" (primary action)
+- `pn.widgets.Button` for "Refresh Cells" 
+- `pn.widgets.Button` for "Dataset Info"
+- Status indicator with real-time feedback
+- Professional styling with clear visual hierarchy
 
+#### 5. Perspective Workspace (Right)
+**Components**:
+- `pn.pane.Perspective` with full feature set enabled
+- Arrow table integration via Polars → Arrow conversion
+- Professional theming and sizing
+- Error handling with graceful fallbacks
+
+### Backend Integration Points
+
+#### 1. LazyDataService Extension
+**New Methods Needed**:
 ```python
-Master Arrow Columns:
-├── Identifiers
-│   ├── segment_id, cell_name, file_id
-│   └── timestamp, acquisition_start_date
-├── Raw Measurements  
-│   ├── time_s, potential_v, current_a
-│   ├── power_w, temperature_c
-│   └── impedance_real_ohm, impedance_imag_ohm (for EIS)
-├── Experimental Context
-│   ├── experiment_capacity_cumulative_ah ← Your cycle proxy!
-│   ├── experiment_time_cumulative_s
-│   └── experiment_energy_cumulative_wh
-├── Analysis Results (Flattened from JSON)
-│   ├── ir_immediate_ohm, ir_10s_ohm, ir_30s_ohm
-│   ├── time_constant_s, voltage_infinity
-│   ├── r_squared, rmse, fit_quality
-│   └── analysis_type, success_flag
-├── Metadata
-│   ├── fundamental_technique, technique_id
-│   ├── chemistry, nominal_capacity_ah
-│   ├── cathode_material, electrolyte_type
-│   └── processing_status, original_filename
-└── Computed Fields (Available for expressions)
-    ├── resistance_ratio = ir_10s_ohm / ir_immediate_ohm
-    ├── capacity_efficiency = abs(discharge_ah) / charge_ah  
-    └── voltage_range = end_potential_v - start_potential_v
+def create_comprehensive_research_query(self, cell_filters: List[str] = None, 
+                                      temp_filter: float = None) -> str:
+    """Create master query for Perspective with minimal filtering."""
+
+def get_available_research_cells(self) -> List[str]:
+    """Get cells available for advanced research."""
+
+def get_dataset_info(self, query_id: str) -> Dict[str, Any]:
+    """Get metadata about dataset scale and characteristics."""
 ```
 
-## Research Capabilities Enabled
-
-### Example User Workflows
-1. **"Resistance evolution after 5 cycles around 4V"**
-   - Filter: `experiment_capacity_cumulative_ah >= 5.0`
-   - Filter: `potential_v between 3.9 and 4.1` 
-   - X-axis: `experiment_capacity_cumulative_ah`
-   - Y-axis: `ir_immediate_ohm`
-   - Color: `cell_name`
-   - Result: Cross-cell resistance degradation analysis
-
-2. **"Temperature effects on kinetics quality"**
-   - Group by: `temperature_c`
-   - X-axis: `time_constant_s`
-   - Y-axis: `r_squared`
-   - Filter: `fundamental_technique = 'Rest'`
-   - Chart: Scatter plot showing kinetics vs. fit quality by temperature
-
-3. **"Raw voltage curves for best-fitting segments"**
-   - Filter: `r_squared >= 0.95`
-   - Filter: `analysis_type = 'exponential_fit'`
-   - X-axis: `time_s`
-   - Y-axis: `potential_v` 
-   - Color: `time_constant_s`
-   - Result: Raw relaxation curves for high-quality exponential fits
-
-## Implementation Plan
-
-### Phase 1: Core Implementation
+#### 2. API Extensions  
+**New Methods in** `src_clean/backend/api.py`:
 ```python
-class AdvancedResearchTab:
-    def __init__(self, api):
-        self.api = api
-        
-        # Left pane: Simple domain filters
-        self.cell_selector = pn.widgets.CheckBoxGroup(
-            name="Select Cells",
-            options=self.get_available_cells(),
-            value=[]
-        )
-        
-        self.temp_selector = pn.widgets.Select(
-            name="Temperature Filter", 
-            options=['All'] + self.get_available_temperatures(),
-            value='All'
-        )
-        
-        self.load_button = pn.widgets.Button(
-            name="🔍 Load Dataset",
-            button_type="primary"
-        )
-        
-        # Right pane: Perspective workspace
-        self.perspective_pane = pn.pane.HTML("Select cells and click Load Dataset")
-        
-        # Layout
-        self.panel = pn.Row(
-            pn.Column(
-                "## 🔋 Data Selection",
-                self.cell_selector,
-                self.temp_selector, 
-                self.load_button,
-                self.create_info_panel(),
-                width=300, 
-                margin=(10, 10)
-            ),
-            pn.Column(
-                "## 📊 Interactive Analysis",
-                self.perspective_pane,
-                margin=(10, 10)
-            ),
-            sizing_mode='stretch_width'
-        )
-        
-        # Event handlers
-        self.load_button.on_click(self.load_perspective_data)
-    
-    def load_perspective_data(self, event=None):
-        """Create and load Perspective with filtered master table."""
-        try:
-            # Apply minimal pre-filtering
-            arrow_table = self.create_master_arrow_table()
-            
-            # Create Perspective pane
-            self.perspective_pane.object = pn.pane.Perspective(
-                arrow_table,
-                width=900,
-                height=600, 
-                settings=True,  # Show all controls
-                theme='pro'     # Professional theme
-            ).object
-            
-        except Exception as e:
-            self.perspective_pane.object = f"Error loading data: {str(e)}"
-    
-    def create_master_arrow_table(self):
-        """Create the complete electrochemical dataset as Arrow table."""
-        # Get selections
-        selected_cells = self.cell_selector.value
-        temp_filter = self.temp_selector.value
-        
-        # Use existing LazyDataService with minimal filtering
-        query_filters = {}
-        if selected_cells:
-            query_filters['cells'] = selected_cells
-        if temp_filter != 'All':
-            query_filters['temperature'] = float(temp_filter.replace('°C', ''))
-        
-        # Create comprehensive dataset
-        master_query = self.api.create_comprehensive_research_query(query_filters)
-        polars_df = self.api.materialize_query_for_visualization(master_query)
-        
-        # Convert to Arrow (zero-copy!)
-        return polars_df.to_arrow()
+def get_research_dataset_for_perspective(self, cells: List[str] = None, 
+                                       temperature: float = None) -> pl.DataFrame:
+    """Get comprehensive dataset optimized for Perspective analysis."""
+
+def get_research_data_summary(self, cells: List[str] = None) -> Dict[str, Any]:
+    """Get summary statistics for dataset selection."""
 ```
 
-### Phase 2: Backend Integration
+### Data Pipeline Architecture
+
+#### 1. Query Creation Flow
+```
+Cell Selection → LazyDataService → Polars LazyFrame → Filter Chain → Query ID
+```
+
+#### 2. Data Materialization Flow  
+```
+Query ID → LazyFrame.collect() → Polars DataFrame → .to_arrow() → Perspective
+```
+
+#### 3. Error Handling Flow
+```
+Exception → Log Error → Status Update → Graceful Fallback → User Notification
+```
+
+### UI/UX Implementation Details
+
+#### 1. Professional Styling
+**Follow existing patterns from**:
+- `group_management_tab.py` for card layouts
+- `main_tab.py` for button styling  
+- `status_bar.py` for status indicators
+- Colors: Scientific blue (#1976D2), professional grays
+
+#### 2. State Management
+**Key State Variables**:
 ```python
-# Extend existing LazyDataService
-def create_comprehensive_research_query(self, filters=None):
-    """
-    Create comprehensive Arrow table with all electrochemical data.
-    Joins: raw_data + segments + cells + files + analysis_results
-    """
-    base_query = (
-        pl.scan_parquet("raw_data.parquet")
-        .join(pl.scan_table("segments"), on="segment_id")  
-        .join(pl.scan_table("cells"), on="cell_id")
-        .join(pl.scan_table("files"), on="file_id")
-    )
-    
-    # Apply minimal filters
-    if filters:
-        if 'cells' in filters:
-            base_query = base_query.filter(pl.col('cell_name').is_in(filters['cells']))
-        if 'temperature' in filters:
-            base_query = base_query.filter(pl.col('temperature_c') == filters['temperature'])
-    
-    # Add computed columns for common expressions
-    base_query = base_query.with_columns([
-        (pl.col('ir_10s_ohm') / pl.col('ir_immediate_ohm')).alias('resistance_ratio'),
-        (pl.col('end_potential_v') - pl.col('start_potential_v')).alias('voltage_range'),
-        # Add more computed fields as needed
-    ])
-    
-    return base_query
+self.selected_cells = []
+self.current_temperature_filter = "All"  
+self.current_query_id = None
+self.dataset_loaded = False
+self.perspective_ready = False
 ```
 
-## Success Metrics
+#### 3. Event Handling
+**Primary Callbacks**:
+- `_on_load_dataset()` - Main data loading action
+- `_on_cell_selection_changed()` - Update available actions
+- `_on_refresh_cells()` - Reload cell options
+- `_on_show_dataset_info()` - Display data characteristics
 
-### Technical Success
-- [ ] 10M+ row dataset loads in <30 seconds
-- [ ] Interactive filtering responds in <5 seconds  
-- [ ] Cross-cell comparisons work smoothly
-- [ ] Arrow integration provides zero-copy performance
+### Performance Considerations
 
-### Research Success  
-- [ ] Users can reproduce "resistance after 5 cycles" analysis
-- [ ] Temperature effects clearly visible in data
-- [ ] Raw data and analysis results correlate properly
-- [ ] Publication-quality plots exported successfully
+#### 1. Data Loading Strategy
+- **Lazy Loading**: Only materialize data when "Load Dataset" clicked
+- **Progress Indication**: Show loading progress for large datasets
+- **Memory Management**: Use Arrow format for zero-copy data transfer
+- **Error Recovery**: Graceful handling of memory/performance issues
 
-### Development Success
-- [ ] Implementation completed in days, not weeks
-- [ ] Minimal custom UI components required
-- [ ] Leverages existing backend without major changes
-- [ ] Easy to extend with new data columns
+#### 2. Scalability Approach  
+- **Start Simple**: Load full datasets, optimize later if needed
+- **Fallback Options**: Data sampling if performance issues arise
+- **Caching Strategy**: Leverage existing LazyDataService caching
+
+#### 3. User Experience
+- **Fast Feedback**: Immediate response to selections
+- **Clear Status**: Always show what's happening
+- **Professional Polish**: Consistent with existing tabs
+
+## Integration with Main App
+
+### 1. Main App Integration
+**File**: `src_clean/panel_app/main.py`
+```python
+# Add to existing tab structure
+self.advanced_tab = AdvancedResearchTab(self.api)
+tabs.append(("🔬 Advanced Research", self.advanced_tab.panel))
+```
+
+### 2. API Backend Integration
+**Extends existing**: `src_clean/backend/api.py`
+- New methods follow existing patterns
+- Reuse existing error handling and logging
+- Maintain consistency with Tab 1/2 integration
+
+### 3. Configuration Integration
+**Uses existing**: `src_clean/core/config.py`
+- Same data directories and settings
+- Consistent logging configuration  
+- Shared database connections
+
+## Development Phases
+
+### Merged Phase 1+2: Functional Foundation
+**Deliverables**:
+- ✅ Working three-panel layout integrated into main app
+- ✅ Real cell selection with API data
+- ✅ Functional "Load Dataset" with Perspective display
+- ✅ Basic error handling and status feedback
+- ✅ Professional styling consistent with existing tabs
+
+### Phase 3: Enhanced Functionality 
+**Future Scope**:
+- Advanced filtering widgets
+- Dataset sampling controls
+- Export capabilities
+- Performance optimizations
+
+### Phase 4: Templates & Caching 
+**Future Scope**:
+- Saved query templates
+- Query caching and persistence
+- Collaborative features
+- Advanced research workflows
+
+## Technical Architecture
+
+### File Structure
+```
+src_clean/panel_app/components/
+├── advanced_research_tab.py          # Main tab implementation
+├── advanced_research/                # Supporting modules (future)
+│   ├── __init__.py
+│   ├── data_manager.py               # Data loading logic
+│   ├── perspective_integration.py    # Perspective helpers
+│   └── query_templates.py            # Template system (Phase 4)
+```
+
+### Dependencies
+- **Existing**: Panel, Polars, existing API backend
+- **New**: `panel.pane.Perspective` (already available)
+- **Future**: Enhanced Arrow integration if needed
+
+### Configuration
+```python
+# Add to existing config
+ADVANCED_RESEARCH_SETTINGS = {
+    'max_dataset_rows': 1_000_000,      # Performance limit
+    'default_sample_size': 100_000,     # If sampling needed
+    'perspective_theme': 'pro',         # Professional theme
+    'enable_exports': True,             # Export capabilities
+}
+```
 
 ## Risk Mitigation
 
-### Performance Concerns
-- **10M rows might be slow**: Test with data decimation options
-- **Memory usage**: Monitor Arrow table size, implement lazy loading if needed
-- **Perspective limitations**: Have fallback to simplified dataset
+### Technical Risks
+1. **Performance Issues**: Implement sampling fallbacks
+2. **Memory Problems**: Monitor usage, add limits if needed
+3. **Perspective Integration**: Test thoroughly with real data
+4. **API Complexity**: Leverage existing patterns, start simple
 
-### User Experience  
-- **Learning curve**: Provide example workflows and documentation
-- **Overwhelming options**: Consider guided tours or preset views
-- **Domain knowledge**: Include tooltips explaining electrochemical terms
+### User Experience Risks  
+1. **Learning Curve**: Provide clear documentation and examples
+2. **Data Overwhelming**: Good defaults and guided exploration
+3. **Integration Confusion**: Clear visual/functional separation from other tabs
 
-## Future Extensions
+## Claude-Code Implementation Notes
 
-### If Successful
-- Add more computed columns for common electrochemical calculations
-- Implement data export/import for collaboration
-- Add real-time streaming for live experiments
-- Create saved query templates for common analyses
+### Priority Implementation Order
+1. **Advanced Research Tab Class** - Core structure and integration
+2. **Data Selection Panel** - Real cell loading and filtering
+3. **Perspective Integration** - Arrow data pipeline  
+4. **Load Dataset Functionality** - Core user workflow
+5. **Error Handling & Status** - Professional user experience
+6. **Professional Styling** - Visual integration with existing app
 
-### Registry System Value
-- Keep registry for guided workflows in Tab 3
-- Use registry for data validation and quality checks  
-- Registry valuable for teaching and standardized analysis
-- Perspective complements rather than replaces registry
+### Key Implementation Patterns to Follow
+- **Panel Widget Creation**: Follow `group_management_tab.py` patterns
+- **API Integration**: Follow `main_tab.py` backend call patterns  
+- **Error Handling**: Follow `status_bar.py` notification patterns
+- **Styling**: Use existing card/button/layout styles
+- **State Management**: Follow param-based patterns from existing tabs
 
-## Conclusion
-
-This approach leverages your sophisticated backend with Perspective's unlimited frontend capabilities. It's a **test of the hypothesis** that researchers need **exploration tools** more than **guided workflows**.
-
-**Key insight**: Your accumulation tracking + analysis results + Perspective interactivity = **Revolutionary electrochemical research platform**
-
-The left-right pane structure provides the perfect balance: **domain-smart filtering** (left) + **unlimited exploration** (right) = **Professional research tool** with **rapid development timeline**.
+### Testing Strategy
+1. **Unit Tests**: API integration and data loading
+2. **Integration Tests**: Full workflow with real data
+3. **Performance Tests**: Large dataset handling
+4. **User Acceptance**: Research workflow validation
 
 ---
 
-*Status: Ready for prototype development and user testing*
+**Status**: Ready for claude-code implementation
+**Target**: Functional exploration tool integrated with main Panel application
