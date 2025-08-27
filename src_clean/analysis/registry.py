@@ -168,6 +168,50 @@ class AnalysisRegistry:
         analyses = self.list_analyses(category)
         return [(analysis.name, analysis.analysis_id) for analysis in analyses]
     
+    def get_analyses_for_technique(self, technique_name: str) -> List[AnalysisConfig]:
+        """
+        Get all analyses applicable to a specific fundamental technique.
+        
+        Args:
+            technique_name: Fundamental technique name (e.g., 'Rest', 'Galvanostatic')
+            
+        Returns:
+            List of AnalysisConfig objects that apply to the given technique
+        """
+        applicable_analyses = []
+        
+        for analysis in self._analyses.values():
+            if technique_name in analysis.required_techniques:
+                applicable_analyses.append(analysis)
+        
+        return applicable_analyses
+    
+    def get_analysis_ids_for_technique(self, technique_name: str) -> List[str]:
+        """
+        Get analysis IDs for a specific fundamental technique.
+        
+        Args:
+            technique_name: Fundamental technique name (e.g., 'Rest', 'Galvanostatic')
+            
+        Returns:
+            List of analysis_id strings that apply to the given technique
+        """
+        analyses = self.get_analyses_for_technique(technique_name)
+        return [analysis.analysis_id for analysis in analyses]
+    
+    def get_analysis_options_for_technique(self, technique_name: str) -> List[tuple[str, str]]:
+        """
+        Get analysis options for UI dropdowns, filtered by technique.
+        
+        Args:
+            technique_name: Fundamental technique name (e.g., 'Rest', 'Galvanostatic')
+            
+        Returns:
+            List of (display_name, analysis_id) tuples for analyses applicable to technique
+        """
+        analyses = self.get_analyses_for_technique(technique_name)
+        return [(analysis.name, analysis.analysis_id) for analysis in analyses]
+    
     def validate_analysis_request(self, analysis_id: str, segments: List[Dict[str, Any]]) -> tuple[bool, str]:
         """Validate that an analysis can be run with given data."""
         config = self.get_analysis(analysis_id)
@@ -345,6 +389,7 @@ class AnalysisRegistry:
             name="Basic Statistics", 
             description="Statistical summary of segment metrics (mean, std, min, max)",
             category=AnalysisCategory.BASIC_STATISTICS,
+            required_techniques=["Rest", "Galvanostatic", "Potentiostatic", "EIS", "Cyclic_Voltammetry"],  # Applicable to all
             min_segments=1,
             analysis_function=basic_statistics_analysis,
             settings_schema={
@@ -383,7 +428,7 @@ class AnalysisRegistry:
             name="Resistance Analysis",
             description="Instantaneous resistance calculations from galvanostatic data",
             category=AnalysisCategory.ELECTROCHEMICAL,
-            required_techniques=["Galvanostatic"],
+            required_techniques=["Galvanostatic", "EIS"],
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=resistance_analysis_function,
@@ -462,7 +507,7 @@ class AnalysisRegistry:
             name="Kinetics Analysis",
             description="Relaxation kinetics from REST phase analysis",
             category=AnalysisCategory.KINETICS,
-            required_techniques=["Rest"],
+            required_techniques=["Rest", "Potentiostatic"],
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=kinetics_analysis_function,

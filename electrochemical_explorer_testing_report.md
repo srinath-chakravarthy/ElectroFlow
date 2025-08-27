@@ -52,7 +52,8 @@
 **Expected Behavior**: Should show cell names, segment counts, quality assessment, and status messages
 **Actual Behavior**: Shows "cell = NaN, Segments = 30.0, Quality = NaN, Status = NaN"
 **Error Messages**: None displayed
-**Status**: Open
+**Status**: Fixed
+**Fix Notes**: Enhanced cell identification with fallback column detection, added robust NaN handling, improved quality assessment
 
 **BUG-002**  
 **Priority**: High
@@ -66,7 +67,8 @@
 **Expected Behavior**: Should generate overlay plot with multiple metrics
 **Actual Behavior**: Plot Error: 'Overlay' object has no attribute replace
 **Error Messages**: Debug: x=start_timestamp, y=['capacity_ah', 'duration_s', 'end_potential_v']
-**Status**: Open
+**Status**: Fixed  
+**Fix Notes**: Replaced complex overlay with primary metric approach, shows "Primary + N others" in title, TODO added for future proper overlay implementation
 
 ### **Bug Template**
 ```
