@@ -499,23 +499,46 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             raise
     
     def _get_y_metrics_options(self, df):
-        """Get available Y-axis metrics from dataset."""
+        """Get available Y-axis metrics from dataset with technique filtering."""
         options = []
         
-        # Add registry-based columns
+        # Add registry-based columns (filtered by technique if applicable)
         for analysis_id, info in self.available_columns.items():
+            # Filter by technique relevance
+            if self.current_technique != "All":
+                # Simple technique-analysis mapping
+                technique_analysis_map = {
+                    "REST": ["kinetics", "equilibrium"],
+                    "Galvanostatic": ["resistance", "basic_statistics"], 
+                    "Potentiostatic": ["current_decay", "kinetics"],
+                    "EIS": ["resistance", "impedance"],
+                    "CV": ["basic_statistics"]
+                }
+                
+                relevant_analyses = technique_analysis_map.get(self.current_technique, [])
+                if not any(analysis in analysis_id.lower() for analysis in relevant_analyses):
+                    continue
+            
             for col in info['columns']:
                 if col in df.columns:
+                    # Create display name
                     display_name = col.replace(f"{analysis_id}_", "").replace("_", " ").title()
-                    options.append(col)
+                    options.append((col, f"{info['name']}: {display_name}"))
         
         # Add base numeric columns
         numeric_cols = df.select_dtypes(include=['number']).columns
-        base_cols = ['duration_s', 'capacity_ah', 'energy_wh', 'start_potential_v', 'end_potential_v']
+        base_cols = ['duration_s', 'capacity_ah', 'energy_wh', 'start_potential_v', 'end_potential_v',
+                     'exp_charge_cap_ah', 'exp_discharge_cap_ah', 'exp_time_cumulative_s']
         
         for col in base_cols:
-            if col in numeric_cols and col not in options:
-                options.append(col)
+            if col in numeric_cols and col not in [opt[0] if isinstance(opt, tuple) else opt for opt in options]:
+                display_name = col.replace("_", " ").title()
+                options.append((col, f"Base: {display_name}"))
+        
+        # Sort by display name and return just column names
+        if options and isinstance(options[0], tuple):
+            options.sort(key=lambda x: x[1])
+            return [opt[0] for opt in options]
         
         return sorted(options)
     
@@ -592,7 +615,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Failed to update data feedback: {e}")
     
     def _generate_plot(self, df):
-        """Generate interactive plot with hvplot."""
+        """Generate interactive plot with hvplot and intelligent decimation."""
         try:
             if df.empty:
                 self.plot_pane.object = """<div style='padding:40px; text-align:center; background:#fff3e0; border-radius:8px; margin:10px; border-left:3px solid #f57c00;'>
@@ -615,34 +638,96 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 return
             
             # Generate plot based on selections
-            x_col = x_axis.value if x_axis else df.columns[0]
-            y_cols = y_metrics.value
+            x_col = x_axis.value if x_axis else df.columns[0] 
+            y_cols = y_metrics.value if isinstance(y_metrics.value, list) else [y_metrics.value]
             group_col = grouping.value if grouping and grouping.value != 'None' else None
             
-            # Create hvplot
-            plot_df = df[[x_col] + y_cols + ([group_col] if group_col else [])].copy()
+            # Select required columns and handle missing data
+            required_cols = [x_col] + y_cols + ([group_col] if group_col else [])
+            available_cols = [col for col in required_cols if col in df.columns]
+            
+            if not available_cols:
+                self.plot_pane.object = """<div style='padding:40px; text-align:center; background:#fff3e0; border-radius:8px; margin:10px; border-left:3px solid #f57c00;'>
+                   <h3>⚠️ Missing Columns</h3>
+                   <p>Selected columns not available in dataset</p>
+                   </div>"""
+                return
+            
+            plot_df = df[available_cols].copy().dropna()
+            
+            # Intelligent decimation for large datasets (>10k points)
+            if len(plot_df) > 10000:
+                sample_size = min(10000, len(plot_df))
+                plot_df = plot_df.sample(n=sample_size, random_state=42)
+                decimation_note = f" (showing {sample_size:,} of {len(df):,} points)"
+            else:
+                decimation_note = f" ({len(plot_df):,} points)"
             
             if plot_type and plot_type.value == "Distribution":
-                # Distribution plot
+                # Distribution plot for first y-metric
+                y_col = y_cols[0]
+                if y_col not in plot_df.columns:
+                    y_col = y_cols[0] if y_cols else plot_df.select_dtypes(include=['number']).columns[0]
+                
                 plot = plot_df.hvplot.hist(
-                    y=y_cols[0], 
+                    y=y_col, 
                     by=group_col,
-                    bins=20,
-                    width=600,
-                    height=400,
-                    title=f"Distribution of {y_cols[0]}"
-                )
-            else:
-                # Line/Scatter plot
-                plot = plot_df.hvplot.scatter(
-                    x=x_col,
-                    y=y_cols,
-                    by=group_col,
-                    width=600,
-                    height=400,
-                    title="Electrochemical Data Explorer",
+                    bins=30,
+                    width=700,
+                    height=450,
+                    title=f"Distribution: {y_col.replace('_', ' ').title()}{decimation_note}",
+                    xlabel=y_col.replace('_', ' ').title(),
+                    ylabel="Count",
                     alpha=0.7
                 )
+            else:
+                # Line/Scatter plot - handle multiple y-metrics
+                if len(y_cols) == 1:
+                    y_col = y_cols[0]
+                    if y_col not in plot_df.columns:
+                        y_col = plot_df.select_dtypes(include=['number']).columns[0]
+                    
+                    plot = plot_df.hvplot.scatter(
+                        x=x_col,
+                        y=y_col,
+                        by=group_col,
+                        width=700,
+                        height=450,
+                        title=f"Explorer: {y_col.replace('_', ' ').title()} vs {x_col.replace('_', ' ').title()}{decimation_note}",
+                        xlabel=x_col.replace('_', ' ').title(),
+                        ylabel=y_col.replace('_', ' ').title(),
+                        alpha=0.7,
+                        size=60
+                    )
+                else:
+                    # Multiple y-metrics: create overlay
+                    plots = []
+                    for y_col in y_cols:
+                        if y_col in plot_df.columns:
+                            single_plot = plot_df.hvplot.scatter(
+                                x=x_col,
+                                y=y_col,
+                                by=group_col,
+                                alpha=0.6,
+                                size=50,
+                                label=y_col.replace('_', ' ').title()
+                            )
+                            plots.append(single_plot)
+                    
+                    if plots:
+                        plot = plots[0]
+                        for p in plots[1:]:
+                            plot *= p
+                        
+                        plot = plot.opts(
+                            width=700,
+                            height=450,
+                            title=f"Multi-Metric Explorer{decimation_note}",
+                            xlabel=x_col.replace('_', ' ').title(),
+                            legend_position='right'
+                        )
+                    else:
+                        raise ValueError("No valid y-columns available")
             
             # Update plot pane
             self.plot_pane.object = plot
@@ -652,6 +737,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             self.plot_pane.object = f"""<div style='padding:40px; text-align:center; background:#ffebee; border-radius:8px; margin:10px; border-left:3px solid #d32f2f;'>
                <h3>❌ Plot Error</h3>
                <p>Failed to generate plot: {str(e)}</p>
+               <p><small>Debug: x={getattr(x_axis, 'value', 'N/A') if 'x_axis' in locals() else 'N/A'}, y={getattr(y_metrics, 'value', 'N/A') if 'y_metrics' in locals() else 'N/A'}</small></p>
                </div>"""
     
     def _on_update_plot(self, event):
