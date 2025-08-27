@@ -37,7 +37,8 @@ class PlotState(param.Parameterized):
     
     # Axis configuration
     x_axis = param.String(default="start_time_s", doc="Selected X-axis column")
-    y_axis = param.String(default="", doc="Selected Y-axis column")
+    y_axis = param.String(default="", doc="Selected Y-axis column (backward compatibility)")
+    y_axes = param.List(default=[], doc="Selected Y-axis columns for multi-series plotting")
     group_by = param.String(default="", doc="Column to group/color by")
     
     # View controls (for Phase D)
@@ -58,6 +59,7 @@ class PlotState(param.Parameterized):
         self.analysis_name = ""
         self.x_axis = "start_time_s" 
         self.y_axis = ""
+        self.y_axes = []
         self.group_by = ""
         self.x_range_start = None
         self.x_range_end = None
@@ -92,17 +94,37 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         self.available_columns = {}
         self.registry_columns = {}
         
-        # Plot state management (Phase B)
-        self.current_plot = PlotState()  # Single plot for Phase B
+        # Plot state management (Phase C: Multi-Plot Grid)
+        self.plots = [PlotState()]  # List of plot states
+        self.active_plot_index = 0  # Currently selected plot for config
+        self.max_plots = 4  # Maximum number of plots supported
         self.available_x_columns = []    # Available X-axis options
         self.available_y_columns = []    # Available Y-axis options
         
-        # Get registry for column discovery
-        from src_clean.analysis.registry import get_analysis_registry
-        self.registry = get_analysis_registry()
+        # Initialize panel attribute first
+        self.panel = None
+        self.registry = None
         
-        # Create components with error handling
+        # Initialize all components
+        self._initialize_components()
+        
+    @property
+    def current_plot(self):
+        """Get the currently active plot state."""
+        return self.plots[self.active_plot_index]
+    
+    @current_plot.setter
+    def current_plot(self, value):
+        """Set the currently active plot state."""
+        self.plots[self.active_plot_index] = value
+    
+    def _initialize_components(self):
+        """Initialize components with error handling."""
         try:
+            logger.info("Initializing registry...")
+            from src_clean.analysis.registry import get_analysis_registry
+            self.registry = get_analysis_registry()
+            
             logger.info("Creating components...")
             self._create_components()
             logger.info("Setting up layout...")
@@ -110,13 +132,24 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.info("Setting up callbacks...")
             self._setup_callbacks()
             logger.info("Explorer tab initialization complete")
+            
+            # Initialize data
+            self._refresh_cells()
+            
         except Exception as e:
             logger.error(f"Failed to create explorer components: {e}")
-            # Create a simple error panel
-            self.panel = pn.pane.HTML(f"<h3>❌ Component Creation Error</h3><p>{str(e)}</p>")
-        
-        # Initialize data
-        self._refresh_cells()
+            # Create detailed error panel - ensure panel is always set
+            if self.panel is None:
+                import traceback
+                error_details = traceback.format_exc()
+                self.panel = pn.pane.HTML(
+                    f"<div style='padding:20px; background:#ffebee; border-radius:8px;'>"
+                    f"<h3 style='color:#d32f2f;'>❌ Component Creation Error</h3>"
+                    f"<p><strong>Error:</strong> {str(e)}</p>"
+                    f"<details><summary>Full traceback</summary>"
+                    f"<pre style='background:#f5f5f5; padding:10px; overflow:auto; max-height:300px;'>{error_details}</pre>"
+                    f"</details></div>"
+                )
         
         logger.info("Electrochemical Explorer Tab initialized")
     
@@ -227,10 +260,12 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         )
         
         # Y-axis selection  
-        self.y_axis_select = pn.widgets.Select(
-            name="Y-Axis",
+        self.y_axis_multiselect = pn.widgets.MultiSelect(
+            name="Y-Axis (Multi-select)",
             options=[("Select analysis first", "")],
-            width=150, 
+            value=[],
+            width=180,
+            size=4,
             margin=(2, 5)
         )
         
@@ -252,11 +287,35 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             margin=(2, 5)
         )
         
+        # Plot management controls (Phase C)
+        self.plot_selector = pn.widgets.Select(
+            name="Active Plot:",
+            options=["Plot 1"],
+            value="Plot 1",
+            width=100,
+            margin=(2, 5)
+        )
+        
+        self.add_plot_btn = pn.widgets.Button(
+            name="＋ Add Plot",
+            button_type="primary",
+            width=100,
+            margin=(2, 5)
+        )
+        
+        self.remove_plot_btn = pn.widgets.Button(
+            name="✕ Remove",
+            button_type="light",
+            width=90,
+            margin=(2, 5),
+            disabled=True  # Disabled when only one plot
+        )
+        
         # Generate plot button
         self.generate_plot_btn = pn.widgets.Button(
-            name="📊 Generate Plot",
+            name="📊 Generate",
             button_type="success",
-            width=120,
+            width=100,
             margin=(2, 5),
             disabled=True
         )
@@ -272,8 +331,14 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             pn.Column(
                 pn.pane.HTML("<h5>📊 Plot Configuration</h5>"),
                 pn.Row(
+                    # Plot management section
+                    self.plot_selector,
+                    self.add_plot_btn, 
+                    self.remove_plot_btn,
+                    pn.Spacer(width=20),  # Visual separator
+                    # Plot config section
                     self.x_axis_select,
-                    self.y_axis_select,
+                    self.y_axis_multiselect,
                     self.group_by_select,
                     self.plot_type_radio,
                     self.generate_plot_btn,
@@ -281,23 +346,26 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 ),
                 margin=(5, 5)
             ),
-            height=120,
+            height=150,
             sizing_mode='stretch_width',
             margin=(5, 5)
         )
         
-        # Bottom plot area (flexible)
-        self.plot_area = pn.Column(
+        # Bottom multi-plot grid area (flexible)
+        self.plot_grid = pn.Column(
             pn.pane.HTML(
                 "<div style='text-align:center; padding:50px;'>"
-                "<h3>📈 Electrochemical Analysis Plots</h3>"
-                "<p>Configure analysis in left panel to generate plots</p>"
+                "<h3>📈 Multi-Plot Analysis Grid</h3>"
+                "<p>Configure analysis and generate plots to see results</p>"
                 "</div>",
                 sizing_mode='stretch_both'
             ),
             sizing_mode='stretch_both',
             margin=(5, 5)
         )
+        
+        # Individual plot containers (initially empty)
+        self.plot_containers = [None]  # Will grow as plots are added
     
     def _create_visualization_components(self):
         """Create visualization panel components."""
@@ -359,7 +427,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         # RIGHT PANEL (70%) - Config Bar + Plot Area
         right_panel = pn.Column(
             self.config_bar,    # Top config bar (120px)
-            self.plot_area,     # Bottom plot area (flexible)
+            self.plot_grid,     # Bottom multi-plot grid (flexible)
             sizing_mode='stretch_both',
             margin=(10, 10)
         )
@@ -372,6 +440,11 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 sizing_mode='stretch_both'
             )
             logger.info("Layout created successfully")
+            
+            # Initialize plot grid layout after successful layout creation
+            logger.info("Initializing plot grid layout...")
+            self._update_plot_grid_layout()  # Initialize with single plot placeholder
+            
         except Exception as e:
             logger.error(f"Failed to create layout: {e}")
             # Fallback simple layout
@@ -392,9 +465,14 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         self.analysis_category_radio.param.watch(self._on_analysis_category_changed, 'value')
         self.analysis_select.param.watch(self._on_analysis_changed, 'value')
         
+        # Plot management callbacks (Phase C)
+        self.plot_selector.param.watch(self._on_plot_selection_changed, 'value')
+        self.add_plot_btn.on_click(self._on_add_plot_click)
+        self.remove_plot_btn.on_click(self._on_remove_plot_click)
+        
         # Config bar callbacks
         self.x_axis_select.param.watch(self._on_x_axis_changed, 'value')
-        self.y_axis_select.param.watch(self._on_y_axis_changed, 'value')
+        self.y_axis_multiselect.param.watch(self._on_y_axis_changed, 'value')
         self.group_by_select.param.watch(self._on_group_by_changed, 'value')
         self.plot_type_radio.param.watch(self._on_plot_type_changed, 'value')
         self.generate_plot_btn.on_click(self._on_generate_plot_click)
@@ -617,7 +695,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             
             # Update dropdown options
             self.x_axis_select.options = x_options
-            self.y_axis_select.options = y_options
+            self.y_axis_multiselect.options = y_options
             
             # Set smart defaults
             if x_options:
@@ -625,8 +703,9 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 self.current_plot.x_axis = "start_time_s"
                 
             if y_options:
-                self.y_axis_select.value = y_options[0][1]  # Default to first metric
-                self.current_plot.y_axis = y_options[0][1]  # Use the actual column name
+                self.y_axis_multiselect.value = [y_options[0][1]]  # Default to first metric
+                self.current_plot.y_axes = [y_options[0][1]]  # Use the actual column name
+                self.current_plot.y_axis = y_options[0][1]  # Backward compatibility
             
             logger.debug(f"Populated axis options: {len(x_options)} X-axis, {len(y_options)} Y-axis options")
             
@@ -636,10 +715,10 @@ class ElectrochemicalExplorerTab(param.Parameterized):
     def _update_generate_button_state(self):
         """Enable/disable generate button based on configuration completeness."""
         try:
-            # Enable if we have analysis, X-axis, and Y-axis selected
+            # Enable if we have analysis, X-axis, and at least one Y-axis selected
             has_analysis = bool(self.current_plot.analysis_type)
             has_x_axis = bool(self.current_plot.x_axis)
-            has_y_axis = bool(self.current_plot.y_axis) 
+            has_y_axis = bool(self.current_plot.y_axes)  # Check y_axes list
             has_cells = bool(self.selected_cells)
             
             self.generate_plot_btn.disabled = not (has_analysis and has_x_axis and has_y_axis and has_cells)
@@ -756,20 +835,29 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Failed to handle X-axis change: {e}")
     
     def _on_y_axis_changed(self, event):
-        """Handle Y-axis selection change and update plot types accordingly."""
+        """Handle Y-axis multi-selection change and update plot types accordingly."""
         try:
-            y_axis = event.new
-            # Ensure we have a string value, not a tuple
-            if isinstance(y_axis, (tuple, list)):
-                y_axis = y_axis[1] if len(y_axis) > 1 else y_axis[0]
+            y_axes_raw = event.new  # Raw selection from widget
+            logger.debug(f"Raw Y-axis selection: {y_axes_raw}")
             
-            self.current_plot.y_axis = str(y_axis) if y_axis else ""
+            # Extract column names if we get tuples (shouldn't happen with proper MultiSelect)
+            if y_axes_raw and isinstance(y_axes_raw[0], tuple):
+                y_axes = [item[1] if isinstance(item, tuple) else item for item in y_axes_raw]
+                logger.warning(f"Got tuples in Y-axis selection, extracted: {y_axes}")
+            else:
+                y_axes = y_axes_raw if y_axes_raw else []
             
-            # Update plot type options based on column category
-            self._update_plot_type_options_for_column(y_axis)
+            self.current_plot.y_axes = y_axes
+            
+            # Backward compatibility: set single y_axis to first selected
+            self.current_plot.y_axis = y_axes[0] if y_axes else ""
+            
+            # Update plot type options based on first selected column category
+            if y_axes:
+                self._update_plot_type_options_for_column(y_axes[0])
             
             self._update_generate_button_state()
-            logger.debug(f"Y-axis changed to: {y_axis}")
+            logger.debug(f"Final Y-axes: {y_axes}")
         except Exception as e:
             logger.error(f"Failed to handle Y-axis change: {e}")
     
@@ -832,6 +920,206 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Failed to load dataset: {e}")
             raise
     
+    # === MULTI-PLOT MANAGEMENT METHODS (Phase C) ===
+    
+    def _on_plot_selection_changed(self, event):
+        """Handle plot selection change."""
+        try:
+            plot_name = event.new
+            plot_index = int(plot_name.split(' ')[1]) - 1  # "Plot 1" -> 0
+            self.active_plot_index = plot_index
+            
+            # Update config bar to show active plot's settings
+            self._sync_config_bar_to_active_plot()
+            
+            # Update visual feedback for active plot
+            self._update_plot_grid_visual_feedback()
+            
+            logger.debug(f"Switched to active plot: {plot_index + 1}")
+            
+        except Exception as e:
+            logger.error(f"Failed to change plot selection: {e}")
+    
+    def _on_add_plot_click(self, event):
+        """Handle add plot button click."""
+        try:
+            if len(self.plots) >= self.max_plots:
+                logger.warning(f"Maximum plots ({self.max_plots}) reached")
+                return
+            
+            # Create new plot state
+            new_plot = PlotState()
+            self.plots.append(new_plot)
+            self.plot_containers.append(None)  # Add placeholder container
+            
+            # Update plot selector options
+            plot_options = [f"Plot {i+1}" for i in range(len(self.plots))]
+            self.plot_selector.options = plot_options
+            self.plot_selector.value = f"Plot {len(self.plots)}"  # Select new plot
+            
+            # Update active plot index
+            self.active_plot_index = len(self.plots) - 1
+            
+            # Enable remove button if we have more than one plot
+            self.remove_plot_btn.disabled = len(self.plots) <= 1
+            
+            # Sync config to new plot
+            self._sync_config_bar_to_active_plot()
+            
+            # Update plot grid layout
+            self._update_plot_grid_layout()
+            
+            logger.info(f"Added plot {len(self.plots)}, now have {len(self.plots)} plots")
+            
+        except Exception as e:
+            logger.error(f"Failed to add plot: {e}")
+    
+    def _on_remove_plot_click(self, event):
+        """Handle remove plot button click."""
+        try:
+            if len(self.plots) <= 1:
+                logger.warning("Cannot remove last plot")
+                return
+            
+            # Remove current plot
+            removed_index = self.active_plot_index
+            self.plots.pop(removed_index)
+            self.plot_containers.pop(removed_index)
+            
+            # Adjust active plot index
+            if self.active_plot_index >= len(self.plots):
+                self.active_plot_index = len(self.plots) - 1
+            
+            # Update plot selector options
+            plot_options = [f"Plot {i+1}" for i in range(len(self.plots))]
+            self.plot_selector.options = plot_options
+            self.plot_selector.value = f"Plot {self.active_plot_index + 1}"
+            
+            # Disable remove button if only one plot left
+            self.remove_plot_btn.disabled = len(self.plots) <= 1
+            
+            # Sync config to active plot
+            self._sync_config_bar_to_active_plot()
+            
+            # Update plot grid layout
+            self._update_plot_grid_layout()
+            
+            logger.info(f"Removed plot {removed_index + 1}, now have {len(self.plots)} plots")
+            
+        except Exception as e:
+            logger.error(f"Failed to remove plot: {e}")
+    
+    def _sync_config_bar_to_active_plot(self):
+        """Sync config bar controls to match active plot state."""
+        try:
+            active_plot = self.current_plot
+            
+            # Update selectors to match active plot
+            if active_plot.x_axis in [opt[0] for opt in self.x_axis_select.options]:
+                self.x_axis_select.value = active_plot.x_axis
+            
+            # Sync multi-select Y-axis values
+            available_options = [opt[1] for opt in self.y_axis_multiselect.options]
+            valid_y_axes = [col for col in active_plot.y_axes if col in available_options]
+            self.y_axis_multiselect.value = valid_y_axes
+                
+            if active_plot.group_by in [opt[0] for opt in self.group_by_select.options]:
+                self.group_by_select.value = active_plot.group_by
+            
+            # Update plot type options based on first Y-axis column
+            if active_plot.y_axes:
+                self._update_plot_type_options_for_column(active_plot.y_axes[0])
+            
+            # Update plot type selector
+            display_plot_type = active_plot.plot_type.replace('_', ' ').title()
+            if display_plot_type in self.plot_type_radio.options:
+                self.plot_type_radio.value = display_plot_type
+                
+        except Exception as e:
+            logger.error(f"Failed to sync config bar: {e}")
+    
+    def _update_plot_grid_layout(self):
+        """Update plot grid layout based on number of plots."""
+        try:
+            num_plots = len(self.plots)
+            
+            if num_plots == 1:
+                # Single plot: full width
+                layout = pn.Column(
+                    self.plot_containers[0] if self.plot_containers[0] else 
+                    pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 1<br>Click Generate to create plot</div>"),
+                    sizing_mode='stretch_both'
+                )
+                
+            elif num_plots == 2:
+                # Two plots: side by side
+                layout = pn.Row(
+                    self.plot_containers[0] if self.plot_containers[0] else 
+                    pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 1<br>Click Generate to create plot</div>"),
+                    
+                    self.plot_containers[1] if self.plot_containers[1] else 
+                    pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 2<br>Click Generate to create plot</div>"),
+                    
+                    sizing_mode='stretch_both'
+                )
+                
+            elif num_plots == 3:
+                # Three plots: top full + bottom split
+                layout = pn.Column(
+                    self.plot_containers[0] if self.plot_containers[0] else 
+                    pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 1<br>Click Generate to create plot</div>"),
+                    
+                    pn.Row(
+                        self.plot_containers[1] if self.plot_containers[1] else 
+                        pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 2<br>Click Generate to create plot</div>"),
+                        
+                        self.plot_containers[2] if self.plot_containers[2] else 
+                        pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 3<br>Click Generate to create plot</div>"),
+                        
+                        sizing_mode='stretch_both'
+                    ),
+                    sizing_mode='stretch_both'
+                )
+                
+            elif num_plots == 4:
+                # Four plots: 2x2 grid
+                layout = pn.Column(
+                    pn.Row(
+                        self.plot_containers[0] if self.plot_containers[0] else 
+                        pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 1<br>Click Generate to create plot</div>"),
+                        
+                        self.plot_containers[1] if self.plot_containers[1] else 
+                        pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 2<br>Click Generate to create plot</div>"),
+                        
+                        sizing_mode='stretch_both'
+                    ),
+                    pn.Row(
+                        self.plot_containers[2] if self.plot_containers[2] else 
+                        pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 3<br>Click Generate to create plot</div>"),
+                        
+                        self.plot_containers[3] if self.plot_containers[3] else 
+                        pn.pane.HTML("<div style='text-align:center; padding:20px; border:2px dashed #ccc;'>Plot 4<br>Click Generate to create plot</div>"),
+                        
+                        sizing_mode='stretch_both'
+                    ),
+                    sizing_mode='stretch_both'
+                )
+            
+            # Update the plot grid
+            self.plot_grid.clear()
+            self.plot_grid.append(layout)
+            
+            logger.debug(f"Updated plot grid layout for {num_plots} plots")
+            
+        except Exception as e:
+            logger.error(f"Failed to update plot grid layout: {e}")
+    
+    def _update_plot_grid_visual_feedback(self):
+        """Update visual feedback to show active plot."""
+        # This will be implemented in Phase D with better visual styling
+        # For now, just update the layout
+        self._update_plot_grid_layout()
+
     def _generate_plot_from_state(self):
         """Generate plot using current PlotState configuration."""
         try:
@@ -840,8 +1128,8 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 self._show_plot_error("No data available for plotting")
                 return
                 
-            if not self.current_plot.x_axis or not self.current_plot.y_axis:
-                self._show_plot_error("Please select both X and Y axes")
+            if not self.current_plot.x_axis or not self.current_plot.y_axes:
+                self._show_plot_error("Please select X-axis and at least one Y-axis")
                 return
             
             # Check if columns exist in dataset
@@ -849,61 +1137,159 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                 self._show_plot_error(f"X-axis column '{self.current_plot.x_axis}' not found in data")
                 return
                 
-            if self.current_plot.y_axis not in self.current_dataset.columns:
-                self._show_plot_error(f"Y-axis column '{self.current_plot.y_axis}' not found in data")
+            # Check all Y-axis columns exist
+            missing_y_cols = [col for col in self.current_plot.y_axes if col not in self.current_dataset.columns]
+            if missing_y_cols:
+                self._show_plot_error(f"Y-axis columns not found in data: {missing_y_cols}")
                 return
             
-            # Generate plot based on plot type
+            # Apply data filtering based on selected analysis (non-persistent)
             df = self.current_dataset
+            
+            if self.current_plot.analysis_type and 'fundamental_technique' in df.columns:
+                try:
+                    analysis_config = self.registry.get_analysis(self.current_plot.analysis_type)
+                    applicable_techniques = analysis_config.applicable_techniques
+                    
+                    # Filter to only show segments from applicable techniques
+                    original_count = len(df)
+                    # df = df[df['fundamental_technique'].isin(applicable_techniques)]
+                    df = df[
+                        df['fundamental_technique'].str.lower().isin([tech.lower() for tech in applicable_techniques])]
+                    filtered_count = len(df)
+                    
+                    logger.info(f"Filtered dataset: {original_count} → {filtered_count} segments "
+                               f"for {self.current_plot.analysis_type} (techniques: {applicable_techniques})")
+                    
+                    if filtered_count == 0:
+                        self._show_plot_error(f"No data found for {self.current_plot.analysis_type}. "
+                                            f"Available techniques: {df['fundamental_technique'].unique().tolist()}")
+                        return
+                        
+                except Exception as e:
+                    logger.warning(f"Could not apply technique filtering: {e}")
+                    # Continue with unfiltered data if filtering fails
             x_col = self.current_plot.x_axis
-            y_col = self.current_plot.y_axis
+            y_cols = self.current_plot.y_axes
             plot_type = self.current_plot.plot_type
+            group_by = self.current_plot.group_by
             
             # Get units for axis labels
             x_unit = self._get_column_unit(x_col)
-            y_unit = self._get_column_unit(y_col) 
             x_label = f"{x_col.replace('_', ' ').title()}"
-            y_label = f"{y_col.replace('_', ' ').title()}"
+            
+            # For multi-series, create compound Y-label
+            if len(y_cols) == 1:
+                y_unit = self._get_column_unit(y_cols[0])
+                y_label = f"{y_cols[0].replace('_', ' ').title()}"
+            else:
+                # Multiple Y columns - create combined label
+                y_labels = [col.replace('_', ' ').title() for col in y_cols]
+                y_label = " + ".join(y_labels[:3])  # Show first 3
+                if len(y_cols) > 3:
+                    y_label += f" (+ {len(y_cols)-3} more)"
+                y_unit = ""  # Mixed units - don't show specific unit
             if x_unit:
                 x_label += f" ({x_unit})"
             if y_unit:
                 y_label += f" ({y_unit})"
             
-            # Create plot using hvplot
+            # Prepare common plot parameters with hover info
+            hover_cols = ['id']  # Always include id for debugging
+            if group_by and group_by != "None" and group_by in df.columns:
+                hover_cols.append(group_by)
+            
+            plot_kwargs = {
+                "title": f"{self.current_plot.analysis_name}: {y_label} vs {x_label}",
+                "xlabel": x_label,
+                "ylabel": y_label,
+                "width": 700,
+                "height": 400,
+                "hover_cols": hover_cols
+            }
+            
+            # Add grouping/coloring if specified
+            if group_by and group_by != "None" and group_by in df.columns:
+                # Check if group column has reasonable number of unique values
+                unique_groups = df[group_by].nunique()
+                if unique_groups <= 20:  # Reasonable limit for color coding
+                    plot_kwargs["by"] = group_by
+                    plot_kwargs["title"] += f" (Grouped by {group_by.replace('_', ' ').title()})"
+                else:
+                    logger.warning(f"Too many unique values in {group_by} ({unique_groups}), skipping grouping")
+            
+            # Create plot based on plot type (multi-series support)
+            y_plot_cols = y_cols[0] if len(y_cols) == 1 else y_cols  # Single vs multiple
+            
             if plot_type == "line":
-                plot = df.hvplot.line(
-                    x=x_col, y=y_col,
-                    title=f"{self.current_plot.analysis_name}: {y_label} vs {x_label}",
-                    xlabel=x_label,
-                    ylabel=y_label,
-                    width=700, height=400
-                )
+                plot = df.hvplot.line(x=x_col, y=y_plot_cols, **plot_kwargs)
+                
             elif plot_type == "scatter":
-                plot = df.hvplot.scatter(
-                    x=x_col, y=y_col,
-                    title=f"{self.current_plot.analysis_name}: {y_label} vs {x_label}",
-                    xlabel=x_label,
-                    ylabel=y_label, 
-                    width=700, height=400
-                )
-            elif plot_type == "bar":
-                # For bar plots, we might need to aggregate data
-                plot = df.hvplot.bar(
-                    x=x_col, y=y_col,
-                    title=f"{self.current_plot.analysis_name}: {y_label} vs {x_label}",
-                    xlabel=x_label,
-                    ylabel=y_label,
-                    width=700, height=400
-                )
+                plot = df.hvplot.scatter(x=x_col, y=y_plot_cols, **plot_kwargs)
+                
+            elif plot_type == "histogram":
+                # For histograms, use first Y column (multi-histogram less common)
+                plot_kwargs["title"] = f"{self.current_plot.analysis_name}: Distribution of {y_label}"
+                plot_kwargs["xlabel"] = y_label
+                plot_kwargs["ylabel"] = "Count"
+                if group_by and group_by != "None" and group_by in df.columns:
+                    plot = df.hvplot.hist(y=y_cols[0], by=group_by, **plot_kwargs)
+                else:
+                    plot = df.hvplot.hist(y=y_cols[0], **plot_kwargs)
+                    
+            elif plot_type == "box_plot":
+                # Box plots work well with grouping and multiple columns
+                plot_kwargs["title"] = f"{self.current_plot.analysis_name}: Box Plot of {y_label}"
+                if group_by and group_by != "None" and group_by in df.columns:
+                    plot = df.hvplot.box(y=y_plot_cols, by=group_by, **plot_kwargs)
+                else:
+                    plot = df.hvplot.box(y=y_plot_cols, **plot_kwargs)
+                    
+            elif plot_type == "violin_plot":
+                # Violin plots with grouping (use first Y column)
+                plot_kwargs["title"] = f"{self.current_plot.analysis_name}: Violin Plot of {y_label}" 
+                if group_by and group_by != "None" and group_by in df.columns:
+                    plot = df.hvplot.violin(y=y_cols[0], by=group_by, **plot_kwargs)
+                else:
+                    plot = df.hvplot.violin(y=y_cols[0], **plot_kwargs)
+                    
+            elif plot_type == "bar_chart":
+                # Bar charts - use first Y column for aggregation
+                plot_kwargs["title"] = f"{self.current_plot.analysis_name}: {y_label} by {x_label}"
+                if group_by and group_by != "None" and group_by in df.columns:
+                    # Aggregate data for bar chart with grouping
+                    agg_df = df.groupby([x_col, group_by])[y_cols[0]].mean().reset_index()
+                    plot = agg_df.hvplot.bar(x=x_col, y=y_cols[0], by=group_by, **plot_kwargs)
+                else:
+                    # Simple aggregation by X column
+                    agg_df = df.groupby(x_col)[y_cols[0]].mean().reset_index()
+                    plot = agg_df.hvplot.bar(x=x_col, y=y_cols[0], **plot_kwargs)
+                    
+            elif plot_type == "count_plot":
+                # Count plots show frequency of categorical values
+                plot_kwargs["title"] = f"{self.current_plot.analysis_name}: Count of {x_label}"
+                plot_kwargs["xlabel"] = x_label
+                plot_kwargs["ylabel"] = "Count"
+                if group_by and group_by != "None" and group_by in df.columns:
+                    count_df = df.groupby([x_col, group_by]).size().reset_index(name='count')
+                    plot = count_df.hvplot.bar(x=x_col, y='count', by=group_by, **plot_kwargs)
+                else:
+                    count_df = df[x_col].value_counts().reset_index()
+                    count_df.columns = [x_col, 'count']
+                    plot = count_df.hvplot.bar(x=x_col, y='count', **plot_kwargs)
+                    
             else:
-                # Default to line
-                plot = df.hvplot.line(x=x_col, y=y_col, width=700, height=400)
+                # Default to line plot with multi-series support
+                plot = df.hvplot.line(x=x_col, y=y_plot_cols, **plot_kwargs)
             
-            # Update plot area with generated plot
-            self.plot_area.clear()
-            self.plot_area.append(plot)
+            # Store plot in the active plot container (Phase C)
+            self.plot_containers[self.active_plot_index] = plot
             
-            logger.info(f"Plot generated successfully: {plot_type} plot with {len(df)} data points")
+            # Update plot grid layout to show the new plot
+            self._update_plot_grid_layout()
+            
+            logger.info(f"Plot generated successfully: {plot_type} plot with {len(df)} data points" + 
+                       (f", grouped by {group_by}" if group_by and group_by != "None" else ""))
             
         except Exception as e:
             logger.error(f"Failed to generate plot from state: {e}")
@@ -951,8 +1337,10 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             <p><small>Check your data selection and analysis configuration</small></p>
         </div>
         """
-        self.plot_area.clear()
-        self.plot_area.append(pn.pane.HTML(error_html))
+        # Show error in active plot container (Phase C)
+        error_pane = pn.pane.HTML(error_html)
+        self.plot_containers[self.active_plot_index] = error_pane
+        self._update_plot_grid_layout()
     
     def _get_available_techniques(self, selected_cells):
         """Get available techniques from selected cells."""
@@ -1773,8 +2161,34 @@ class ElectrochemicalExplorerTabWrapper(param.Parameterized):
     
     def __init__(self, api, **params):
         super().__init__(**params)
-        self.tab = ElectrochemicalExplorerTab(api)
-        self.panel = self.tab.panel
+        
+        try:
+            self.tab = ElectrochemicalExplorerTab(api)
+            
+            # Handle case where tab panel might not be created due to initialization errors
+            if hasattr(self.tab, 'panel') and self.tab.panel is not None:
+                self.panel = self.tab.panel
+            else:
+                # Fallback panel if tab creation failed
+                self.panel = pn.pane.HTML(
+                    "<div style='padding:50px; text-align:center; background:#ffebee; border-radius:8px;'>"
+                    "<h3 style='color:#d32f2f;'>❌ Explorer Tab Panel Not Created</h3>"
+                    "<p>The tab was created but panel attribute is missing or None.</p>"
+                    "</div>"
+                )
+        except Exception as e:
+            # Capture the actual error and display it
+            import traceback
+            error_details = traceback.format_exc()
+            self.panel = pn.pane.HTML(
+                f"<div style='padding:20px; background:#ffebee; border-radius:8px; font-family:monospace;'>"
+                f"<h3 style='color:#d32f2f;'>❌ Explorer Tab Initialization Error</h3>"
+                f"<p><strong>Error:</strong> {str(e)}</p>"
+                f"<details><summary>Click to see full traceback</summary>"
+                f"<pre style='background:#f5f5f5; padding:10px; overflow:auto; max-height:300px;'>{error_details}</pre>"
+                f"</details>"
+                f"</div>"
+            )
         
     def __panel__(self):
         # Debug: Check if panel was created properly

@@ -16,7 +16,7 @@ import pandas as pd
 from typing import List, Dict, Any, Optional
 
 # Import DataViewer for plotting functionality
-from panel_app.components.data_viewer import DataViewer
+from .data_viewer import DataViewer
 
 pn.extension('tabulator', 'modal', 'filedropper')
 
