@@ -445,9 +445,12 @@ class AnalysisRegistry:
             min_segments=1,
             analysis_function=basic_statistics_analysis,
             output_columns={
-                "metrics": ["duration_mean", "capacity_mean", "energy_mean", "potential_range"],
-                "quality": ["duration_std", "capacity_std", "energy_std", "segment_count"],
-                "insights": ["technique_distribution", "quality_level"]
+                "metrics": ["duration_s_mean", "start_potential_v_mean", "end_potential_v_mean", 
+                           "capacity_ah_mean", "energy_wh_mean", "time_range_hours"],
+                "quality": ["duration_s_std", "start_potential_v_std", "end_potential_v_std", 
+                           "duration_s_count", "total_segments_analyzed", "quality_score"],
+                "insights": ["metrics_analyzed", "first_segment_time", "last_segment_time",
+                            "technique_count_Rest", "technique_count_Galvanostatic"]
             },
             settings_schema={
                 "metrics": {
@@ -490,9 +493,12 @@ class AnalysisRegistry:
             requires_analysis_results=True,
             analysis_function=resistance_analysis_function,
             output_columns={
-                "metrics": ["instantaneous_resistance_ohm", "dc_resistance_ohm", "voltage_change_v"],
-                "quality": ["r_squared", "fit_quality_score", "data_points_used"],
-                "insights": ["resistance_category", "technique_suitability"]
+                "metrics": ["ir_immediate_ohm", "ir_10s_ohm", "ir_30s_ohm", "baseline_voltage_v", 
+                           "average_current_a", "pulse_duration_s", "resistance_ratio_immediate_30s"],
+                "quality": ["calculation_quality", "quality_score", "ir_immediate_ohm_mean", 
+                           "ir_immediate_ohm_std", "ir_10s_ohm_mean", "ir_10s_ohm_std"],
+                "insights": ["insight_resistance_level", "insight_average_resistance", "insight_data_quality", 
+                            "insight_consistency", "insight_coefficient_of_variation"]
             },
             settings_schema={
                 "time_points": {
@@ -574,9 +580,13 @@ class AnalysisRegistry:
             requires_analysis_results=True,
             analysis_function=kinetics_analysis_function,
             output_columns={
-                "metrics": ["diffusion_coefficient_cm2_s", "time_constant_s", "current_amplitude", "current_infinity"],
-                "quality": ["r_squared", "rmse", "fit_converged", "quality_score"],
-                "insights": ["analysis_type", "meets_cottrell_criteria", "fit_method"]
+                "metrics": ["voltage_infinity", "voltage_amplitude", "current_infinity", "current_amplitude", 
+                           "time_constant_s", "voltage_sqrt_amplitude", "current_sqrt_amplitude", "voltage_recovery_v"],
+                "quality": ["r_squared", "rmse", "quality_score", "fit_quality", "diffusion_regime", 
+                           "extraction_quality_exp", "extraction_quality_sqrt"],
+                "insights": ["fit_type", "selection_reason", "analysis_type", "fit_type_used", 
+                            "is_high_quality", "insight_dominant_process", "insight_data_quality", 
+                            "insight_fit_quality", "insight_relaxation_speed", "insight_voltage_recovery"]
             },
             settings_schema={
                 "analysis_status_filter": {
@@ -659,9 +669,14 @@ class AnalysisRegistry:
             requires_analysis_results=True,
             analysis_function=equilibrium_analysis_function,
             output_columns={
-                "metrics": ["equilibrium_voltage_v", "diffusion_coefficient_cm2_s", "current_amplitude", "current_infinity"],
-                "quality": ["r_squared", "rmse", "equilibrium_quality", "quality_score"],
-                "insights": ["analysis_type", "meets_drift_criteria", "meets_duration_criteria"]
+                "metrics": ["equilibrium_voltage_v", "voltage_infinity", "voltage_amplitude", "current_infinity", 
+                           "current_amplitude", "time_constant_s", "voltage_change_v", "drift_rate_mv_min", 
+                           "diffusion_coefficient_cm2_s"],
+                "quality": ["r_squared", "rmse", "equilibrium_quality", "quality_score", "meets_duration_criteria", 
+                           "meets_drift_criteria"],
+                "insights": ["analysis_type", "insight_data_quality", "insight_equilibrium_voltage", 
+                            "insight_voltage_stability", "insight_voltage_evolution", "insight_drift_assessment", 
+                            "insight_duration_assessment"]
             },
             settings_schema={
                 "analysis_status_filter": {
@@ -769,9 +784,13 @@ class AnalysisRegistry:
             requires_analysis_results=True,
             analysis_function=current_decay_analysis_function,
             output_columns={
-                "metrics": ["diffusion_coefficient_cm2_s", "decay_time_constant_s", "initial_current_a", "steady_state_current_a"],
-                "quality": ["r_squared", "rmse", "fit_quality", "min_r_squared"],
-                "insights": ["decay_model", "cottrell_compliance", "analysis_method"]
+                "metrics": ["current_infinity", "current_amplitude", "time_constant_s", "i_ss_a", "i0_amplitude_a", 
+                           "i0_a", "tau_s", "current_decay_ratio", "current_decay_percent"],
+                "quality": ["r_squared", "rmse", "quality_score", "meets_duration_criteria", "meets_fit_criteria", 
+                           "fit_quality", "decay_quality", "extraction_quality"],
+                "insights": ["fit_type", "extraction_method", "kinetic_regime", "decay_completeness", 
+                            "analysis_type", "insight_fit_quality", "insight_decay_kinetics", 
+                            "insight_time_constant_analysis", "insight_current_magnitude", "insight_decay_completeness"]
             },
             settings_schema={
                 "min_r_squared": {
