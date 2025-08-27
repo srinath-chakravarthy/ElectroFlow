@@ -848,39 +848,72 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             # Get analysis options from registry
             analysis_options = self.registry.get_analysis_options()
             
+            if not analysis_options:
+                logger.warning("No analysis options found in registry")
+                self.available_columns = {}
+                return
+            
             for analysis_name, analysis_id in analysis_options:
-                config = self.registry.get_analysis(analysis_id)
-                if config and config.output_columns:
-                    # Use static declarations instead of running analysis
-                    static_columns = self.registry.get_all_output_columns(analysis_id)
-                    if static_columns:
-                        registry_analyses[analysis_id] = {
-                            'name': analysis_name,
-                            'columns': static_columns,
-                            'categorized': self.registry.get_columns_by_category(analysis_id)
-                        }
+                try:
+                    config = self.registry.get_analysis(analysis_id)
+                    if config and hasattr(config, 'output_columns') and config.output_columns:
+                        # Use static declarations instead of running analysis
+                        static_columns = self.registry.get_all_output_columns(analysis_id)
+                        categorized_columns = self.registry.get_columns_by_category(analysis_id)
+                        
+                        if static_columns:
+                            registry_analyses[analysis_id] = {
+                                'name': analysis_name,
+                                'columns': static_columns,
+                                'categorized': categorized_columns or {}
+                            }
+                            logger.debug(f"Added analysis {analysis_id} with {len(static_columns)} columns")
+                        else:
+                            logger.debug(f"No static columns found for {analysis_id}")
+                    else:
+                        logger.debug(f"No output columns config for {analysis_id}")
+                except Exception as e:
+                    logger.warning(f"Error processing analysis {analysis_id}: {e}")
+                    continue
             
             self.registry_columns = registry_analyses
             
-            # Find columns in dataset that actually exist
-            dataset_columns = list(self.current_dataset.columns)
+            # For registry-driven UI, we use static declarations without dataset validation
+            # Dataset validation will happen during actual plot generation
             self.available_columns = {}
             
             for analysis_id, info in registry_analyses.items():
-                matching_columns = []
-                for col in info['columns']:
-                    if col in dataset_columns:
-                        matching_columns.append(col)
+                # Use all static columns from registry for UI population
+                self.available_columns[analysis_id] = {
+                    'name': info['name'],
+                    'columns': info['columns'],
+                    'categorized': info['categorized']
+                }
                 
-                if matching_columns:
-                    self.available_columns[analysis_id] = {
-                        'name': info['name'],
-                        'columns': matching_columns,
-                        'categorized': {
-                            category: [col for col in cols if col in dataset_columns]
-                            for category, cols in info['categorized'].items()
+            # If dataset is available, we could filter columns, but for UI setup we show all
+            if self.current_dataset is not None:
+                dataset_columns = list(self.current_dataset.columns)
+                
+                # Filter to only show columns that exist in dataset
+                filtered_columns = {}
+                for analysis_id, info in self.available_columns.items():
+                    matching_columns = [col for col in info['columns'] if col in dataset_columns]
+                    if matching_columns:
+                        # Safely handle categorized columns
+                        categorized_filtered = {}
+                        if info.get('categorized'):
+                            for category, cols in info['categorized'].items():
+                                if cols:  # Only process non-empty column lists
+                                    filtered_cols = [col for col in cols if col in dataset_columns]
+                                    if filtered_cols:  # Only add if we have matching columns
+                                        categorized_filtered[category] = filtered_cols
+                        
+                        filtered_columns[analysis_id] = {
+                            'name': info['name'],
+                            'columns': matching_columns,
+                            'categorized': categorized_filtered
                         }
-                    }
+                self.available_columns = filtered_columns
             
             logger.info(f"Discovered {len(self.available_columns)} analysis types with columns")
             logger.debug(f"Available analyses: {list(self.available_columns.keys())}")
