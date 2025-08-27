@@ -119,29 +119,58 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         )
     
     def _create_configuration_components(self):
-        """Create configuration panel components."""
+        """Create configuration panel components with analysis-centric intent-based design."""
         
-        # Technique selection
-        self.technique_select = pn.widgets.Select(
-            name="Technique",
-            options=["All", "REST", "Galvanostatic", "Potentiostatic", "EIS", "CV"],
-            value="All",
+        # Analysis-centric tabs for intent-based organization
+        self.trends_panel = self._create_trends_section()
+        self.quality_panel = self._create_quality_section() 
+        self.insights_panel = self._create_insights_section()
+        
+        self.analysis_tabs = pn.Tabs(
+            ("📈 Trends", self.trends_panel),
+            ("🎯 Quality", self.quality_panel),
+            ("💡 Insights", self.insights_panel),
             sizing_mode='stretch_width',
             margin=(5, 5)
         )
         
         # Plot trigger button
-        self.configure_btn = pn.widgets.Button(
-            name="🔧 Configure Explorer",
-            button_type="primary",
+        self.plot_btn = pn.widgets.Button(
+            name="📊 Generate Plot",
+            button_type="primary", 
             disabled=True,
             sizing_mode='stretch_width',
             margin=(5, 5)
         )
         
-        # Auto-generated controls placeholder
-        self.auto_controls_column = pn.Column(
-            pn.pane.HTML("<p><i>Select cells and technique, then click Configure Explorer</i></p>"),
+        # Status display
+        self.config_status = pn.pane.HTML(
+            "<p><i>Select cells to load available analyses and columns</i></p>",
+            sizing_mode='stretch_width',
+            margin=(5, 5)
+        )
+    
+    def _create_trends_section(self):
+        """Create Trends section for time-series and relationship analysis."""
+        return pn.Column(
+            pn.pane.HTML("<h5>📈 Analyze Trends Over Time</h5><p><small>Select metrics for X-Y plotting and time-series analysis</small></p>"),
+            pn.pane.HTML("<p><i>Configure cells to load trend analysis options</i></p>", name="trends_placeholder"),
+            sizing_mode='stretch_width'
+        )
+    
+    def _create_quality_section(self):
+        """Create Quality section for distribution and statistical analysis."""
+        return pn.Column(
+            pn.pane.HTML("<h5>🎯 Assess Data Quality</h5><p><small>Select quality metrics for distribution analysis</small></p>"),
+            pn.pane.HTML("<p><i>Configure cells to load quality analysis options</i></p>", name="quality_placeholder"),
+            sizing_mode='stretch_width'
+        )
+    
+    def _create_insights_section(self):
+        """Create Insights section for categorical and comparative analysis."""
+        return pn.Column(
+            pn.pane.HTML("<h5>💡 Extract Insights</h5><p><small>Select categorical data for comparative analysis</small></p>"),
+            pn.pane.HTML("<p><i>Configure cells to load insight analysis options</i></p>", name="insights_placeholder"),
             sizing_mode='stretch_width'
         )
     
@@ -191,15 +220,15 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             margin=(5, 5)
         )
         
-        # Panel 2: Configuration  
+        # Panel 2: Analysis Configuration  
         config_panel = pn.Card(
             pn.Column(
-                pn.pane.HTML("<h4>⚙️ Configuration</h4>"),
-                self.technique_select,
-                self.configure_btn,
-                self.auto_controls_column
+                pn.pane.HTML("<h4>⚙️ Analysis Configuration</h4>"),
+                self.analysis_tabs,
+                self.plot_btn,
+                self.config_status
             ),
-            title="Explorer Configuration",
+            title="Analysis Explorer",
             sizing_mode='stretch_width',
             margin=(5, 5)
         )
@@ -231,9 +260,8 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         self.cell_tabulator.param.watch(self._on_cell_selection_changed, 'selection')
         self.refresh_cells_btn.on_click(self._on_refresh_cells)
         
-        # Configuration callbacks
-        self.technique_select.param.watch(self._on_technique_changed, 'value')
-        self.configure_btn.on_click(self._on_configure_explorer)
+        # Analysis configuration callbacks
+        self.plot_btn.on_click(self._on_generate_plot)
     
     def _refresh_cells(self):
         """Refresh available cells from backend."""
@@ -289,8 +317,11 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             
             self.selected_cells = selected_cells
             
-            # Update configure button state
-            self.configure_btn.disabled = len(selected_cells) == 0
+            # Update plot button state and populate analysis sections
+            self.plot_btn.disabled = len(selected_cells) == 0
+            
+            if selected_cells:
+                self._populate_analysis_sections(selected_cells)
             
             # Update cell status
             if selected_cells:
@@ -309,36 +340,214 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Cell selection error: {e}")
             self._update_status("Selection error", "error")
     
-    def _on_technique_changed(self, event):
-        """Handle technique selection change."""
-        self.current_technique = event.new
-        if self.selected_cells:
-            self._update_status(f"Technique changed to {event.new}", "info")
-    
     def _on_refresh_cells(self, event):
         """Handle refresh cells button click."""
         self._refresh_cells()
     
-    def _on_configure_explorer(self, event):
-        """Handle configure explorer button click."""
+    def _on_generate_plot(self, event):
+        """Handle generate plot button click."""
         try:
             if not self.selected_cells:
                 self._update_status("No cells selected", "warning")
                 return
                 
-            self._update_status("Configuring explorer interface...", "loading")
+            self._update_status("Generating plot...", "loading")
             
-            # Load comprehensive dataset
-            self._load_dataset()
+            # Get selected columns from active tab
+            selected_columns = self._get_selected_columns()
+            if not selected_columns:
+                self._update_status("No columns selected for plotting", "warning")
+                return
             
-            # Auto-configure interface based on selections
-            self._auto_configure_interface()
+            # Load dataset if not already loaded
+            if self.current_dataset is None:
+                self._load_dataset()
             
-            self._update_status("Explorer configured successfully", "success")
+            # Generate plot with selected columns
+            self._generate_analysis_plot(selected_columns)
+            
+            self._update_status("Plot generated successfully", "success")
             
         except Exception as e:
-            logger.error(f"Failed to configure explorer: {e}")
-            self._update_status(f"Configuration failed: {str(e)}", "error")
+            logger.error(f"Failed to generate plot: {e}")
+            self._update_status(f"Plot generation failed: {str(e)}", "error")
+    
+    def _populate_analysis_sections(self, selected_cells):
+        """Populate analysis sections with available analyses and columns."""
+        try:
+            # Get available techniques for selected cells
+            available_techniques = self._get_available_techniques(selected_cells)
+            
+            # Discover available analyses and columns
+            self._discover_registry_columns()
+            
+            # Populate each section with relevant analyses
+            self._populate_trends_section(available_techniques)
+            self._populate_quality_section(available_techniques) 
+            self._populate_insights_section(available_techniques)
+            
+            # Update status
+            analysis_count = len(self.available_columns)
+            self.config_status.object = f"<p><b>✅ Analysis Ready:</b> {analysis_count} analyses available for selected cells</p>"
+            
+        except Exception as e:
+            logger.error(f"Failed to populate analysis sections: {e}")
+            self.config_status.object = f"<p><b>❌ Configuration Error:</b> {str(e)}</p>"
+    
+    def _get_available_techniques(self, selected_cells):
+        """Get available techniques from selected cells."""
+        try:
+            summary = self.api.get_research_data_summary(selected_cells)
+            return summary.get('techniques', [])
+        except Exception as e:
+            logger.warning(f"Failed to get techniques: {e}")
+            return []
+    
+    def _populate_trends_section(self, available_techniques):
+        """Populate trends section with metric columns from applicable analyses."""
+        trends_content = []
+        
+        # Header
+        trends_content.append(
+            pn.pane.HTML("<h5>📈 Analyze Trends Over Time</h5><p><small>Select metrics for X-Y plotting and time-series analysis</small></p>")
+        )
+        
+        # For each analysis, create expandable section with metric columns
+        for analysis_id, columns in self.available_columns.items():
+            config = self.registry.get_analysis(analysis_id)
+            if not config:
+                continue
+                
+            # Check if analysis is applicable to available techniques
+            if not any(tech.lower() in [t.lower() for t in config.applicable_techniques] for tech in available_techniques):
+                continue
+                
+            # Get metrics columns with units
+            metrics_columns = self.registry.get_metrics_columns_with_units(analysis_id)
+            if not metrics_columns:
+                continue
+                
+            # Create expandable section for this analysis
+            column_checkboxes = []
+            for col_name, display_name in metrics_columns.items():
+                checkbox = pn.widgets.Checkbox(name=display_name, value=False, margin=(2, 5))
+                checkbox.param.watch(self._on_column_selection_changed, 'value')
+                column_checkboxes.append(checkbox)
+                
+            analysis_expander = pn.Accordion(
+                (f"{config.name} ({len(metrics_columns)} metrics)", pn.Column(*column_checkboxes)),
+                toggle=False,
+                sizing_mode='stretch_width'
+            )
+            trends_content.append(analysis_expander)
+        
+        # Replace trends panel content
+        self.trends_panel.clear()
+        self.trends_panel.extend(trends_content)
+    
+    def _populate_quality_section(self, available_techniques):
+        """Populate quality section with quality columns from applicable analyses."""
+        quality_content = []
+        
+        # Header
+        quality_content.append(
+            pn.pane.HTML("<h5>🎯 Assess Data Quality</h5><p><small>Select quality metrics for distribution analysis</small></p>")
+        )
+        
+        # For each analysis, create expandable section with quality columns
+        for analysis_id, columns in self.available_columns.items():
+            config = self.registry.get_analysis(analysis_id)
+            if not config:
+                continue
+                
+            # Check if analysis is applicable to available techniques
+            if not any(tech.lower() in [t.lower() for t in config.applicable_techniques] for tech in available_techniques):
+                continue
+                
+            # Get quality columns with units
+            quality_columns = self.registry.get_quality_columns_with_units(analysis_id)
+            if not quality_columns:
+                continue
+                
+            # Create expandable section for this analysis
+            column_checkboxes = []
+            for col_name, display_name in quality_columns.items():
+                checkbox = pn.widgets.Checkbox(name=display_name, value=False, margin=(2, 5))
+                checkbox.param.watch(self._on_column_selection_changed, 'value')
+                column_checkboxes.append(checkbox)
+                
+            analysis_expander = pn.Accordion(
+                (f"{config.name} ({len(quality_columns)} quality)", pn.Column(*column_checkboxes)),
+                toggle=False,
+                sizing_mode='stretch_width'
+            )
+            quality_content.append(analysis_expander)
+        
+        # Replace quality panel content
+        self.quality_panel.clear()
+        self.quality_panel.extend(quality_content)
+    
+    def _populate_insights_section(self, available_techniques):
+        """Populate insights section with insight columns from applicable analyses."""
+        insights_content = []
+        
+        # Header  
+        insights_content.append(
+            pn.pane.HTML("<h5>💡 Extract Insights</h5><p><small>Select categorical data for comparative analysis</small></p>")
+        )
+        
+        # For each analysis, create expandable section with insight columns
+        for analysis_id, columns in self.available_columns.items():
+            config = self.registry.get_analysis(analysis_id)
+            if not config:
+                continue
+                
+            # Check if analysis is applicable to available techniques
+            if not any(tech.lower() in [t.lower() for t in config.applicable_techniques] for tech in available_techniques):
+                continue
+                
+            # Get insight columns with units
+            insight_columns = self.registry.get_insight_columns_with_units(analysis_id)
+            if not insight_columns:
+                continue
+                
+            # Create expandable section for this analysis
+            column_checkboxes = []
+            for col_name, display_name in insight_columns.items():
+                checkbox = pn.widgets.Checkbox(name=display_name, value=False, margin=(2, 5))
+                checkbox.param.watch(self._on_column_selection_changed, 'value')
+                column_checkboxes.append(checkbox)
+                
+            analysis_expander = pn.Accordion(
+                (f"{config.name} ({len(insight_columns)} insights)", pn.Column(*column_checkboxes)),
+                toggle=False,
+                sizing_mode='stretch_width'
+            )
+            insights_content.append(analysis_expander)
+        
+        # Replace insights panel content
+        self.insights_panel.clear()
+        self.insights_panel.extend(insights_content)
+    
+    def _on_column_selection_changed(self, event):
+        """Handle column selection change in any section."""
+        # Update plot button state based on selections
+        selected_columns = self._get_selected_columns()
+        self.plot_btn.disabled = len(selected_columns) == 0
+    
+    def _get_selected_columns(self):
+        """Get currently selected columns from all sections."""
+        selected = []
+        
+        # TODO: Implement column collection from checkboxes in all sections
+        # This is a placeholder - will be fully implemented in Phase 3
+        
+        return selected
+    
+    def _generate_analysis_plot(self, selected_columns):
+        """Generate plot with selected columns (placeholder for Phase 4)."""
+        # TODO: Implement in Phase 4 with context-sensitive plot configuration
+        self.plot_pane.object = "<p><b>🚧 Plot generation will be implemented in Phase 4</b></p>"
     
     def _load_dataset(self):
         """Load comprehensive dataset for selected cells."""
