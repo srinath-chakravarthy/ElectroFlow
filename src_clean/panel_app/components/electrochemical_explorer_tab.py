@@ -162,11 +162,14 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         
         # Top configuration bar (120px fixed height)
         self.config_bar = pn.Row(
-            pn.pane.HTML("<p><b>📊 Plot Configuration</b> - Select analysis to configure</p>"),
+            pn.pane.HTML(
+                "<div style='padding:10px; background:#f8f9fa; border-radius:5px;'>"
+                "<p><b>📊 Plot Configuration</b> - Select analysis to configure</p>"
+                "</div>"
+            ),
             height=120,
             sizing_mode='stretch_width',
-            margin=(5, 5),
-            background='#f8f9fa'
+            margin=(5, 5)
         )
         
         # Bottom plot area (flexible)
