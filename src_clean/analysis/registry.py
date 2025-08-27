@@ -71,6 +71,8 @@ class AnalysisConfig:
     #   "quality": ["r_squared", "rmse", "quality_score"],                # For distribution plots  
     #   "insights": ["analysis_type", "meets_criteria"]                   # For categorical/bar plots
     # }
+    units_metadata: Dict[str, str] = field(default_factory=dict)  # Column units mapping
+    column_descriptions: Dict[str, str] = field(default_factory=dict)  # Column descriptions for UI tooltips
     
     # === ANALYSIS FUNCTION ===
     analysis_function: Callable[..., Dict[str, Any]] = None
@@ -425,6 +427,68 @@ class AnalysisRegistry:
         validator = RegistryValidator()
         return validator.generate_config_report()
     
+    # ===== UNITS AND METADATA HELPER METHODS =====
+    
+    def get_column_unit(self, analysis_id: str, column_name: str) -> Optional[str]:
+        """Get unit for a specific column."""
+        config = self.get_analysis(analysis_id)
+        if config and config.units_metadata:
+            # Remove analysis prefix if present
+            clean_column = column_name.replace(f"{analysis_id}_", "")
+            return config.units_metadata.get(clean_column)
+        return None
+    
+    def get_column_description(self, analysis_id: str, column_name: str) -> Optional[str]:
+        """Get description for a specific column."""
+        config = self.get_analysis(analysis_id)
+        if config and config.column_descriptions:
+            # Remove analysis prefix if present
+            clean_column = column_name.replace(f"{analysis_id}_", "")
+            return config.column_descriptions.get(clean_column)
+        return None
+    
+    def get_metrics_columns_with_units(self, analysis_id: str) -> Dict[str, str]:
+        """Get metric columns with their units for UI display."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns and config.units_metadata:
+            metrics = config.output_columns.get("metrics", [])
+            result = {}
+            for col in metrics:
+                prefixed_col = f"{analysis_id}_{col}"
+                unit = config.units_metadata.get(col, "")
+                display_name = f"{col} ({unit})" if unit else col
+                result[prefixed_col] = display_name
+            return result
+        return {}
+    
+    def get_quality_columns_with_units(self, analysis_id: str) -> Dict[str, str]:
+        """Get quality columns with their units for UI display."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns and config.units_metadata:
+            quality = config.output_columns.get("quality", [])
+            result = {}
+            for col in quality:
+                prefixed_col = f"{analysis_id}_{col}"
+                unit = config.units_metadata.get(col, "")
+                display_name = f"{col} ({unit})" if unit else col
+                result[prefixed_col] = display_name
+            return result
+        return {}
+    
+    def get_insight_columns_with_units(self, analysis_id: str) -> Dict[str, str]:
+        """Get insight columns with their units for UI display."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns and config.units_metadata:
+            insights = config.output_columns.get("insights", [])
+            result = {}
+            for col in insights:
+                prefixed_col = f"{analysis_id}_{col}"
+                unit = config.units_metadata.get(col, "")
+                display_name = f"{col} ({unit})" if unit else col
+                result[prefixed_col] = display_name
+            return result
+        return {}
+    
     def _register_default_analyses(self):
         """Register the default analyses that replace existing specialized methods."""
         
@@ -451,6 +515,20 @@ class AnalysisRegistry:
                            "duration_s_count", "total_segments_analyzed", "quality_score"],
                 "insights": ["metrics_analyzed", "first_segment_time", "last_segment_time",
                             "technique_count_Rest", "technique_count_Galvanostatic"]
+            },
+            units_metadata={
+                "duration_s_mean": "s", "start_potential_v_mean": "V", "end_potential_v_mean": "V",
+                "capacity_ah_mean": "Ah", "energy_wh_mean": "Wh", "time_range_hours": "hours",
+                "duration_s_std": "s", "start_potential_v_std": "V", "end_potential_v_std": "V",
+                "duration_s_count": "count", "total_segments_analyzed": "count", "quality_score": "score",
+                "first_segment_time": "s", "last_segment_time": "s"
+            },
+            column_descriptions={
+                "duration_s_mean": "Average segment duration", "start_potential_v_mean": "Average starting potential",
+                "end_potential_v_mean": "Average ending potential", "capacity_ah_mean": "Average capacity per segment",
+                "energy_wh_mean": "Average energy per segment", "time_range_hours": "Total experiment time range",
+                "duration_s_std": "Duration standard deviation", "total_segments_analyzed": "Number of segments processed",
+                "quality_score": "Analysis confidence score (0-1)", "metrics_analyzed": "List of analyzed metrics"
             },
             settings_schema={
                 "metrics": {
@@ -499,6 +577,22 @@ class AnalysisRegistry:
                            "ir_immediate_ohm_std", "ir_10s_ohm_mean", "ir_10s_ohm_std"],
                 "insights": ["insight_resistance_level", "insight_average_resistance", "insight_data_quality", 
                             "insight_consistency", "insight_coefficient_of_variation"]
+            },
+            units_metadata={
+                "ir_immediate_ohm": "Ω", "ir_10s_ohm": "Ω", "ir_30s_ohm": "Ω", "baseline_voltage_v": "V",
+                "average_current_a": "A", "pulse_duration_s": "s", "resistance_ratio_immediate_30s": "ratio",
+                "calculation_quality": "score", "quality_score": "score", 
+                "ir_immediate_ohm_mean": "Ω", "ir_immediate_ohm_std": "Ω", "ir_10s_ohm_mean": "Ω", "ir_10s_ohm_std": "Ω"
+            },
+            column_descriptions={
+                "ir_immediate_ohm": "Instantaneous resistance at current application",
+                "ir_10s_ohm": "Resistance at 10 seconds after current application", 
+                "ir_30s_ohm": "Resistance at 30 seconds after current application",
+                "baseline_voltage_v": "Baseline voltage before current pulse",
+                "average_current_a": "Average current during pulse",
+                "pulse_duration_s": "Duration of current pulse",
+                "calculation_quality": "Quality of resistance calculation (0-1)",
+                "quality_score": "Overall analysis confidence score"
             },
             settings_schema={
                 "time_points": {
@@ -587,6 +681,24 @@ class AnalysisRegistry:
                 "insights": ["fit_type", "selection_reason", "analysis_type", "fit_type_used", 
                             "is_high_quality", "insight_dominant_process", "insight_data_quality", 
                             "insight_fit_quality", "insight_relaxation_speed", "insight_voltage_recovery"]
+            },
+            units_metadata={
+                "voltage_infinity": "V", "voltage_amplitude": "V", "current_infinity": "A", "current_amplitude": "A",
+                "time_constant_s": "s", "voltage_sqrt_amplitude": "V", "current_sqrt_amplitude": "A", "voltage_recovery_v": "V",
+                "r_squared": "score", "rmse": "V", "quality_score": "score", "fit_quality": "score",
+                "diffusion_regime": "score", "extraction_quality_exp": "score", "extraction_quality_sqrt": "score"
+            },
+            column_descriptions={
+                "voltage_infinity": "Equilibrium voltage at infinite time",
+                "voltage_amplitude": "Voltage change amplitude during relaxation", 
+                "current_infinity": "Equilibrium current at infinite time",
+                "current_amplitude": "Current change amplitude during relaxation",
+                "time_constant_s": "Characteristic relaxation time constant",
+                "voltage_recovery_v": "Voltage recovery during relaxation phase",
+                "r_squared": "Coefficient of determination for fit quality",
+                "rmse": "Root mean square error of fit",
+                "quality_score": "Overall analysis confidence score",
+                "fit_type": "Type of kinetic fit used (exponential/sqrt-time)"
             },
             settings_schema={
                 "analysis_status_filter": {
@@ -677,6 +789,25 @@ class AnalysisRegistry:
                 "insights": ["analysis_type", "insight_data_quality", "insight_equilibrium_voltage", 
                             "insight_voltage_stability", "insight_voltage_evolution", "insight_drift_assessment", 
                             "insight_duration_assessment"]
+            },
+            units_metadata={
+                "equilibrium_voltage_v": "V", "voltage_infinity": "V", "voltage_amplitude": "V", 
+                "current_infinity": "A", "current_amplitude": "A", "time_constant_s": "s",
+                "voltage_change_v": "V", "drift_rate_mv_min": "mV/min", "diffusion_coefficient_cm2_s": "cm²/s",
+                "r_squared": "score", "rmse": "V", "equilibrium_quality": "score", "quality_score": "score",
+                "meets_duration_criteria": "boolean", "meets_drift_criteria": "boolean"
+            },
+            column_descriptions={
+                "equilibrium_voltage_v": "Final equilibrium voltage value",
+                "voltage_infinity": "Extrapolated voltage at infinite time",
+                "voltage_amplitude": "Voltage amplitude during equilibration",
+                "time_constant_s": "Time constant for equilibrium approach",
+                "voltage_change_v": "Total voltage change during equilibration", 
+                "drift_rate_mv_min": "Voltage drift rate in final phase",
+                "diffusion_coefficient_cm2_s": "Calculated diffusion coefficient",
+                "r_squared": "Coefficient of determination for equilibrium fit",
+                "equilibrium_quality": "Quality assessment of equilibrium state",
+                "quality_score": "Overall analysis confidence score"
             },
             settings_schema={
                 "analysis_status_filter": {
@@ -791,6 +922,28 @@ class AnalysisRegistry:
                 "insights": ["fit_type", "extraction_method", "kinetic_regime", "decay_completeness", 
                             "analysis_type", "insight_fit_quality", "insight_decay_kinetics", 
                             "insight_time_constant_analysis", "insight_current_magnitude", "insight_decay_completeness"]
+            },
+            units_metadata={
+                "current_infinity": "A", "current_amplitude": "A", "time_constant_s": "s", 
+                "i_ss_a": "A", "i0_amplitude_a": "A", "i0_a": "A", "tau_s": "s",
+                "current_decay_ratio": "ratio", "current_decay_percent": "%",
+                "r_squared": "score", "rmse": "A", "quality_score": "score",
+                "meets_duration_criteria": "boolean", "meets_fit_criteria": "boolean",
+                "fit_quality": "score", "decay_quality": "score", "extraction_quality": "score"
+            },
+            column_descriptions={
+                "current_infinity": "Steady-state current at infinite time",
+                "current_amplitude": "Current decay amplitude",
+                "time_constant_s": "Decay time constant",
+                "i_ss_a": "Steady-state current value", 
+                "i0_amplitude_a": "Initial current amplitude at t=0",
+                "i0_a": "Initial current at step application",
+                "tau_s": "Exponential decay time constant",
+                "current_decay_ratio": "Ratio of final to initial current",
+                "current_decay_percent": "Percentage current decay",
+                "r_squared": "Coefficient of determination for decay fit",
+                "quality_score": "Overall analysis confidence score",
+                "fit_type": "Type of decay fit used (exponential/power-law)"
             },
             settings_schema={
                 "min_r_squared": {
