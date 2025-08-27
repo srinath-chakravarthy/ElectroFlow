@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 
-def basic_statistics_analysis(segments: List[Dict[str, Any]], settings: Dict[str, Any]) -> pd.DataFrame:
+def basic_statistics_analysis(segments: List[Dict[str, Any]], settings: Dict[str, Any], **kwargs) -> pd.DataFrame:
     """
     Calculate basic statistics for segment data.
     
@@ -24,10 +24,10 @@ def basic_statistics_analysis(segments: List[Dict[str, Any]], settings: Dict[str
     Returns:
         Dictionary with analysis results compatible with existing UI
     """
-    
+    include_segment_data = kwargs.get('include_segment_data', True)
     try:
         if not segments:
-            return pd.DataFrame(columns=['segment_id', 'error_message'])
+            return pd.DataFrame(columns=['id', 'error_message'])
         
         # Get metrics to analyze from settings
         metrics = settings.get('metrics', ['duration_s', 'start_potential_v', 'end_potential_v'])
@@ -35,9 +35,7 @@ def basic_statistics_analysis(segments: List[Dict[str, Any]], settings: Dict[str
         # Create DataFrame from segments (already has core columns)
         df = pd.DataFrame(segments)
         
-        # Rename 'id' to 'segment_id' for consistency
-        if 'id' in df.columns:
-            df = df.rename(columns={'id': 'segment_id'})
+        # Keep 'id' column as-is for consistent merging
         
         # Add standard columns required by registry
         df['analysis_type'] = 'basic_statistics'
@@ -88,7 +86,7 @@ def basic_statistics_analysis(segments: List[Dict[str, Any]], settings: Dict[str
         df['quality_score'] = 1.0  # Basic statistics always succeeds
         
         # Apply analysis prefix to all columns except base columns
-        base_columns = ['id', 'segment_id']  # Don't prefix these
+        base_columns = ['id']  # Don't prefix these
         analysis_id = 'basic_statistics_analytics'
         
         # Create mapping for column renaming

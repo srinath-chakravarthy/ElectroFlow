@@ -2715,14 +2715,30 @@ class BackendAPI:
             except Exception:
                 time_range = "Unknown"
             
-            # Get available techniques
+            # Get available techniques directly from database segments
             try:
-                dataset = self.get_research_dataset_for_perspective(cells)
-                if len(dataset) > 0 and "technique_name" in dataset.columns:
-                    techniques = dataset.get_column("technique_name").unique().to_list()
+                techniques = set()
+                if cells:
+                    for cell_name in cells:
+                        cell_segments = self.get_cell_segments(cell_name)
+                        if cell_segments:
+                            for segment in cell_segments:
+                                technique_name = segment.get('technique_name') or segment.get('fundamental_technique')
+                                if technique_name:
+                                    techniques.add(technique_name)
                 else:
-                    techniques = []
-            except Exception:
+                    # Get techniques from all cells
+                    all_cells = self.get_cells()
+                    for cell in all_cells:
+                        cell_segments = self.get_cell_segments(cell['name'])
+                        if cell_segments:
+                            for segment in cell_segments:
+                                technique_name = segment.get('technique_name') or segment.get('fundamental_technique')
+                                if technique_name:
+                                    techniques.add(technique_name)
+                techniques = list(techniques)
+            except Exception as e:
+                logger.warning(f"Failed to get techniques from segments: {e}")
                 techniques = []
             
             summary = {

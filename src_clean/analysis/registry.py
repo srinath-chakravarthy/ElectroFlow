@@ -60,7 +60,7 @@ class AnalysisConfig:
     category: AnalysisCategory         # Analysis category for organization
     
     # === DATA REQUIREMENTS ===
-    required_techniques: List[str] = field(default_factory=list)  # ['Rest', 'Galvanostatic']
+    applicable_techniques: List[str] = field(default_factory=list)  # ['Rest', 'Galvanostatic']
     min_segments: int = 1              # Minimum segments required
     requires_analysis_results: bool = False  # Needs JSON analysis_results
     
@@ -103,12 +103,12 @@ class AnalysisConfig:
         if len(segments) < self.min_segments:
             return False, f"Analysis requires at least {self.min_segments} segments, got {len(segments)}"
         
-        if self.required_techniques:
+        if self.applicable_techniques:
             available_techniques = set(seg.get('fundamental_technique', '').lower() for seg in segments)
-            required_set = set(technique.lower() for technique in self.required_techniques)
-            if not required_set.issubset(available_techniques):
-                missing = required_set - available_techniques
-                return False, f"Analysis requires techniques: {missing}"
+            applicable_set = set(technique.lower() for technique in self.applicable_techniques)
+            if not applicable_set.intersection(available_techniques):
+                # No applicable techniques found - issue warning but proceed
+                return True, f"Warning: {self.name} is applicable to {self.applicable_techniques} but dataset only contains {list(available_techniques)} - running anyway"
         
         if self.requires_analysis_results:
             segments_with_results = [seg for seg in segments 
@@ -189,7 +189,7 @@ class AnalysisRegistry:
         applicable_analyses = []
         
         for analysis in self._analyses.values():
-            if technique_name in analysis.required_techniques:
+            if technique_name in analysis.applicable_techniques:
                 applicable_analyses.append(analysis)
         
         return applicable_analyses
@@ -441,7 +441,7 @@ class AnalysisRegistry:
             name="Basic Statistics", 
             description="Statistical summary of segment metrics (mean, std, min, max)",
             category=AnalysisCategory.BASIC_STATISTICS,
-            required_techniques=["Rest", "Galvanostatic", "Potentiostatic", "EIS", "Cyclic_Voltammetry"],  # Applicable to all
+            applicable_techniques=["Rest", "Galvanostatic", "Potentiostatic", "EIS", "Cyclic_Voltammetry"],  # Applicable to all
             min_segments=1,
             analysis_function=basic_statistics_analysis,
             output_columns={
@@ -488,7 +488,7 @@ class AnalysisRegistry:
             name="Resistance Analysis",
             description="Instantaneous resistance calculations from galvanostatic data",
             category=AnalysisCategory.ELECTROCHEMICAL,
-            required_techniques=["Galvanostatic", "EIS"],
+            applicable_techniques=["Galvanostatic"],
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=resistance_analysis_function,
@@ -575,7 +575,7 @@ class AnalysisRegistry:
             name="Kinetics Analysis",
             description="Relaxation kinetics from REST phase analysis",
             category=AnalysisCategory.KINETICS,
-            required_techniques=["Rest", "Potentiostatic"],
+            applicable_techniques=["Rest"],
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=kinetics_analysis_function,
@@ -664,7 +664,7 @@ class AnalysisRegistry:
             name="Equilibrium Analysis",
             description="Time constants, diffusion coefficients, and equilibrium voltage analysis from REST segments",
             category=AnalysisCategory.THERMODYNAMICS,
-            required_techniques=["Rest"],
+            applicable_techniques=["Rest"],
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=equilibrium_analysis_function,
@@ -779,7 +779,7 @@ class AnalysisRegistry:
             name="Current Decay Analysis",
             description="Potentiostatic current decay kinetics analysis",
             category=AnalysisCategory.KINETICS,
-            required_techniques=["Potentiostatic"],
+            applicable_techniques=["Potentiostatic"],
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=current_decay_analysis_function,

@@ -39,6 +39,10 @@
 - **Multi-Interface Access**: Panel web app, CLI, Python API, Jupyter
 
 ### Latest Completions (August 2025)
+- **Explorer UI Column Architecture Fix**: Static column declarations in registry eliminate runtime discovery issues
+- **Startup Performance Optimization**: Eliminated unnecessary analytics pipeline execution during UI initialization  
+- **Registry Validation Logic Corrections**: Changed from `required_techniques` to `applicable_techniques` with intersection-based warnings
+- **Column Name Standardization**: Fixed mismatches between registry declarations and analysis function outputs
 - **Advanced Research Tab (Tab 4)**: Complete automated analytics pipeline with Perspective integration
 - **Registry **kwargs System**: Dynamic parameter passing for all analysis functions  
 - **Merge Conflict Resolution**: Eliminated duplicate columns, clean `on='id'` merging

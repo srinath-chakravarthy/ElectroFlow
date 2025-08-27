@@ -375,7 +375,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             # Get analysis options from registry
             analysis_options = self.registry.get_analysis_options()
             
-            for analysis_id, analysis_name in analysis_options:
+            for analysis_name, analysis_id in analysis_options:
                 config = self.registry.get_analysis(analysis_id)
                 if config and config.output_columns:
                     # Use static declarations instead of running analysis
@@ -797,8 +797,16 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                     else:
                         raise ValueError("No valid y-columns available")
             
-            # Update plot pane
-            self.plot_pane.object = plot
+            # Update plot pane - ensure clean object assignment
+            try:
+                self.plot_pane.object = plot
+                logger.debug(f"Plot successfully assigned to pane: {type(plot)}")
+            except Exception as plot_assignment_error:
+                logger.error(f"Failed to assign plot to pane: {plot_assignment_error}")
+                self.plot_pane.object = f"""<div style='padding:40px; text-align:center; background:#ffebee; border-radius:8px; margin:10px; border-left:3px solid #d32f2f;'>
+                   <h3>❌ Plot Assignment Error</h3>
+                   <p>Failed to display plot: {str(plot_assignment_error)}</p>
+                   </div>"""
             
         except Exception as e:
             logger.error(f"Failed to generate plot: {e}")
