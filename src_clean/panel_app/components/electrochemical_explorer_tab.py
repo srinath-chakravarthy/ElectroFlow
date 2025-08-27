@@ -589,14 +589,46 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         try:
             feedback_data = []
             
+            # Debug: Check available columns for cell identification
+            cell_columns = [col for col in df.columns if 'cell' in col.lower()]
+            logger.debug(f"Available cell columns: {cell_columns}")
+            
+            # Determine cell identification column
+            cell_id_col = None
+            if 'cell_name' in df.columns:
+                cell_id_col = 'cell_name'
+            elif 'cell_id' in df.columns:
+                cell_id_col = 'cell_id' 
+            elif cell_columns:
+                cell_id_col = cell_columns[0]
+                
             for cell_name in self.selected_cells:
-                cell_df = df[df['cell_name'] == cell_name] if 'cell_name' in df.columns else df
+                if cell_id_col:
+                    # Filter by actual cell identification
+                    if cell_id_col in df.columns:
+                        cell_df = df[df[cell_id_col].astype(str).str.contains(cell_name, case=False, na=False)]
+                    else:
+                        cell_df = df  # Use full dataset if no cell column
+                else:
+                    # If no cell identification possible, use full dataset 
+                    cell_df = df
                 
                 segments_count = len(cell_df)
                 
-                # Simple quality assessment
+                # Enhanced quality assessment
                 if segments_count > 0:
-                    quality = "Good"
+                    # Check for analysis results or successful segments
+                    if 'analysis_status' in cell_df.columns:
+                        success_count = len(cell_df[cell_df['analysis_status'] == 'completed'])
+                        if success_count > segments_count * 0.8:
+                            quality = "High"
+                        elif success_count > segments_count * 0.5:
+                            quality = "Medium"
+                        else:
+                            quality = "Low"
+                    else:
+                        quality = "Available"
+                    
                     status = f"✅ {segments_count} segments"
                 else:
                     quality = "No Data"
@@ -609,10 +641,30 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                     'Status': status
                 })
             
-            self.data_feedback_tabulator.value = pd.DataFrame(feedback_data)
+            # Create DataFrame and ensure no NaN values
+            feedback_df = pd.DataFrame(feedback_data)
+            
+            # Fill any remaining NaN values
+            feedback_df = feedback_df.fillna({
+                'Cell': 'Unknown',
+                'Segments': 0,
+                'Quality': 'Unknown', 
+                'Status': 'No data'
+            })
+            
+            self.data_feedback_tabulator.value = feedback_df
+            logger.debug(f"Data feedback updated: {len(feedback_data)} cells")
             
         except Exception as e:
             logger.error(f"Failed to update data feedback: {e}")
+            # Create empty feedback on error
+            empty_feedback = pd.DataFrame({
+                'Cell': ['Error'],
+                'Segments': [0],
+                'Quality': ['Error'],
+                'Status': ['Failed to load data']
+            })
+            self.data_feedback_tabulator.value = empty_feedback
     
     def _generate_plot(self, df):
         """Generate interactive plot with hvplot and intelligent decimation."""
@@ -700,32 +752,30 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                         size=60
                     )
                 else:
-                    # Multiple y-metrics: create overlay
-                    plots = []
-                    for y_col in y_cols:
-                        if y_col in plot_df.columns:
-                            single_plot = plot_df.hvplot.scatter(
-                                x=x_col,
-                                y=y_col,
-                                by=group_col,
-                                alpha=0.6,
-                                size=50,
-                                label=y_col.replace('_', ' ').title()
-                            )
-                            plots.append(single_plot)
+                    # Multiple y-metrics: create simple combined plot
+                    # Use first valid y-column for now to avoid Overlay complications
+                    valid_y_cols = [col for col in y_cols if col in plot_df.columns]
                     
-                    if plots:
-                        plot = plots[0]
-                        for p in plots[1:]:
-                            plot *= p
+                    if valid_y_cols:
+                        # For now, plot first metric and show others in title
+                        y_col = valid_y_cols[0]
                         
-                        plot = plot.opts(
+                        plot = plot_df.hvplot.scatter(
+                            x=x_col,
+                            y=y_col,
+                            by=group_col,
                             width=700,
                             height=450,
-                            title=f"Multi-Metric Explorer{decimation_note}",
+                            title=f"Multi-Metric: {y_col.replace('_', ' ').title()} (+ {len(valid_y_cols)-1} others){decimation_note}",
                             xlabel=x_col.replace('_', ' ').title(),
-                            legend_position='right'
+                            ylabel=f"{y_col.replace('_', ' ').title()} (Primary)",
+                            alpha=0.7,
+                            size=60
                         )
+                        
+                        # TODO: Implement proper multi-metric overlay in future enhancement
+                        logger.info(f"Multi-metric plot showing primary metric: {y_col}, others available: {valid_y_cols[1:]}")
+                        
                     else:
                         raise ValueError("No valid y-columns available")
             
