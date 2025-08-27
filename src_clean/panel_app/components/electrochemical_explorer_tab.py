@@ -52,10 +52,19 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         from src_clean.analysis.registry import get_analysis_registry
         self.registry = get_analysis_registry()
         
-        # Create components
-        self._create_components()
-        self._setup_layout()
-        self._setup_callbacks()
+        # Create components with error handling
+        try:
+            logger.info("Creating components...")
+            self._create_components()
+            logger.info("Setting up layout...")
+            self._setup_layout()
+            logger.info("Setting up callbacks...")
+            self._setup_callbacks()
+            logger.info("Explorer tab initialization complete")
+        except Exception as e:
+            logger.error(f"Failed to create explorer components: {e}")
+            # Create a simple error panel
+            self.panel = pn.pane.HTML(f"<h3>❌ Component Creation Error</h3><p>{str(e)}</p>")
         
         # Initialize data
         self._refresh_cells()
@@ -251,11 +260,21 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         )
         
         # MAIN LAYOUT - 30/70 Proportional Split  
-        self.panel = pn.Row(
-            (left_panel, 30),    # 30% width
-            (right_panel, 70),   # 70% width
-            sizing_mode='stretch_both'
-        )
+        try:
+            self.panel = pn.Row(
+                left_panel,      # Natural width for left panel
+                right_panel,     # Flexible width for right panel  
+                sizing_mode='stretch_both'
+            )
+            logger.info("Layout created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create layout: {e}")
+            # Fallback simple layout
+            self.panel = pn.Column(
+                pn.pane.HTML("<h3>Layout Error</h3>"),
+                left_panel,
+                right_panel
+            )
     
     def _setup_callbacks(self):
         """Setup component callbacks."""
@@ -1277,4 +1296,10 @@ class ElectrochemicalExplorerTabWrapper(param.Parameterized):
         self.panel = self.tab.panel
         
     def __panel__(self):
-        return self.panel
+        # Debug: Check if panel was created properly
+        if hasattr(self, 'panel') and self.panel is not None:
+            logger.info(f"Returning panel of type: {type(self.panel)}")
+            return self.panel
+        else:
+            logger.error("Panel not created properly - returning error message")
+            return pn.pane.HTML("<h3>❌ Panel Creation Error</h3><p>Check logs for details</p>")
