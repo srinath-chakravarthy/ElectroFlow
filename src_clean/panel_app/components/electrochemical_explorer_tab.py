@@ -71,7 +71,10 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         # === CONFIGURATION PANEL ===
         self._create_configuration_components()
         
-        # === VISUALIZATION PANEL ===
+        # === RIGHT PANEL COMPONENTS ===
+        self._create_right_panel_components()
+        
+        # === LEGACY VISUALIZATION (for data feedback) ===
         self._create_visualization_components()
     
     def _create_cell_selection_components(self):
@@ -119,59 +122,64 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         )
     
     def _create_configuration_components(self):
-        """Create configuration panel components with analysis-centric intent-based design."""
+        """Create clean left panel configuration components."""
         
-        # Analysis-centric tabs for intent-based organization
-        self.trends_panel = self._create_trends_section()
-        self.quality_panel = self._create_quality_section() 
-        self.insights_panel = self._create_insights_section()
-        
-        self.analysis_tabs = pn.Tabs(
-            ("📈 Trends", self.trends_panel),
-            ("🎯 Quality", self.quality_panel),
-            ("💡 Insights", self.insights_panel),
+        # Analysis Category Selection (Radio buttons)
+        self.analysis_category_radio = pn.widgets.RadioButtonGroup(
+            name="Analysis Category",
+            options=["Basic Statistics", "Resistance", "Kinetics", "Equilibrium", "Current Decay"],
+            button_type="primary",
             sizing_mode='stretch_width',
             margin=(5, 5)
         )
         
-        # Plot trigger button
-        self.plot_btn = pn.widgets.Button(
-            name="📊 Generate Plot",
-            button_type="primary", 
-            disabled=True,
+        # Specific Analysis Selection (Dropdown - populated dynamically)
+        self.analysis_select = pn.widgets.Select(
+            name="Specific Analysis",
+            options=[("Select category first", "")],
+            sizing_mode='stretch_width',
+            margin=(5, 5)
+        )
+        
+        # Temperature Filter (Optional)
+        self.temperature_filter = pn.widgets.Select(
+            name="Temperature Filter",
+            options=[("All Temperatures", "all"), ("25°C", "25"), ("Room Temp", "rt")],
+            value="all",
             sizing_mode='stretch_width',
             margin=(5, 5)
         )
         
         # Status display
         self.config_status = pn.pane.HTML(
-            "<p><i>Select cells to load available analyses and columns</i></p>",
+            "<p><i>Select cells and analysis to begin</i></p>",
             sizing_mode='stretch_width',
             margin=(5, 5)
         )
     
-    def _create_trends_section(self):
-        """Create Trends section for time-series and relationship analysis."""
-        return pn.Column(
-            pn.pane.HTML("<h5>📈 Analyze Trends Over Time</h5><p><small>Select metrics for X-Y plotting and time-series analysis</small></p>"),
-            pn.pane.HTML("<p><i>Configure cells to load trend analysis options</i></p>", name="trends_placeholder"),
-            sizing_mode='stretch_width'
+    def _create_right_panel_components(self):
+        """Create right panel with config bar and plot area."""
+        
+        # Top configuration bar (120px fixed height)
+        self.config_bar = pn.Row(
+            pn.pane.HTML("<p><b>📊 Plot Configuration</b> - Select analysis to configure</p>"),
+            height=120,
+            sizing_mode='stretch_width',
+            margin=(5, 5),
+            background='#f8f9fa'
         )
-    
-    def _create_quality_section(self):
-        """Create Quality section for distribution and statistical analysis."""
-        return pn.Column(
-            pn.pane.HTML("<h5>🎯 Assess Data Quality</h5><p><small>Select quality metrics for distribution analysis</small></p>"),
-            pn.pane.HTML("<p><i>Configure cells to load quality analysis options</i></p>", name="quality_placeholder"),
-            sizing_mode='stretch_width'
-        )
-    
-    def _create_insights_section(self):
-        """Create Insights section for categorical and comparative analysis."""
-        return pn.Column(
-            pn.pane.HTML("<h5>💡 Extract Insights</h5><p><small>Select categorical data for comparative analysis</small></p>"),
-            pn.pane.HTML("<p><i>Configure cells to load insight analysis options</i></p>", name="insights_placeholder"),
-            sizing_mode='stretch_width'
+        
+        # Bottom plot area (flexible)
+        self.plot_area = pn.Column(
+            pn.pane.HTML(
+                "<div style='text-align:center; padding:50px;'>"
+                "<h3>📈 Electrochemical Analysis Plots</h3>"
+                "<p>Configure analysis in left panel to generate plots</p>"
+                "</div>",
+                sizing_mode='stretch_both'
+            ),
+            sizing_mode='stretch_both',
+            margin=(5, 5)
         )
     
     def _create_visualization_components(self):
@@ -205,51 +213,44 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         )
     
     def _setup_layout(self):
-        """Setup 3-panel layout for explorer."""
+        """Setup clean 30/70 proportional layout."""
         
-        # Panel 1: Cell Selection
-        cell_panel = pn.Card(
-            pn.Column(
-                pn.pane.HTML("<h4>🔋 Cell Selection</h4>"),
-                self.cell_tabulator,
-                self.refresh_cells_btn,
-                self.cell_status_html
-            ),
-            title="Data Selection",
-            sizing_mode='stretch_width',
-            margin=(5, 5)
+        # LEFT PANEL (30%) - Analysis Selection
+        left_panel = pn.Column(
+            pn.pane.HTML("<h4>🔋 Cell & Analysis Selection</h4>"),
+            
+            # Cell Selection Section
+            pn.pane.HTML("<h5>Data Selection</h5>"),
+            self.cell_tabulator,
+            self.refresh_cells_btn,
+            self.cell_status_html,
+            
+            pn.Divider(),
+            
+            # Analysis Selection Section  
+            pn.pane.HTML("<h5>Analysis Configuration</h5>"),
+            self.analysis_category_radio,
+            self.analysis_select,
+            self.temperature_filter,
+            self.config_status,
+            
+            width_policy='max',  # Takes minimum needed space
+            sizing_mode='stretch_height',
+            margin=(10, 10)
         )
         
-        # Panel 2: Analysis Configuration  
-        config_panel = pn.Card(
-            pn.Column(
-                pn.pane.HTML("<h4>⚙️ Analysis Configuration</h4>"),
-                self.analysis_tabs,
-                self.plot_btn,
-                self.config_status
-            ),
-            title="Analysis Explorer",
-            sizing_mode='stretch_width',
-            margin=(5, 5)
-        )
-        
-        # Panel 3: Visualization
-        viz_panel = pn.Card(
-            pn.Column(
-                pn.pane.HTML("<h4>📊 Data Feedback</h4>"),
-                self.data_feedback_tabulator,
-                pn.pane.HTML("<h4>🎯 Interactive Visualization</h4>"),
-                self.plot_pane
-            ),
-            title="Visual Explorer",
+        # RIGHT PANEL (70%) - Config Bar + Plot Area
+        right_panel = pn.Column(
+            self.config_bar,    # Top config bar (120px)
+            self.plot_area,     # Bottom plot area (flexible)
             sizing_mode='stretch_both',
-            margin=(5, 5)
+            margin=(10, 10)
         )
         
-        # Main layout
+        # MAIN LAYOUT - 30/70 Proportional Split  
         self.panel = pn.Row(
-            pn.Column(cell_panel, config_panel, width=400),
-            viz_panel,
+            (left_panel, 30),    # 30% width
+            (right_panel, 70),   # 70% width
             sizing_mode='stretch_both'
         )
     
@@ -260,8 +261,9 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         self.cell_tabulator.param.watch(self._on_cell_selection_changed, 'selection')
         self.refresh_cells_btn.on_click(self._on_refresh_cells)
         
-        # Analysis configuration callbacks
-        self.plot_btn.on_click(self._on_generate_plot)
+        # Analysis selection callbacks
+        self.analysis_category_radio.param.watch(self._on_analysis_category_changed, 'value')
+        self.analysis_select.param.watch(self._on_analysis_changed, 'value')
     
     def _refresh_cells(self):
         """Refresh available cells from backend."""
@@ -317,11 +319,9 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             
             self.selected_cells = selected_cells
             
-            # Update plot button state and populate analysis sections
-            self.plot_btn.disabled = len(selected_cells) == 0
-            
+            # Update analysis category radio based on available data
             if selected_cells:
-                self._populate_analysis_sections(selected_cells)
+                self._update_analysis_options(selected_cells)
             
             # Update cell status
             if selected_cells:
@@ -372,27 +372,84 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Failed to generate plot: {e}")
             self._update_status(f"Plot generation failed: {str(e)}", "error")
     
-    def _populate_analysis_sections(self, selected_cells):
-        """Populate analysis sections with available analyses and columns."""
+    def _update_analysis_options(self, selected_cells):
+        """Update analysis options based on available data from selected cells."""
         try:
             # Get available techniques for selected cells
             available_techniques = self._get_available_techniques(selected_cells)
             
-            # Discover available analyses and columns
-            self._discover_registry_columns()
-            
-            # Populate each section with relevant analyses
-            self._populate_trends_section(available_techniques)
-            self._populate_quality_section(available_techniques) 
-            self._populate_insights_section(available_techniques)
-            
             # Update status
-            analysis_count = len(self.available_columns)
-            self.config_status.object = f"<p><b>✅ Analysis Ready:</b> {analysis_count} analyses available for selected cells</p>"
+            technique_text = f"Available techniques: {', '.join(available_techniques)}" if available_techniques else "Loading techniques..."
+            self.config_status.object = f"<p><b>✅ Data Ready:</b> {len(selected_cells)} cells selected<br><small>{technique_text}</small></p>"
             
         except Exception as e:
-            logger.error(f"Failed to populate analysis sections: {e}")
+            logger.error(f"Failed to update analysis options: {e}")
             self.config_status.object = f"<p><b>❌ Configuration Error:</b> {str(e)}</p>"
+    
+    def _on_analysis_category_changed(self, event):
+        """Handle analysis category selection change."""
+        category = event.new
+        if not category:
+            return
+            
+        try:
+            # Map category to analysis IDs using registry
+            category_map = {
+                "Basic Statistics": "basic_statistics_analytics",
+                "Resistance": "resistance_analytics", 
+                "Kinetics": "kinetics_analytics",
+                "Equilibrium": "equilibrium_analytics",
+                "Current Decay": "current_decay_analytics"
+            }
+            
+            if category in category_map:
+                analysis_id = category_map[category]
+                config = self.registry.get_analysis(analysis_id)
+                
+                if config:
+                    # Update dropdown with single option (can be expanded later)
+                    self.analysis_select.options = [(config.name, analysis_id)]
+                    self.analysis_select.value = analysis_id
+                    
+                    logger.info(f"Selected analysis category: {category} -> {analysis_id}")
+                
+        except Exception as e:
+            logger.error(f"Failed to update analysis options for category {category}: {e}")
+    
+    def _on_analysis_changed(self, event):
+        """Handle specific analysis selection change.""" 
+        analysis_id = event.new
+        if not analysis_id:
+            return
+            
+        try:
+            config = self.registry.get_analysis(analysis_id)
+            if config:
+                # Update config bar for this analysis
+                self._update_config_bar(analysis_id, config)
+                logger.info(f"Selected analysis: {config.name} ({analysis_id})")
+                
+        except Exception as e:
+            logger.error(f"Failed to handle analysis change to {analysis_id}: {e}")
+    
+    def _update_config_bar(self, analysis_id, config):
+        """Update the top configuration bar for the selected analysis."""
+        try:
+            # For now, just show analysis info - will be enhanced in Phase B
+            config_html = f"""
+            <div style='padding:10px;'>
+                <h4>📊 {config.name}</h4>
+                <p><strong>Description:</strong> {config.description}</p>
+                <p><strong>Applicable to:</strong> {', '.join(config.applicable_techniques)}</p>
+                <p><em>Plot configuration controls will be added in Phase B</em></p>
+            </div>
+            """
+            
+            self.config_bar.clear()
+            self.config_bar.append(pn.pane.HTML(config_html, sizing_mode='stretch_width'))
+            
+        except Exception as e:
+            logger.error(f"Failed to update config bar: {e}")
     
     def _get_available_techniques(self, selected_cells):
         """Get available techniques from selected cells."""
@@ -403,165 +460,20 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.warning(f"Failed to get techniques: {e}")
             return []
     
-    def _populate_trends_section(self, available_techniques):
-        """Populate trends section with metric columns from applicable analyses."""
-        trends_content = []
-        
-        # Header
-        trends_content.append(
-            pn.pane.HTML("<h5>📈 Analyze Trends Over Time</h5><p><small>Select metrics for X-Y plotting and time-series analysis</small></p>")
-        )
-        
-        # For each analysis, create expandable section with metric columns
-        for analysis_id, columns in self.available_columns.items():
-            config = self.registry.get_analysis(analysis_id)
-            if not config:
-                continue
-                
-            # Check if analysis is applicable to available techniques
-            if not any(tech.lower() in [t.lower() for t in config.applicable_techniques] for tech in available_techniques):
-                continue
-                
-            # Get metrics columns with units
-            metrics_columns = self.registry.get_metrics_columns_with_units(analysis_id)
-            if not metrics_columns:
-                continue
-                
-            # Create expandable section for this analysis
-            column_checkboxes = []
-            for col_name, display_name in metrics_columns.items():
-                checkbox = pn.widgets.Checkbox(name=display_name, value=False, margin=(2, 5))
-                checkbox.param.watch(self._on_column_selection_changed, 'value')
-                column_checkboxes.append(checkbox)
-                
-            analysis_expander = pn.Accordion(
-                (f"{config.name} ({len(metrics_columns)} metrics)", pn.Column(*column_checkboxes)),
-                toggle=False,
-                sizing_mode='stretch_width'
-            )
-            trends_content.append(analysis_expander)
-        
-        # Replace trends panel content
-        self.trends_panel.clear()
-        self.trends_panel.extend(trends_content)
+    # === REMOVED: Complex accordion methods replaced by simple dropdown approach ===
+    # Old _populate_trends_section, _populate_quality_section, _populate_insights_section
+    # methods removed for cleaner UI approach
     
-    def _populate_quality_section(self, available_techniques):
-        """Populate quality section with quality columns from applicable analyses."""
-        quality_content = []
-        
-        # Header
-        quality_content.append(
-            pn.pane.HTML("<h5>🎯 Assess Data Quality</h5><p><small>Select quality metrics for distribution analysis</small></p>")
-        )
-        
-        # For each analysis, create expandable section with quality columns
-        for analysis_id, columns in self.available_columns.items():
-            config = self.registry.get_analysis(analysis_id)
-            if not config:
-                continue
-                
-            # Check if analysis is applicable to available techniques
-            if not any(tech.lower() in [t.lower() for t in config.applicable_techniques] for tech in available_techniques):
-                continue
-                
-            # Get quality columns with units
-            quality_columns = self.registry.get_quality_columns_with_units(analysis_id)
-            if not quality_columns:
-                continue
-                
-            # Create expandable section for this analysis
-            column_checkboxes = []
-            for col_name, display_name in quality_columns.items():
-                checkbox = pn.widgets.Checkbox(name=display_name, value=False, margin=(2, 5))
-                checkbox.param.watch(self._on_column_selection_changed, 'value')
-                column_checkboxes.append(checkbox)
-                
-            analysis_expander = pn.Accordion(
-                (f"{config.name} ({len(quality_columns)} quality)", pn.Column(*column_checkboxes)),
-                toggle=False,
-                sizing_mode='stretch_width'
-            )
-            quality_content.append(analysis_expander)
-        
-        # Replace quality panel content
-        self.quality_panel.clear()
-        self.quality_panel.extend(quality_content)
-    
-    def _populate_insights_section(self, available_techniques):
-        """Populate insights section with insight columns from applicable analyses."""
-        insights_content = []
-        
-        # Header  
-        insights_content.append(
-            pn.pane.HTML("<h5>💡 Extract Insights</h5><p><small>Select categorical data for comparative analysis</small></p>")
-        )
-        
-        # For each analysis, create expandable section with insight columns
-        for analysis_id, columns in self.available_columns.items():
-            config = self.registry.get_analysis(analysis_id)
-            if not config:
-                continue
-                
-            # Check if analysis is applicable to available techniques
-            if not any(tech.lower() in [t.lower() for t in config.applicable_techniques] for tech in available_techniques):
-                continue
-                
-            # Get insight columns with units
-            insight_columns = self.registry.get_insight_columns_with_units(analysis_id)
-            if not insight_columns:
-                continue
-                
-            # Create expandable section for this analysis
-            column_checkboxes = []
-            for col_name, display_name in insight_columns.items():
-                checkbox = pn.widgets.Checkbox(name=display_name, value=False, margin=(2, 5))
-                checkbox.param.watch(self._on_column_selection_changed, 'value')
-                column_checkboxes.append(checkbox)
-                
-            analysis_expander = pn.Accordion(
-                (f"{config.name} ({len(insight_columns)} insights)", pn.Column(*column_checkboxes)),
-                toggle=False,
-                sizing_mode='stretch_width'
-            )
-            insights_content.append(analysis_expander)
-        
-        # Replace insights panel content
-        self.insights_panel.clear()
-        self.insights_panel.extend(insights_content)
-    
+    # === OLD COLUMN SELECTION METHOD - WILL BE REPLACED IN PHASE B ===
     def _on_column_selection_changed(self, event):
-        """Handle column selection change in any section."""
-        # Update plot button state based on selections
-        selected_columns = self._get_selected_columns()
-        self.plot_btn.disabled = len(selected_columns) == 0
+        """Handle column selection change (Phase B implementation)."""
+        # TODO: Implement in Phase B with new PlotState system
+        pass
     
     def _get_selected_columns(self):
-        """Get currently selected columns from all sections."""
-        selected_columns = []
-        
-        # Collect from all three sections
-        for section_name, panel in [("trends", self.trends_panel), ("quality", self.quality_panel), ("insights", self.insights_panel)]:
-            try:
-                for component in panel:
-                    if hasattr(component, 'objects'):  # Accordion component
-                        for accordion_item in component.objects:
-                            if hasattr(accordion_item, 'objects'):  # Column container
-                                for checkbox_container in accordion_item.objects:
-                                    if hasattr(checkbox_container, 'objects'):  # Individual checkboxes
-                                        for checkbox in checkbox_container.objects:
-                                            if hasattr(checkbox, 'value') and checkbox.value:
-                                                # Extract column name from checkbox name (remove units display)
-                                                col_name = checkbox.name.split(' (')[0]  # Remove units part
-                                                selected_columns.append({
-                                                    'name': col_name,
-                                                    'section': section_name,
-                                                    'display_name': checkbox.name
-                                                })
-            except Exception as e:
-                logger.debug(f"Error collecting from {section_name}: {e}")
-                continue
-        
-        return selected_columns
+        """Get currently selected columns (Phase B implementation)."""
+        # TODO: Implement in Phase B with config bar controls
+        return []
     
     def _generate_analysis_plot(self, selected_columns):
         """Generate plot with selected columns using context-sensitive configuration modal."""
