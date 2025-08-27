@@ -2640,12 +2640,9 @@ class BackendAPI:
                         logger.info(f"✅ {analysis_name}: {len(df)} rows, {len(df.columns)} columns")
                         logger.debug(f"  Columns: {list(df.columns)[:10]}...")
                         logger.debug(f"  Has 'id' column: {'id' in df.columns}")
-                        prefix = analysis_name + "_"
-                        # Create a dictionary to map old names to new names
-                        new_column_names = {col: f"{prefix}{col}" for col in df.columns if col != 'id'}
-
-                        # Rename the columns using the dictionary
-                        df = df.rename(columns=new_column_names)
+                        
+                        # NOTE: Analysis functions now return pre-prefixed columns
+                        # No need to rename columns here anymore!
                         analytics_results[analysis_name] = df
                     else:
                         logger.warning(f"⚠️  {analysis_name}: No results or invalid DataFrame")

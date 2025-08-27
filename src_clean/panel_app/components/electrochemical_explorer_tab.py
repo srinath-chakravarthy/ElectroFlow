@@ -367,9 +367,9 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             raise
     
     def _discover_registry_columns(self):
-        """Discover available columns from registry and current dataset."""
+        """Discover available columns from registry static declarations and current dataset."""
         try:
-            # Get all registered analysis configurations
+            # Get all registered analysis configurations with static declarations
             registry_analyses = {}
             
             # Get analysis options from registry
@@ -377,34 +377,40 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             
             for analysis_id, analysis_name in analysis_options:
                 config = self.registry.get_analysis(analysis_id)
-                if config:
-                    # Get available columns for this analysis
-                    available_cols = self.registry.get_available_columns(analysis_id)
-                    if available_cols:
+                if config and config.output_columns:
+                    # Use static declarations instead of running analysis
+                    static_columns = self.registry.get_all_output_columns(analysis_id)
+                    if static_columns:
                         registry_analyses[analysis_id] = {
                             'name': analysis_name,
-                            'columns': available_cols
+                            'columns': static_columns,
+                            'categorized': self.registry.get_columns_by_category(analysis_id)
                         }
             
             self.registry_columns = registry_analyses
             
-            # Find columns in dataset that match registry pattern
+            # Find columns in dataset that actually exist
             dataset_columns = list(self.current_dataset.columns)
             self.available_columns = {}
             
             for analysis_id, info in registry_analyses.items():
                 matching_columns = []
-                for col in dataset_columns:
-                    if col.startswith(f"{analysis_id}_"):
+                for col in info['columns']:
+                    if col in dataset_columns:
                         matching_columns.append(col)
                 
                 if matching_columns:
                     self.available_columns[analysis_id] = {
                         'name': info['name'],
-                        'columns': matching_columns
+                        'columns': matching_columns,
+                        'categorized': {
+                            category: [col for col in cols if col in dataset_columns]
+                            for category, cols in info['categorized'].items()
+                        }
                     }
             
             logger.info(f"Discovered {len(self.available_columns)} analysis types with columns")
+            logger.debug(f"Available analyses: {list(self.available_columns.keys())}")
             
         except Exception as e:
             logger.error(f"Failed to discover registry columns: {e}")
@@ -499,31 +505,43 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             raise
     
     def _get_y_metrics_options(self, df):
-        """Get available Y-axis metrics from dataset with technique filtering."""
+        """Get available Y-axis metrics from dataset with registry technique filtering."""
         options = []
         
-        # Add registry-based columns (filtered by technique if applicable)
-        for analysis_id, info in self.available_columns.items():
-            # Filter by technique relevance
-            if self.current_technique != "All":
-                # Simple technique-analysis mapping
-                technique_analysis_map = {
-                    "REST": ["kinetics", "equilibrium"],
-                    "Galvanostatic": ["resistance", "basic_statistics"], 
-                    "Potentiostatic": ["current_decay", "kinetics"],
-                    "EIS": ["resistance", "impedance"],
-                    "CV": ["basic_statistics"]
-                }
+        # Use registry technique filtering
+        if self.current_technique != "All":
+            # Get applicable analyses for this technique using registry
+            applicable_analyses = self.registry.get_analyses_for_technique(self.current_technique)
+            applicable_analysis_ids = {config.analysis_id for config in applicable_analyses}
+        else:
+            # Use all available analyses
+            applicable_analysis_ids = set(self.available_columns.keys())
+        
+        # Add metrics from applicable analyses (prioritize metrics category)
+        for analysis_id in applicable_analysis_ids:
+            if analysis_id in self.available_columns:
+                info = self.available_columns[analysis_id]
                 
-                relevant_analyses = technique_analysis_map.get(self.current_technique, [])
-                if not any(analysis in analysis_id.lower() for analysis in relevant_analyses):
-                    continue
-            
-            for col in info['columns']:
-                if col in df.columns:
-                    # Create display name
-                    display_name = col.replace(f"{analysis_id}_", "").replace("_", " ").title()
-                    options.append((col, f"{info['name']}: {display_name}"))
+                # Get metrics columns first (primary for X/Y plotting)
+                metrics_cols = info['categorized'].get('metrics', [])
+                for col in metrics_cols:
+                    if col in df.columns:
+                        display_name = col.replace(f"{analysis_id}_", "").replace("_", " ").title()
+                        options.append((col, f"{info['name']} Metrics: {display_name}"))
+                
+                # Add quality columns (good for distribution plots)  
+                quality_cols = info['categorized'].get('quality', [])
+                for col in quality_cols:
+                    if col in df.columns:
+                        display_name = col.replace(f"{analysis_id}_", "").replace("_", " ").title()
+                        options.append((col, f"{info['name']} Quality: {display_name}"))
+                
+                # Add insight columns (categorical/bar plots)
+                insight_cols = info['categorized'].get('insights', [])
+                for col in insight_cols:
+                    if col in df.columns:
+                        display_name = col.replace(f"{analysis_id}_", "").replace("_", " ").title()
+                        options.append((col, f"{info['name']} Insights: {display_name}"))
         
         # Add base numeric columns
         numeric_cols = df.select_dtypes(include=['number']).columns
@@ -531,16 +549,16 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                      'exp_charge_cap_ah', 'exp_discharge_cap_ah', 'exp_time_cumulative_s']
         
         for col in base_cols:
-            if col in numeric_cols and col not in [opt[0] if isinstance(opt, tuple) else opt for opt in options]:
+            if col in numeric_cols and col not in [opt[0] for opt in options]:
                 display_name = col.replace("_", " ").title()
                 options.append((col, f"Base: {display_name}"))
         
         # Sort by display name and return just column names
-        if options and isinstance(options[0], tuple):
+        if options:
             options.sort(key=lambda x: x[1])
             return [opt[0] for opt in options]
         
-        return sorted(options)
+        return []
     
     def _get_x_axis_options(self, df):
         """Get appropriate X-axis options based on data."""

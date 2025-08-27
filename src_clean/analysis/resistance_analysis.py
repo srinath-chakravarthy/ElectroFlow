@@ -114,15 +114,29 @@ def resistance_analysis_function(segments: List[Dict[str, Any]], settings: Dict[
         insights = _interpret_resistance_data(resistance_data)
         for key, value in insights.items():
             df[f'insight_{key}'] = value
+        
+        # Apply analysis prefix to all columns except base columns
+        base_columns = ['id']  # Don't prefix these
+        analysis_id = 'resistance_analytics'
+        
+        # Create mapping for column renaming
+        column_mapping = {}
+        for col in df.columns:
+            if col not in base_columns:
+                column_mapping[col] = f"{analysis_id}_{col}"
+        
+        # Rename columns with prefix
+        df = df.rename(columns=column_mapping)
             
         return df
         
     except Exception as e:
-        # Return error as DataFrame
+        # Return error as DataFrame with prefixed columns
+        analysis_id = 'resistance_analytics'
         error_df = pd.DataFrame([{
             'id': None,
-            'error_message': f"Resistance analysis failed: {str(e)}",
-            'analysis_type': 'resistance_analysis'
+            f'{analysis_id}_error_message': f"Resistance analysis failed: {str(e)}",
+            f'{analysis_id}_analysis_type': 'resistance_analysis'
         }])
         return error_df
 

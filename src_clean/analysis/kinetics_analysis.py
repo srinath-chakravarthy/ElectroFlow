@@ -135,15 +135,29 @@ def kinetics_analysis_function(segments: List[Dict[str, Any]], settings: Dict[st
         df['fit_type_used'] = fit_type
         df['min_r_squared_threshold'] = min_r_squared
         df['is_high_quality'] = df['r_squared'] >= min_r_squared
+        
+        # Apply analysis prefix to all columns except base columns
+        base_columns = ['id']  # Don't prefix these
+        analysis_id = 'kinetics_analytics'
+        
+        # Create mapping for column renaming
+        column_mapping = {}
+        for col in df.columns:
+            if col not in base_columns:
+                column_mapping[col] = f"{analysis_id}_{col}"
+        
+        # Rename columns with prefix
+        df = df.rename(columns=column_mapping)
             
         return df
         
     except Exception as e:
-        # Return error as DataFrame
+        # Return error as DataFrame with prefixed columns
+        analysis_id = 'kinetics_analytics'
         error_df = pd.DataFrame([{
             'id': None,
-            'error_message': f"Kinetics analysis failed: {str(e)}",
-            'analysis_type': 'kinetics_analysis'
+            f'{analysis_id}_error_message': f"Kinetics analysis failed: {str(e)}",
+            f'{analysis_id}_analysis_type': 'kinetics_analysis'
         }])
         return error_df
 

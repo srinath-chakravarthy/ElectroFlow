@@ -88,7 +88,11 @@ class RegistryValidator:
     
     def get_available_columns(self, analysis_id: str) -> List[str]:
         """
-        Get available DataFrame columns for an analysis by running it.
+        Get available DataFrame columns for an analysis from static declarations.
+        
+        NOTE: This is a "fake" validator that reads static declarations instead of 
+        running analysis functions. This eliminates the fragile dependency on sample
+        data and makes column discovery reliable.
         
         Args:
             analysis_id: Analysis type to check
@@ -97,22 +101,23 @@ class RegistryValidator:
             List of column names available in the DataFrame
         """
         try:
-            # Get appropriate sample segments for this analysis
-            sample_segments = self._get_sample_segments_for_analysis(analysis_id)
-            
-            # Execute analysis to get actual DataFrame
-            result = self.registry.execute_analysis(analysis_id, sample_segments, {})
-            
-            if isinstance(result, pd.DataFrame):
-                columns = list(result.columns)
-                print(f"  📊 {analysis_id}: Found {len(columns)} columns")
-                return sorted(columns)
+            config = self.registry.get_analysis(analysis_id)
+            if config and config.output_columns:
+                # Get all columns from static declarations
+                all_columns = []
+                for category, columns in config.output_columns.items():
+                    # Return pre-prefixed column names
+                    prefixed_columns = [f"{analysis_id}_{col}" for col in columns]
+                    all_columns.extend(prefixed_columns)
+                
+                print(f"  📊 {analysis_id}: Found {len(all_columns)} columns from static declarations")
+                return sorted(all_columns)
             else:
-                print(f"  ❌ {analysis_id}: Analysis returned {type(result)}, not DataFrame")
+                print(f"  ❌ {analysis_id}: No output_columns defined in registry")
                 return []
                 
         except Exception as e:
-            print(f"  ❌ {analysis_id}: Error running analysis - {str(e)}")
+            print(f"  ❌ {analysis_id}: Error reading static declarations - {str(e)}")
             return []
     
     def validate_plot_columns(self, analysis_id: str, plot_name: str) -> ValidationResult:

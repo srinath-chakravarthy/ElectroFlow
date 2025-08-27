@@ -64,6 +64,14 @@ class AnalysisConfig:
     min_segments: int = 1              # Minimum segments required
     requires_analysis_results: bool = False  # Needs JSON analysis_results
     
+    # === OUTPUT SPECIFICATION ===
+    output_columns: Dict[str, List[str]] = field(default_factory=dict)  # Categorized output columns
+    # {
+    #   "metrics": ["diffusion_coefficient_cm2_s", "time_constant_s"],     # For X/Y plotting
+    #   "quality": ["r_squared", "rmse", "quality_score"],                # For distribution plots  
+    #   "insights": ["analysis_type", "meets_criteria"]                   # For categorical/bar plots
+    # }
+    
     # === ANALYSIS FUNCTION ===
     analysis_function: Callable[..., Dict[str, Any]] = None
     data_preparation: Optional[Callable] = None  # Optional data preprocessing
@@ -337,6 +345,50 @@ class AnalysisRegistry:
         validator = RegistryValidator()
         return validator.get_available_columns(analysis_id)
     
+    def get_metrics_columns(self, analysis_id: str) -> List[str]:
+        """Get metric columns for X/Y axis plotting."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns:
+            metrics = config.output_columns.get("metrics", [])
+            return [f"{analysis_id}_{col}" for col in metrics]
+        return []
+    
+    def get_quality_columns(self, analysis_id: str) -> List[str]:
+        """Get quality columns for distribution analysis."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns:
+            quality = config.output_columns.get("quality", [])
+            return [f"{analysis_id}_{col}" for col in quality]
+        return []
+    
+    def get_insight_columns(self, analysis_id: str) -> List[str]:
+        """Get insight columns for categorical/bar plotting."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns:
+            insights = config.output_columns.get("insights", [])
+            return [f"{analysis_id}_{col}" for col in insights]
+        return []
+    
+    def get_columns_by_category(self, analysis_id: str) -> Dict[str, List[str]]:
+        """Get all columns organized by category for UI."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns:
+            categorized = {}
+            for category, columns in config.output_columns.items():
+                categorized[category] = [f"{analysis_id}_{col}" for col in columns]
+            return categorized
+        return {}
+    
+    def get_all_output_columns(self, analysis_id: str) -> List[str]:
+        """Get all output columns (all categories combined)."""
+        config = self.get_analysis(analysis_id)
+        if config and config.output_columns:
+            all_columns = []
+            for columns in config.output_columns.values():
+                all_columns.extend([f"{analysis_id}_{col}" for col in columns])
+            return sorted(all_columns)
+        return []
+    
     def add_plot_config(self, analysis_id: str, plot_name: str, 
                        plot_type: str, x_column: str, y_column: Optional[str] = None,
                        title: Optional[str] = None, x_label: Optional[str] = None,
@@ -392,6 +444,11 @@ class AnalysisRegistry:
             required_techniques=["Rest", "Galvanostatic", "Potentiostatic", "EIS", "Cyclic_Voltammetry"],  # Applicable to all
             min_segments=1,
             analysis_function=basic_statistics_analysis,
+            output_columns={
+                "metrics": ["duration_mean", "capacity_mean", "energy_mean", "potential_range"],
+                "quality": ["duration_std", "capacity_std", "energy_std", "segment_count"],
+                "insights": ["technique_distribution", "quality_level"]
+            },
             settings_schema={
                 "metrics": {
                     "type": "multiselect",
@@ -432,6 +489,11 @@ class AnalysisRegistry:
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=resistance_analysis_function,
+            output_columns={
+                "metrics": ["instantaneous_resistance_ohm", "dc_resistance_ohm", "voltage_change_v"],
+                "quality": ["r_squared", "fit_quality_score", "data_points_used"],
+                "insights": ["resistance_category", "technique_suitability"]
+            },
             settings_schema={
                 "time_points": {
                     "type": "multiselect", 
@@ -511,6 +573,11 @@ class AnalysisRegistry:
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=kinetics_analysis_function,
+            output_columns={
+                "metrics": ["diffusion_coefficient_cm2_s", "time_constant_s", "current_amplitude", "current_infinity"],
+                "quality": ["r_squared", "rmse", "fit_converged", "quality_score"],
+                "insights": ["analysis_type", "meets_cottrell_criteria", "fit_method"]
+            },
             settings_schema={
                 "analysis_status_filter": {
                     "type": "multiselect",
@@ -591,6 +658,11 @@ class AnalysisRegistry:
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=equilibrium_analysis_function,
+            output_columns={
+                "metrics": ["equilibrium_voltage_v", "diffusion_coefficient_cm2_s", "current_amplitude", "current_infinity"],
+                "quality": ["r_squared", "rmse", "equilibrium_quality", "quality_score"],
+                "insights": ["analysis_type", "meets_drift_criteria", "meets_duration_criteria"]
+            },
             settings_schema={
                 "analysis_status_filter": {
                     "type": "multiselect",
@@ -696,6 +768,11 @@ class AnalysisRegistry:
             min_segments=1,
             requires_analysis_results=True,
             analysis_function=current_decay_analysis_function,
+            output_columns={
+                "metrics": ["diffusion_coefficient_cm2_s", "decay_time_constant_s", "initial_current_a", "steady_state_current_a"],
+                "quality": ["r_squared", "rmse", "fit_quality", "min_r_squared"],
+                "insights": ["decay_model", "cottrell_compliance", "analysis_method"]
+            },
             settings_schema={
                 "min_r_squared": {
                     "type": "float",

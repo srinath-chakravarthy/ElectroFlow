@@ -143,14 +143,21 @@ def equilibrium_analysis_function(segments: List[Dict[str, Any]], settings: Dict
         insights = _interpret_equilibrium_data(equilibrium_data, settings)
         for key, value in insights.items():
             df[f'insight_{key}'] = value
+        
+        # Apply analysis prefix to all columns except base columns
+        base_columns = ['id']
+        analysis_id = 'equilibrium_analytics'
+        column_mapping = {col: f"{analysis_id}_{col}" for col in df.columns if col not in base_columns}
+        df = df.rename(columns=column_mapping)
             
         return df
         
     except Exception as e:
+        analysis_id = 'equilibrium_analytics'
         error_df = pd.DataFrame([{
             'id': None,
-            'error_message': f"Equilibrium analysis failed: {str(e)}",
-            'analysis_type': 'equilibrium_analysis'
+            f'{analysis_id}_error_message': f"Equilibrium analysis failed: {str(e)}",
+            f'{analysis_id}_analysis_type': 'equilibrium_analysis'
         }])
         return error_df
 

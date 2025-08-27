@@ -87,13 +87,27 @@ def basic_statistics_analysis(segments: List[Dict[str, Any]], settings: Dict[str
         df['metrics_analyzed'] = ','.join(metrics)
         df['quality_score'] = 1.0  # Basic statistics always succeeds
         
+        # Apply analysis prefix to all columns except base columns
+        base_columns = ['id', 'segment_id']  # Don't prefix these
+        analysis_id = 'basic_statistics_analytics'
+        
+        # Create mapping for column renaming
+        column_mapping = {}
+        for col in df.columns:
+            if col not in base_columns:
+                column_mapping[col] = f"{analysis_id}_{col}"
+        
+        # Rename columns with prefix
+        df = df.rename(columns=column_mapping)
+        
         return df
         
     except Exception as e:
-        # Return error as DataFrame
+        # Return error as DataFrame with prefixed columns
+        analysis_id = 'basic_statistics_analytics'
         error_df = pd.DataFrame([{
-            'segment_id': None,
-            'error_message': f"Basic statistics analysis failed: {str(e)}",
-            'analysis_type': 'basic_statistics'
+            'id': None,
+            f'{analysis_id}_error_message': f"Basic statistics analysis failed: {str(e)}",
+            f'{analysis_id}_analysis_type': 'basic_statistics'
         }])
         return error_df
