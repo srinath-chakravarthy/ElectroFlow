@@ -537,17 +537,281 @@ class ElectrochemicalExplorerTab(param.Parameterized):
     
     def _get_selected_columns(self):
         """Get currently selected columns from all sections."""
-        selected = []
+        selected_columns = []
         
-        # TODO: Implement column collection from checkboxes in all sections
-        # This is a placeholder - will be fully implemented in Phase 3
+        # Collect from all three sections
+        for section_name, panel in [("trends", self.trends_panel), ("quality", self.quality_panel), ("insights", self.insights_panel)]:
+            try:
+                for component in panel:
+                    if hasattr(component, 'objects'):  # Accordion component
+                        for accordion_item in component.objects:
+                            if hasattr(accordion_item, 'objects'):  # Column container
+                                for checkbox_container in accordion_item.objects:
+                                    if hasattr(checkbox_container, 'objects'):  # Individual checkboxes
+                                        for checkbox in checkbox_container.objects:
+                                            if hasattr(checkbox, 'value') and checkbox.value:
+                                                # Extract column name from checkbox name (remove units display)
+                                                col_name = checkbox.name.split(' (')[0]  # Remove units part
+                                                selected_columns.append({
+                                                    'name': col_name,
+                                                    'section': section_name,
+                                                    'display_name': checkbox.name
+                                                })
+            except Exception as e:
+                logger.debug(f"Error collecting from {section_name}: {e}")
+                continue
         
-        return selected
+        return selected_columns
     
     def _generate_analysis_plot(self, selected_columns):
-        """Generate plot with selected columns (placeholder for Phase 4)."""
-        # TODO: Implement in Phase 4 with context-sensitive plot configuration
-        self.plot_pane.object = "<p><b>🚧 Plot generation will be implemented in Phase 4</b></p>"
+        """Generate plot with selected columns using context-sensitive configuration modal."""
+        try:
+            if not selected_columns:
+                self._update_status("No columns selected for plotting", "warning")
+                return
+            
+            # Show plot configuration modal
+            self._show_plot_configuration_modal(selected_columns)
+            
+        except Exception as e:
+            logger.error(f"Failed to setup plot configuration: {e}")
+            self._update_status(f"Plot configuration error: {str(e)}", "error")
+    
+    def _show_plot_configuration_modal(self, selected_columns):
+        """Show context-sensitive plot configuration modal."""
+        try:
+            # Create plot configuration modal
+            modal_content = self._create_plot_config_modal_content(selected_columns)
+            
+            # Create modal dialog
+            self.plot_config_modal = pn.template.Modal(
+                modal_content,
+                title="🎯 Configure Plot",
+                sizing_mode='stretch_width',
+                max_width=800,
+                margin=(10, 10)
+            )
+            
+            # Show modal
+            self.plot_config_modal.show()
+            
+        except Exception as e:
+            logger.error(f"Failed to show plot configuration modal: {e}")
+            self._update_status(f"Modal error: {str(e)}", "error")
+    
+    def _create_plot_config_modal_content(self, selected_columns):
+        """Create content for plot configuration modal with context-sensitive options."""
+        
+        # Analyze selected columns to determine plot context
+        plot_context = self._analyze_plot_context(selected_columns)
+        
+        # Header with context summary
+        header_html = f"""
+        <h4>🎯 Plot Configuration</h4>
+        <p><strong>Selected Columns:</strong> {len(selected_columns)} columns from {len(set(col['section'] for col in selected_columns))} sections</p>
+        <p><strong>Plot Context:</strong> {plot_context['description']}</p>
+        """
+        
+        header = pn.pane.HTML(header_html, margin=(5, 5))
+        
+        # X-axis configuration
+        x_axis_options = self._get_x_axis_options(plot_context)
+        self.x_axis_select = pn.widgets.Select(
+            name="X-Axis",
+            options=x_axis_options,
+            value=plot_context['suggested_x_axis'],
+            sizing_mode='stretch_width',
+            margin=(5, 5)
+        )
+        
+        # Y-axis configuration (multi-select for multiple metrics)
+        y_axis_options = [(col['display_name'], col['name']) for col in selected_columns]
+        self.y_axis_multiselect = pn.widgets.MultiSelect(
+            name="Y-Axis (Multi-Select)",
+            options=y_axis_options,
+            value=[col['name'] for col in selected_columns[:3]],  # Default to first 3
+            size=min(8, len(y_axis_options)),
+            sizing_mode='stretch_width',
+            margin=(5, 5)
+        )
+        
+        # Plot type selection based on context
+        plot_type_options = self._get_plot_type_options(plot_context)
+        self.plot_type_select = pn.widgets.RadioButtonGroup(
+            name="Plot Type",
+            options=plot_type_options,
+            value=plot_context['suggested_plot_type'],
+            button_type='primary',
+            margin=(5, 5)
+        )
+        
+        # Additional options
+        self.show_units_checkbox = pn.widgets.Checkbox(
+            name="Show units in axis labels",
+            value=True,
+            margin=(5, 5)
+        )
+        
+        self.auto_scale_checkbox = pn.widgets.Checkbox(
+            name="Auto-scale axes",
+            value=True,
+            margin=(5, 5)
+        )
+        
+        # Action buttons
+        generate_btn = pn.widgets.Button(
+            name="Generate Plot",
+            button_type="primary",
+            width=120,
+            margin=(10, 5)
+        )
+        generate_btn.on_click(self._on_modal_generate_plot)
+        
+        cancel_btn = pn.widgets.Button(
+            name="Cancel", 
+            button_type="light",
+            width=80,
+            margin=(10, 5)
+        )
+        cancel_btn.on_click(self._on_modal_cancel)
+        
+        # Layout modal content
+        modal_content = pn.Column(
+            header,
+            pn.Divider(),
+            pn.pane.HTML("<h5>Axis Configuration</h5>"),
+            self.x_axis_select,
+            self.y_axis_multiselect,
+            pn.Divider(), 
+            pn.pane.HTML("<h5>Plot Settings</h5>"),
+            self.plot_type_select,
+            self.show_units_checkbox,
+            self.auto_scale_checkbox,
+            pn.Divider(),
+            pn.Row(generate_btn, cancel_btn, margin=(10, 5)),
+            sizing_mode='stretch_width',
+            margin=(10, 10)
+        )
+        
+        return modal_content
+    
+    def _analyze_plot_context(self, selected_columns):
+        """Analyze selected columns to determine optimal plot context and suggestions."""
+        
+        # Categorize columns by section
+        sections = {}
+        for col in selected_columns:
+            section = col['section']
+            if section not in sections:
+                sections[section] = []
+            sections[section].append(col)
+        
+        # Determine primary context
+        if len(sections) == 1:
+            # Single section - specialized context
+            section_name = list(sections.keys())[0]
+            if section_name == "trends":
+                context = {
+                    'type': 'time_series',
+                    'description': 'Time-series trend analysis',
+                    'suggested_x_axis': 'start_time_s',
+                    'suggested_plot_type': 'Line Plot'
+                }
+            elif section_name == "quality":
+                context = {
+                    'type': 'distribution',
+                    'description': 'Quality distribution analysis', 
+                    'suggested_x_axis': selected_columns[0]['name'],
+                    'suggested_plot_type': 'Histogram'
+                }
+            else:  # insights
+                context = {
+                    'type': 'categorical',
+                    'description': 'Categorical insight analysis',
+                    'suggested_x_axis': selected_columns[0]['name'], 
+                    'suggested_plot_type': 'Bar Chart'
+                }
+        else:
+            # Multi-section - correlation context
+            context = {
+                'type': 'correlation',
+                'description': f'Multi-section correlation analysis ({", ".join(sections.keys())})',
+                'suggested_x_axis': 'start_time_s',
+                'suggested_plot_type': 'Scatter Plot'
+            }
+        
+        return context
+    
+    def _get_x_axis_options(self, plot_context):
+        """Get X-axis options based on plot context."""
+        base_options = [
+            ("Time (s)", "start_time_s"),
+            ("Segment Duration (s)", "duration_s"), 
+            ("Start Potential (V)", "start_potential_v"),
+            ("End Potential (V)", "end_potential_v")
+        ]
+        
+        # Add context-specific options
+        if plot_context['type'] == 'time_series':
+            return [("Time (s)", "start_time_s")] + base_options[1:]
+        else:
+            return base_options
+    
+    def _get_plot_type_options(self, plot_context):
+        """Get plot type options based on context."""
+        if plot_context['type'] == 'time_series':
+            return ["Line Plot", "Scatter Plot", "Area Plot"]
+        elif plot_context['type'] == 'distribution':
+            return ["Histogram", "Box Plot", "Violin Plot"]
+        elif plot_context['type'] == 'categorical':
+            return ["Bar Chart", "Count Plot", "Pie Chart"]
+        else:  # correlation
+            return ["Scatter Plot", "Line Plot", "Heatmap"]
+    
+    def _on_modal_generate_plot(self, event):
+        """Handle generate plot button click from modal."""
+        try:
+            # Get configuration from modal
+            plot_config = {
+                'x_axis': self.x_axis_select.value,
+                'y_axes': self.y_axis_multiselect.value,
+                'plot_type': self.plot_type_select.value,
+                'show_units': self.show_units_checkbox.value,
+                'auto_scale': self.auto_scale_checkbox.value
+            }
+            
+            # Close modal
+            self.plot_config_modal.hide()
+            
+            # Generate plot with configuration (Phase 4)
+            self._create_configured_plot(plot_config)
+            
+        except Exception as e:
+            logger.error(f"Failed to generate plot from modal: {e}")
+            self._update_status(f"Plot generation error: {str(e)}", "error")
+    
+    def _on_modal_cancel(self, event):
+        """Handle cancel button click from modal."""
+        self.plot_config_modal.hide()
+        self._update_status("Plot configuration cancelled", "info")
+    
+    def _create_configured_plot(self, plot_config):
+        """Create plot with user configuration (Phase 4 implementation)."""
+        # TODO: Full implementation in Phase 4
+        # For now, show configuration summary
+        config_summary = f"""
+        <div style='padding:20px; background:#e3f2fd; border-radius:8px; margin:10px;'>
+            <h4>🎯 Plot Configuration Applied</h4>
+            <p><strong>X-Axis:</strong> {plot_config['x_axis']}</p>
+            <p><strong>Y-Axes:</strong> {', '.join(plot_config['y_axes'])}</p>
+            <p><strong>Plot Type:</strong> {plot_config['plot_type']}</p>
+            <p><strong>Units Display:</strong> {'Enabled' if plot_config['show_units'] else 'Disabled'}</p>
+            <p><strong>Auto-Scale:</strong> {'Enabled' if plot_config['auto_scale'] else 'Disabled'}</p>
+            <p><em>🚧 Full plot generation will be implemented in Phase 4</em></p>
+        </div>
+        """
+        self.plot_pane.object = config_summary
+        self._update_status("Plot configuration complete - ready for Phase 4 implementation", "success")
     
     def _load_dataset(self):
         """Load comprehensive dataset for selected cells."""
