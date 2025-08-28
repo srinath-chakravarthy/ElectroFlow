@@ -914,7 +914,8 @@ class CellFileManagement(param.Parameterized):
             self.file_tabulator,
             pn.Row(pn.Spacer(), self.reprocess_file_btn, self.delete_file_btn, self.add_files_btn, margin=(5, 10)),
             
-            sizing_mode='stretch_width',
+            width=480,              # Fixed width for left panel (40% of ~1200px)
+            sizing_mode='stretch_height',
             styles={'background': 'white', 'border-radius': '8px', 
                    'box-shadow': '0 2px 8px rgba(0,0,0,0.1)', 'margin': '10px'}
         )
@@ -934,15 +935,15 @@ class CellFileManagement(param.Parameterized):
             # DataViewer integration - handles all plotting and data display
             self.data_viewer.panel,
             
-            sizing_mode='stretch_width',
+            sizing_mode='stretch_both',
             styles={'background': 'white', 'border-radius': '8px',
                    'box-shadow': '0 2px 8px rgba(0,0,0,0.1)', 'margin': '10px'}
         )
         
-        # Main layout with modal container overlay
+        # Main layout with modal container overlay - 40/60 proportional split using Row
         main_layout = pn.Row(
-            left_panel,
-            right_panel,
+            left_panel,      # Fixed 480px width (40%)
+            right_panel,     # Flexible width (60%)
             sizing_mode='stretch_width',
             height=800
         )

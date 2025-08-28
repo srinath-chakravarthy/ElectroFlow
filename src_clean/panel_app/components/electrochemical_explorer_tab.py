@@ -427,7 +427,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             self.temperature_filter,
             self.config_status,
             
-            width_policy='max',  # Takes minimum needed space
+            width=400,           # Fixed width for left panel (30% of ~1200px)
             sizing_mode='stretch_height',
             margin=(10, 10)
         )
@@ -440,11 +440,11 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             margin=(10, 10)
         )
         
-        # MAIN LAYOUT - 30/70 Proportional Split  
+        # MAIN LAYOUT - 30/70 Proportional Split using Row with fixed width
         try:
             self.panel = pn.Row(
-                left_panel,      # Natural width for left panel
-                right_panel,     # Flexible width for right panel  
+                left_panel,      # Fixed 400px width (30%)
+                right_panel,     # Flexible width (70%)
                 sizing_mode='stretch_both'
             )
             logger.info("Layout created successfully")

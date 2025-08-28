@@ -1,8 +1,8 @@
 # Battery Data Analyzer - AI Assistant Technical Guide
 
-**Version:** 6.2.1 Optimized Multi-Plot Platform  
+**Version:** 6.2.2 Multi-Plot Platform with Fixed Layouts  
 **Last Updated:** August 28, 2025  
-**Status:** Complete multi-plot Explorer with optimized codebase (13% size reduction)
+**Status:** Complete multi-plot Explorer with proper proportional layouts (30/70 & 40/60 splits)
 
 ## Interactive Coding Workflow
 
