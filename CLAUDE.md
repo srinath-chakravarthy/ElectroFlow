@@ -1,8 +1,8 @@
 # Battery Data Analyzer - AI Assistant Technical Guide
 
-**Version:** 6.1.0 Production System  
-**Last Updated:** August 25, 2025  
-**Status:** Registry-driven analysis platform with cross-file experiment tracking
+**Version:** 6.2.0 Multi-Plot Analysis Platform  
+**Last Updated:** August 28, 2025  
+**Status:** Complete multi-plot Explorer with technique-based filtering and multi-series analysis
 
 ## Interactive Coding Workflow
 
@@ -33,19 +33,18 @@
 ### Production Components
 - **Universal Data Processing**: VersaStudio files to 29-column standardized format
 - **Registry Analysis System**: Auto-scaling platform with developer tooling
+- **Multi-Plot Explorer**: Complete Tab 3 with technique filtering and multi-series analysis
 - **Cross-File Experiment Tracking**: Database-level accumulation across multiple files
 - **ElectrochemicalInsights 2.0**: Auto-discovery with expert intelligence algorithms
 - **Group Management**: Templated groups with CASCADE operations
 - **Multi-Interface Access**: Panel web app, CLI, Python API, Jupyter
 
 ### Latest Completions (August 2025)
-- **Explorer UI Column Architecture Fix**: Static column declarations in registry eliminate runtime discovery issues
-- **Startup Performance Optimization**: Eliminated unnecessary analytics pipeline execution during UI initialization  
-- **Registry Validation Logic Corrections**: Changed from `required_techniques` to `applicable_techniques` with intersection-based warnings
-- **Column Name Standardization**: Fixed mismatches between registry declarations and analysis function outputs
+- **Multi-Plot Explorer (Tab 3 Complete)**: Grid layouts (1→4 plots), technique-based filtering, multi-series plotting with saved per-plot state
+- **Data Filtering System**: Registry-driven technique filtering eliminates 0.0 value clutter (kinetics: CV/EIS only, resistance: EIS/Galvanostatic only)
+- **Multi-Series Analysis**: Y-axis MultiSelect widget enables overlaid metrics with automatic legends and color coding
 - **Advanced Research Tab (Tab 4)**: Complete automated analytics pipeline with Perspective integration
 - **Registry **kwargs System**: Dynamic parameter passing for all analysis functions  
-- **Merge Conflict Resolution**: Eliminated duplicate columns, clean `on='id'` merging
 - **Performance Assessment**: Current scale functional, 30K+ row optimization identified
 - Cross-File Experiment Accumulation: 5 experiment columns with automatic maintenance
 - ElectrochemicalInsights 2.0: JSONFieldExtractor + expert algorithms

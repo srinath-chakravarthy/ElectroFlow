@@ -41,6 +41,11 @@ class PlotState(param.Parameterized):
     y_axes = param.List(default=[], doc="Selected Y-axis columns for multi-series plotting")
     group_by = param.String(default="", doc="Column to group/color by")
     
+    # Saved options for this plot (Option 1 implementation)
+    available_x_options = param.List(default=[], doc="Available X-axis options for this plot")
+    available_y_options = param.List(default=[], doc="Available Y-axis options for this plot")
+    available_group_options = param.List(default=[], doc="Available group options for this plot")
+    
     # View controls (for Phase D)
     x_range_start = param.Number(default=None, allow_None=True, doc="X-axis range start")
     x_range_end = param.Number(default=None, allow_None=True, doc="X-axis range end")
@@ -61,6 +66,9 @@ class PlotState(param.Parameterized):
         self.y_axis = ""
         self.y_axes = []
         self.group_by = ""
+        self.available_x_options = []
+        self.available_y_options = []
+        self.available_group_options = []
         self.x_range_start = None
         self.x_range_end = None
         self.x_unit = ""
@@ -697,6 +705,10 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             self.x_axis_select.options = x_options
             self.y_axis_multiselect.options = y_options
             
+            # Save options to current plot state (Option 1 implementation)
+            self.current_plot.available_x_options = x_options
+            self.current_plot.available_y_options = y_options
+            
             # Set smart defaults
             if x_options:
                 self.x_axis_select.value = "start_time_s"  # Default to time
@@ -752,6 +764,10 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             
             # Update dropdown
             self.group_by_select.options = options
+            
+            # Save options to current plot state (Option 1 implementation) 
+            self.current_plot.available_group_options = options
+            
             logger.debug(f"Populated {len(options)} group by options")
             
         except Exception as e:
@@ -1013,6 +1029,28 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         """Sync config bar controls to match active plot state."""
         try:
             active_plot = self.current_plot
+            
+            # Restore saved options from active plot (Option 1 implementation)
+            if active_plot.available_x_options:
+                self.x_axis_select.options = active_plot.available_x_options
+                
+            if active_plot.available_y_options:
+                self.y_axis_multiselect.options = active_plot.available_y_options
+                
+            if active_plot.available_group_options:
+                self.group_by_select.options = active_plot.available_group_options
+            
+            # Sync analysis selection to match active plot
+            if active_plot.analysis_type:
+                try:
+                    # Find analysis option that matches
+                    analysis_options = self.analysis_select.options
+                    for display_name, analysis_id in analysis_options:
+                        if analysis_id == active_plot.analysis_type:
+                            self.analysis_select.value = analysis_id
+                            break
+                except Exception as e:
+                    logger.warning(f"Could not sync analysis selection: {e}")
             
             # Update selectors to match active plot
             if active_plot.x_axis in [opt[0] for opt in self.x_axis_select.options]:
