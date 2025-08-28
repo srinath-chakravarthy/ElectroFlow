@@ -173,7 +173,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         # === RIGHT PANEL COMPONENTS ===
         self._create_right_panel_components()
         
-        # === LEGACY VISUALIZATION (for data feedback) ===
+        # === VISUALIZATION ===
         self._create_visualization_components()
     
     def _create_cell_selection_components(self):
@@ -564,33 +564,6 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         """Handle refresh cells button click."""
         self._refresh_cells()
     
-    def _on_generate_plot(self, event):
-        """Handle generate plot button click."""
-        try:
-            if not self.selected_cells:
-                self._update_status("No cells selected", "warning")
-                return
-                
-            self._update_status("Generating plot...", "loading")
-            
-            # Get selected columns from active tab
-            selected_columns = self._get_selected_columns()
-            if not selected_columns:
-                self._update_status("No columns selected for plotting", "warning")
-                return
-            
-            # Load dataset if not already loaded
-            if self.current_dataset is None:
-                self._load_dataset()
-            
-            # Generate plot with selected columns
-            self._generate_analysis_plot(selected_columns)
-            
-            self._update_status("Plot generated successfully", "success")
-            
-        except Exception as e:
-            logger.error(f"Failed to generate plot: {e}")
-            self._update_status(f"Plot generation failed: {str(e)}", "error")
     
     def _update_analysis_options(self, selected_cells):
         """Update analysis options based on available data from selected cells."""
@@ -1389,20 +1362,7 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.warning(f"Failed to get techniques: {e}")
             return []
     
-    # === REMOVED: Complex accordion methods replaced by simple dropdown approach ===
-    # Old _populate_trends_section, _populate_quality_section, _populate_insights_section
-    # methods removed for cleaner UI approach
     
-    # === OLD COLUMN SELECTION METHOD - WILL BE REPLACED IN PHASE B ===
-    def _on_column_selection_changed(self, event):
-        """Handle column selection change (Phase B implementation)."""
-        # TODO: Implement in Phase B with new PlotState system
-        pass
-    
-    def _get_selected_columns(self):
-        """Get currently selected columns (Phase B implementation)."""
-        # TODO: Implement in Phase B with config bar controls
-        return []
     
     def _generate_analysis_plot(self, selected_columns):
         """Generate plot with selected columns using context-sensitive configuration modal."""
@@ -1418,241 +1378,9 @@ class ElectrochemicalExplorerTab(param.Parameterized):
             logger.error(f"Failed to setup plot configuration: {e}")
             self._update_status(f"Plot configuration error: {str(e)}", "error")
     
-    def _show_plot_configuration_modal(self, selected_columns):
-        """Show context-sensitive plot configuration modal."""
-        try:
-            # Create plot configuration modal
-            modal_content = self._create_plot_config_modal_content(selected_columns)
-            
-            # Create modal dialog
-            self.plot_config_modal = pn.template.Modal(
-                modal_content,
-                title="🎯 Configure Plot",
-                sizing_mode='stretch_width',
-                max_width=800,
-                margin=(10, 10)
-            )
-            
-            # Show modal
-            self.plot_config_modal.show()
-            
-        except Exception as e:
-            logger.error(f"Failed to show plot configuration modal: {e}")
-            self._update_status(f"Modal error: {str(e)}", "error")
     
-    def _create_plot_config_modal_content(self, selected_columns):
-        """Create content for plot configuration modal with context-sensitive options."""
-        
-        # Analyze selected columns to determine plot context
-        plot_context = self._analyze_plot_context(selected_columns)
-        
-        # Header with context summary
-        header_html = f"""
-        <h4>🎯 Plot Configuration</h4>
-        <p><strong>Selected Columns:</strong> {len(selected_columns)} columns from {len(set(col['section'] for col in selected_columns))} sections</p>
-        <p><strong>Plot Context:</strong> {plot_context['description']}</p>
-        """
-        
-        header = pn.pane.HTML(header_html, margin=(5, 5))
-        
-        # X-axis configuration
-        x_axis_options = self._get_x_axis_options(plot_context)
-        self.x_axis_select = pn.widgets.Select(
-            name="X-Axis",
-            options=x_axis_options,
-            value=plot_context['suggested_x_axis'],
-            sizing_mode='stretch_width',
-            margin=(5, 5)
-        )
-        
-        # Y-axis configuration (multi-select for multiple metrics)
-        y_axis_options = [(col['display_name'], col['name']) for col in selected_columns]
-        self.y_axis_multiselect = pn.widgets.MultiSelect(
-            name="Y-Axis (Multi-Select)",
-            options=y_axis_options,
-            value=[col['name'] for col in selected_columns[:3]],  # Default to first 3
-            size=min(8, len(y_axis_options)),
-            sizing_mode='stretch_width',
-            margin=(5, 5)
-        )
-        
-        # Plot type selection based on context
-        plot_type_options = self._get_plot_type_options(plot_context)
-        self.plot_type_select = pn.widgets.RadioButtonGroup(
-            name="Plot Type",
-            options=plot_type_options,
-            value=plot_context['suggested_plot_type'],
-            button_type='primary',
-            margin=(5, 5)
-        )
-        
-        # Additional options
-        self.show_units_checkbox = pn.widgets.Checkbox(
-            name="Show units in axis labels",
-            value=True,
-            margin=(5, 5)
-        )
-        
-        self.auto_scale_checkbox = pn.widgets.Checkbox(
-            name="Auto-scale axes",
-            value=True,
-            margin=(5, 5)
-        )
-        
-        # Action buttons
-        generate_btn = pn.widgets.Button(
-            name="Generate Plot",
-            button_type="primary",
-            width=120,
-            margin=(10, 5)
-        )
-        generate_btn.on_click(self._on_modal_generate_plot)
-        
-        cancel_btn = pn.widgets.Button(
-            name="Cancel", 
-            button_type="light",
-            width=80,
-            margin=(10, 5)
-        )
-        cancel_btn.on_click(self._on_modal_cancel)
-        
-        # Layout modal content
-        modal_content = pn.Column(
-            header,
-            pn.pane.HTML("<hr style='margin:10px 0;'>"),
-            pn.pane.HTML("<h5>Axis Configuration</h5>"),
-            self.x_axis_select,
-            self.y_axis_multiselect,
-            pn.pane.HTML("<hr style='margin:10px 0;'>"), 
-            pn.pane.HTML("<h5>Plot Settings</h5>"),
-            self.plot_type_select,
-            self.show_units_checkbox,
-            self.auto_scale_checkbox,
-            pn.pane.HTML("<hr style='margin:10px 0;'>"),
-            pn.Row(generate_btn, cancel_btn, margin=(10, 5)),
-            sizing_mode='stretch_width',
-            margin=(10, 10)
-        )
-        
-        return modal_content
     
-    def _analyze_plot_context(self, selected_columns):
-        """Analyze selected columns to determine optimal plot context and suggestions."""
-        
-        # Categorize columns by section
-        sections = {}
-        for col in selected_columns:
-            section = col['section']
-            if section not in sections:
-                sections[section] = []
-            sections[section].append(col)
-        
-        # Determine primary context
-        if len(sections) == 1:
-            # Single section - specialized context
-            section_name = list(sections.keys())[0]
-            if section_name == "trends":
-                context = {
-                    'type': 'time_series',
-                    'description': 'Time-series trend analysis',
-                    'suggested_x_axis': 'start_time_s',
-                    'suggested_plot_type': 'Line Plot'
-                }
-            elif section_name == "quality":
-                context = {
-                    'type': 'distribution',
-                    'description': 'Quality distribution analysis', 
-                    'suggested_x_axis': selected_columns[0]['name'],
-                    'suggested_plot_type': 'Histogram'
-                }
-            else:  # insights
-                context = {
-                    'type': 'categorical',
-                    'description': 'Categorical insight analysis',
-                    'suggested_x_axis': selected_columns[0]['name'], 
-                    'suggested_plot_type': 'Bar Chart'
-                }
-        else:
-            # Multi-section - correlation context
-            context = {
-                'type': 'correlation',
-                'description': f'Multi-section correlation analysis ({", ".join(sections.keys())})',
-                'suggested_x_axis': 'start_time_s',
-                'suggested_plot_type': 'Scatter Plot'
-            }
-        
-        return context
     
-    def _get_x_axis_options(self, plot_context):
-        """Get X-axis options based on plot context."""
-        base_options = [
-            ("Time (s)", "start_time_s"),
-            ("Segment Duration (s)", "duration_s"), 
-            ("Start Potential (V)", "start_potential_v"),
-            ("End Potential (V)", "end_potential_v")
-        ]
-        
-        # Add context-specific options
-        if plot_context['type'] == 'time_series':
-            return [("Time (s)", "start_time_s")] + base_options[1:]
-        else:
-            return base_options
-    
-    def _get_plot_type_options(self, plot_context):
-        """Get plot type options based on context."""
-        if plot_context['type'] == 'time_series':
-            return ["Line Plot", "Scatter Plot", "Area Plot"]
-        elif plot_context['type'] == 'distribution':
-            return ["Histogram", "Box Plot", "Violin Plot"]
-        elif plot_context['type'] == 'categorical':
-            return ["Bar Chart", "Count Plot", "Pie Chart"]
-        else:  # correlation
-            return ["Scatter Plot", "Line Plot", "Heatmap"]
-    
-    def _on_modal_generate_plot(self, event):
-        """Handle generate plot button click from modal."""
-        try:
-            # Get configuration from modal
-            plot_config = {
-                'x_axis': self.x_axis_select.value,
-                'y_axes': self.y_axis_multiselect.value,
-                'plot_type': self.plot_type_select.value,
-                'show_units': self.show_units_checkbox.value,
-                'auto_scale': self.auto_scale_checkbox.value
-            }
-            
-            # Close modal
-            self.plot_config_modal.hide()
-            
-            # Generate plot with configuration (Phase 4)
-            self._create_configured_plot(plot_config)
-            
-        except Exception as e:
-            logger.error(f"Failed to generate plot from modal: {e}")
-            self._update_status(f"Plot generation error: {str(e)}", "error")
-    
-    def _on_modal_cancel(self, event):
-        """Handle cancel button click from modal."""
-        self.plot_config_modal.hide()
-        self._update_status("Plot configuration cancelled", "info")
-    
-    def _create_configured_plot(self, plot_config):
-        """Create plot with user configuration (Phase 4 implementation)."""
-        # TODO: Full implementation in Phase 4
-        # For now, show configuration summary
-        config_summary = f"""
-        <div style='padding:20px; background:#e3f2fd; border-radius:8px; margin:10px;'>
-            <h4>🎯 Plot Configuration Applied</h4>
-            <p><strong>X-Axis:</strong> {plot_config['x_axis']}</p>
-            <p><strong>Y-Axes:</strong> {', '.join(plot_config['y_axes'])}</p>
-            <p><strong>Plot Type:</strong> {plot_config['plot_type']}</p>
-            <p><strong>Units Display:</strong> {'Enabled' if plot_config['show_units'] else 'Disabled'}</p>
-            <p><strong>Auto-Scale:</strong> {'Enabled' if plot_config['auto_scale'] else 'Disabled'}</p>
-            <p><em>🚧 Full plot generation will be implemented in Phase 4</em></p>
-        </div>
-        """
-        self.plot_pane.object = config_summary
-        self._update_status("Plot configuration complete - ready for Phase 4 implementation", "success")
     
     def _load_dataset(self):
         """Load comprehensive dataset for selected cells."""
@@ -1907,29 +1635,6 @@ class ElectrochemicalExplorerTab(param.Parameterized):
         
         return []
     
-    def _get_x_axis_options(self, df):
-        """Get appropriate X-axis options based on data."""
-        options = []
-        
-        # Time variables
-        time_vars = ['time_s', 'start_timestamp', 'exp_time_cumulative_s']
-        for var in time_vars:
-            if var in df.columns:
-                options.append(var)
-        
-        # Capacity variables  
-        capacity_vars = ['exp_charge_cap_ah', 'exp_discharge_cap_ah', 'capacity_ah']
-        for var in capacity_vars:
-            if var in df.columns:
-                options.append(var)
-        
-        # Voltage variables
-        voltage_vars = ['start_potential_v', 'end_potential_v']
-        for var in voltage_vars:
-            if var in df.columns:
-                options.append(var)
-        
-        return options
     
     def _get_grouping_options(self, df):
         """Get available grouping options."""
@@ -2138,7 +1843,6 @@ class ElectrochemicalExplorerTab(param.Parameterized):
                             size=60
                         )
                         
-                        # TODO: Implement proper multi-metric overlay in future enhancement
                         logger.info(f"Multi-metric plot showing primary metric: {y_col}, others available: {valid_y_cols[1:]}")
                         
                     else:
