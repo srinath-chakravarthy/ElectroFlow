@@ -138,18 +138,26 @@ class BaseParser(ABC):
             )
     
     def _safe_read_file(self, file_path: Path, encoding: str = 'utf-8') -> str:
-        """Safely read file content with error handling."""
+        """Safely read file content with error handling and skip large data segments."""
         try:
             self._validate_file_exists(file_path)
             
             with open(file_path, 'r', encoding=encoding) as f:
-                return f.read()
+                # For .par files, skip <Segment>...</Segment> blocks which contain raw data
+                if str(file_path).lower().endswith('.par'):
+                    return self._read_par_metadata_only(f)
+                else:
+                    return f.read()
                 
         except UnicodeDecodeError:
             # Try with different encoding
             try:
                 with open(file_path, 'r', encoding='latin-1') as f:
-                    return f.read()
+                    # Apply same optimization for .par files
+                    if str(file_path).lower().endswith('.par'):
+                        return self._read_par_metadata_only(f)
+                    else:
+                        return f.read()
             except Exception as e:
                 raise DataParsingError(
                     str(file_path),
@@ -162,6 +170,28 @@ class BaseParser(ABC):
                 "file content", 
                 f"Cannot read file: {str(e)}"
             )
+    
+    def _read_par_metadata_only(self, file_obj) -> str:
+        """Read .par file but skip <Segment>...</Segment> blocks to avoid loading raw data."""
+        content_lines = []
+        skip_segment = False
+        
+        for line in file_obj:
+            # Check for segment start/end tags (case insensitive)
+            line_upper = line.upper().strip()
+            
+            if line_upper.startswith('<SEGMENT'):
+                skip_segment = True
+                continue
+            elif line_upper.startswith('</SEGMENT>'):
+                skip_segment = False
+                continue
+            
+            # Only include lines that are not inside segment blocks
+            if not skip_segment:
+                content_lines.append(line)
+        
+        return ''.join(content_lines)
     
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA256 hash of file."""
