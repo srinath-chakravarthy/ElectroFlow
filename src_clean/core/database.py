@@ -88,6 +88,7 @@ class DatabaseManager:
                 processing_status TEXT DEFAULT 'pending',
                 parquet_file_path TEXT,
                 metadata_json TEXT DEFAULT '{}',
+                channel_id INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (cell_id) REFERENCES cells(id) ON DELETE CASCADE
             )
@@ -126,14 +127,18 @@ class DatabaseManager:
                 analysis_status TEXT DEFAULT 'pending',
                 analysis_results TEXT DEFAULT '{}',
                 segment_metadata TEXT DEFAULT '{}',
+                cell_id INTEGER,
+                cell_name TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE,
+                FOREIGN KEY (cell_id) REFERENCES cells(id) ON DELETE CASCADE,
                 UNIQUE(file_id, segment_index)
             )
         """)
         
-        # Check if we need to migrate existing segments table
+        # Check if we need to migrate existing tables
         self._migrate_segments_table(conn)
+        self._migrate_files_table(conn)
         
         # User groups table - for group management functionality
         conn.execute("""
@@ -219,7 +224,7 @@ class DatabaseManager:
                 'capacity_absolute_cumulative_ah', 'energy_absolute_cumulative_wh',
                 'exp_charge_cap_ah', 'exp_discharge_cap_ah', 
                 'exp_charge_energy_wh', 'exp_discharge_energy_wh', 'exp_time_cumulative_s',
-                'analysis_status', 'analysis_results'
+                'analysis_status', 'analysis_results', 'cell_id', 'cell_name'
             }
             
             missing_columns = required_columns - columns
@@ -251,7 +256,9 @@ class DatabaseManager:
                     'exp_discharge_energy_wh': 'REAL DEFAULT 0.0',
                     'exp_time_cumulative_s': 'REAL DEFAULT 0.0',
                     'analysis_status': 'TEXT DEFAULT "pending"',
-                    'analysis_results': 'TEXT DEFAULT "{}"'
+                    'analysis_results': 'TEXT DEFAULT "{}"',
+                    'cell_id': 'INTEGER',
+                    'cell_name': 'TEXT'
                 }
                 
                 for column in missing_columns:
@@ -271,6 +278,22 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Error migrating segments table: {e}")
+            # Don't raise - let the application continue with existing schema
+    
+    def _migrate_files_table(self, conn: sqlite3.Connection):
+        """Migrate existing files table to include channel_id column."""
+        try:
+            # Check if channel_id column exists
+            cursor = conn.execute("PRAGMA table_info(files)")
+            columns = {row[1] for row in cursor.fetchall()}
+            
+            if 'channel_id' not in columns:
+                logger.info("Migrating files table - adding channel_id column")
+                conn.execute("ALTER TABLE files ADD COLUMN channel_id INTEGER DEFAULT 1")
+                logger.debug("Added channel_id column to files table")
+                
+        except Exception as e:
+            logger.error(f"Error migrating files table: {e}")
             # Don't raise - let the application continue with existing schema
     
     def _insert_default_data(self, conn: sqlite3.Connection):
