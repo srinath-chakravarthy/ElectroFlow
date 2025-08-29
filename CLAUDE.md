@@ -1,8 +1,8 @@
 # Battery Data Analyzer - AI Assistant Technical Guide
 
-**Version:** 6.3.0 Clean Multi-Plot Explorer Architecture  
+**Version:** 6.3.1 Enhanced Multi-Plot Explorer with Scientific Data Filtering  
 **Last Updated:** August 29, 2025  
-**Status:** Complete Tab 3 rewrite with Panel-native components and simplified state management
+**Status:** Complete Tab 3 with responsive range sliders and registry-driven technique filtering
 
 ## Interactive Coding Workflow
 
@@ -40,11 +40,11 @@
 - **Multi-Interface Access**: Panel web app, CLI, Python API, Jupyter
 
 ### Latest Completions (August 2025)
-- **Tab 3 Clean Architecture Rewrite (Aug 29)**: Complete rebuild with Panel-native components, simplified state management, modal cell selection, and manual plot generation workflow
-- **Multi-Plot Explorer Grid System**: 1→4 plot layouts with proper grid positioning and per-plot state management
-- **Registry Integration Cleanup**: Single registry call per analysis change, proper axis options loading, and clean configuration syncing
-- **Modal Cell Selection**: Panel-native modal with Tabulator integration, apply/cancel workflow, and selection restoration
-- **Range Control Synchronization**: Hybrid slider/input approach with synchronized state management without auto-plotting
+- **Tab 3 Enhanced Multi-Plot Explorer (Aug 29)**: Complete with responsive range sliders, technique filtering, and clean Panel-native architecture
+- **Scientific Data Filtering**: Registry-driven technique filtering eliminates irrelevant data (e.g., resistance analysis shows only galvanostatic data)
+- **Responsive Range Sliders**: Data-driven limits with proper 320px panel fit and circular callback prevention
+- **Multi-Plot Grid System**: 1→4 plot layouts with GridSpec fix and per-plot state management
+- **Performance Optimizations**: Filter-first approach and callback suppression for smooth UI behavior
 - **Advanced Research Tab (Tab 4)**: Complete automated analytics pipeline with Perspective integration
 - **Registry **kwargs System**: Dynamic parameter passing for all analysis functions  
 - **Performance Assessment**: Current scale functional, 30K+ row optimization identified

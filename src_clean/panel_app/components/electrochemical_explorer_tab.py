@@ -43,6 +43,7 @@ class CleanElectrochemicalExplorer(param.Parameterized):
         self.dataset = None
         self.plot_configs = [self._create_empty_plot_config()]  # List of plot configurations
         self.active_plot_index = 0
+        self._updating_ranges = False  # Flag to prevent circular range callbacks
 
         # Create UI components
         self._create_components()
@@ -63,6 +64,8 @@ class CleanElectrochemicalExplorer(param.Parameterized):
             'plot_type': 'scatter',
             'x_range': (None, None),
             'y_range': (None, None),
+            'x_limits': (None, None),  # Data-driven slider limits
+            'y_limits': (None, None),  # Data-driven slider limits
             'plot_object': None
         }
 
@@ -70,6 +73,129 @@ class CleanElectrochemicalExplorer(param.Parameterized):
     def current_config(self):
         """Get current plot configuration."""
         return self.plot_configs[self.active_plot_index]
+
+    # === DATA RANGE UTILITIES ===
+
+    def _calculate_column_range(self, df, column):
+        """Calculate min/max range for a column with padding for better UX."""
+        if column not in df.columns or df[column].isna().all():
+            return {'min': 0, 'max': 100, 'start': 0, 'end': 100, 'step': 1}
+        
+        # Get numeric data only
+        numeric_data = pd.to_numeric(df[column], errors='coerce').dropna()
+        if numeric_data.empty:
+            return {'min': 0, 'max': 100, 'start': 0, 'end': 100, 'step': 1}
+        
+        min_val = float(numeric_data.min())
+        max_val = float(numeric_data.max())
+        
+        # Handle edge case where min == max
+        if min_val == max_val:
+            padding = max(abs(min_val) * 0.1, 1.0)
+            min_val -= padding
+            max_val += padding
+        else:
+            # Add 10% padding for better UX
+            range_span = max_val - min_val
+            padding = range_span * 0.1
+            min_val -= padding
+            max_val += padding
+        
+        # Calculate reasonable step size (1% of range)
+        step = (max_val - min_val) / 100
+        
+        return {
+            'min': min_val,
+            'max': max_val,
+            'start': min_val + (max_val - min_val) * 0.1,  # Start at 10% from min
+            'end': max_val - (max_val - min_val) * 0.1,    # End at 90% of max
+            'step': max(step, 0.01)  # Minimum step of 0.01
+        }
+
+    def _update_range_slider_limits(self, axis_type='both'):
+        """Update range slider limits based on current dataset and axis selections."""
+        if self.dataset is None:
+            return
+        
+        # Prevent circular callbacks during range updates
+        self._updating_ranges = True
+        try:
+            updated = False
+            
+            # Update X-axis ranges
+            if axis_type in ['x', 'both'] and self.current_config['x_axis']:
+                x_col = self.current_config['x_axis']
+                if x_col in self.dataset.columns:
+                    x_range = self._calculate_column_range(self.dataset, x_col)
+                    self.current_config['x_limits'] = (x_range['min'], x_range['max'])
+                    
+                    # Update X slider properties only
+                    self.x_range_slider.start = x_range['min']
+                    self.x_range_slider.end = x_range['max']
+                    self.x_range_slider.step = x_range['step']
+                    
+                    # Set default range if not already set (direct assignment to avoid callbacks)
+                    if self.current_config['x_range'] == (None, None):
+                        self.x_range_slider.value = (x_range['start'], x_range['end'])
+                        self.x_min_input.value = x_range['start']
+                        self.x_max_input.value = x_range['end']
+                        self.current_config['x_range'] = (x_range['start'], x_range['end'])
+                    
+                    updated = True
+            
+            # Update Y-axis ranges
+            if axis_type in ['y', 'both'] and self.current_config['y_axes']:
+                y_cols = self.current_config['y_axes']
+                y_ranges = []
+                
+                for y_col in y_cols:
+                    if y_col in self.dataset.columns:
+                        y_range = self._calculate_column_range(self.dataset, y_col)
+                        y_ranges.append(y_range)
+                
+                if y_ranges:
+                    # Combine ranges for multiple Y-axes
+                    combined_range = {
+                        'min': min(r['min'] for r in y_ranges),
+                        'max': max(r['max'] for r in y_ranges),
+                        'start': min(r['start'] for r in y_ranges),
+                        'end': max(r['end'] for r in y_ranges),
+                        'step': min(r['step'] for r in y_ranges)
+                    }
+                    
+                    self.current_config['y_limits'] = (combined_range['min'], combined_range['max'])
+                    
+                    # Update Y slider properties only
+                    self.y_range_slider.start = combined_range['min']
+                    self.y_range_slider.end = combined_range['max']
+                    self.y_range_slider.step = combined_range['step']
+                    
+                    # Set default range if not already set (direct assignment to avoid callbacks)
+                    if self.current_config['y_range'] == (None, None):
+                        self.y_range_slider.value = (combined_range['start'], combined_range['end'])
+                        self.y_min_input.value = combined_range['start']
+                        self.y_max_input.value = combined_range['end']
+                        self.current_config['y_range'] = (combined_range['start'], combined_range['end'])
+                    
+                    updated = True
+            
+            if updated:
+                logger.info(f"Updated range sliders for {axis_type} axis")
+                
+        except Exception as e:
+            logger.error(f"Failed to update range slider limits: {e}")
+            # Fallback to defaults
+            if axis_type in ['x', 'both']:
+                self.x_range_slider.start = 0
+                self.x_range_slider.end = 100
+                self.x_range_slider.step = 1
+            if axis_type in ['y', 'both']:
+                self.y_range_slider.start = 0
+                self.y_range_slider.end = 100
+                self.y_range_slider.step = 1
+        finally:
+            # Always reset the flag
+            self._updating_ranges = False
 
     def _create_components(self):
         """Create all UI components using Panel-native elements."""
@@ -198,14 +324,28 @@ class CleanElectrochemicalExplorer(param.Parameterized):
             width=280
         )
 
-        # Range controls - hybrid approach
+        # Range controls - hybrid approach with sensible defaults
         self.x_min_input = pn.widgets.FloatInput(name="X Min", width=90)
         self.x_max_input = pn.widgets.FloatInput(name="X Max", width=90)
-        self.x_range_slider = pn.widgets.RangeSlider(name="X Range", width=200)
+        self.x_range_slider = pn.widgets.RangeSlider(
+            name="X Range", 
+            width=140,
+            start=0, 
+            end=100, 
+            value=(0, 100),
+            step=1
+        )
 
         self.y_min_input = pn.widgets.FloatInput(name="Y Min", width=90)
         self.y_max_input = pn.widgets.FloatInput(name="Y Max", width=90)
-        self.y_range_slider = pn.widgets.RangeSlider(name="Y Range", width=200)
+        self.y_range_slider = pn.widgets.RangeSlider(
+            name="Y Range", 
+            width=140,
+            start=0, 
+            end=100, 
+            value=(0, 100),
+            step=1
+        )
 
         # CENTRAL GENERATE BUTTON
         self.generate_btn = pn.widgets.Button(
@@ -244,7 +384,7 @@ class CleanElectrochemicalExplorer(param.Parameterized):
             sizing_mode='stretch_width'
         )
 
-        # Configuration panel - clean card layout
+        # Configuration panel - responsive layout (25-30% of screen)
         config_panel = pn.Card(
             pn.Column(
                 # Plot management
@@ -278,7 +418,10 @@ class CleanElectrochemicalExplorer(param.Parameterized):
                 pn.Row(pn.Spacer(), self.generate_btn, pn.Spacer(), margin=(10, 0))
             ),
             title="Plot Configuration",
-            width=320,
+            min_width=280,
+            max_width=400,
+            width_policy='fit',
+            sizing_mode='stretch_height',
             margin=(10, 10)
         )
 
@@ -335,10 +478,19 @@ class CleanElectrochemicalExplorer(param.Parameterized):
 
         # X-range synchronization
         def sync_x_slider(event):
-            self.x_range_slider.value = (self.x_min_input.value or 0, self.x_max_input.value or 100)
+            if self._updating_ranges:  # Skip during programmatic range updates
+                return
+            min_val = self.x_min_input.value or self.x_range_slider.start
+            max_val = self.x_max_input.value or self.x_range_slider.end
+            # Ensure values are within slider bounds
+            min_val = max(min_val, self.x_range_slider.start)
+            max_val = min(max_val, self.x_range_slider.end)
+            self.x_range_slider.value = (min_val, max_val)
             self.current_config['x_range'] = self.x_range_slider.value
 
         def sync_x_inputs(event):
+            if self._updating_ranges:  # Skip during programmatic range updates
+                return
             if event.new and len(event.new) == 2:
                 self.x_min_input.value = event.new[0]
                 self.x_max_input.value = event.new[1]
@@ -350,10 +502,19 @@ class CleanElectrochemicalExplorer(param.Parameterized):
 
         # Y-range synchronization
         def sync_y_slider(event):
-            self.y_range_slider.value = (self.y_min_input.value or 0, self.y_max_input.value or 100)
+            if self._updating_ranges:  # Skip during programmatic range updates
+                return
+            min_val = self.y_min_input.value or self.y_range_slider.start
+            max_val = self.y_max_input.value or self.y_range_slider.end
+            # Ensure values are within slider bounds
+            min_val = max(min_val, self.y_range_slider.start)
+            max_val = min(max_val, self.y_range_slider.end)
+            self.y_range_slider.value = (min_val, max_val)
             self.current_config['y_range'] = self.y_range_slider.value
 
         def sync_y_inputs(event):
+            if self._updating_ranges:  # Skip during programmatic range updates
+                return
             if event.new and len(event.new) == 2:
                 self.y_min_input.value = event.new[0]
                 self.y_max_input.value = event.new[1]
@@ -609,16 +770,35 @@ class CleanElectrochemicalExplorer(param.Parameterized):
 
         self.plot_type_radio.value = config['plot_type']
 
+        # Restore range slider limits for this plot
+        if config['x_limits'][0] is not None:
+            self.x_range_slider.start = config['x_limits'][0]
+            self.x_range_slider.end = config['x_limits'][1]
+        if config['y_limits'][0] is not None:
+            self.y_range_slider.start = config['y_limits'][0]
+            self.y_range_slider.end = config['y_limits'][1]
+
         # Sync range controls
         if config['x_range'][0] is not None:
             self.x_min_input.value = config['x_range'][0]
             self.x_max_input.value = config['x_range'][1]
             self.x_range_slider.value = config['x_range']
+        if config['y_range'][0] is not None:
+            self.y_min_input.value = config['y_range'][0]
+            self.y_max_input.value = config['y_range'][1]
+            self.y_range_slider.value = config['y_range']
 
     def _on_x_axis_changed(self, event):
         """Update X-axis in current config."""
         x_axis = event.new[1] if isinstance(event.new, tuple) and len(event.new) >= 2 else event.new
-        self.current_config['x_axis'] = x_axis
+        
+        # Only update if actually changed and dataset is available
+        if self.current_config['x_axis'] != x_axis:
+            self.current_config['x_axis'] = x_axis
+            
+            # Update range slider limits only if dataset is loaded
+            if self.dataset is not None:
+                self._update_range_slider_limits('x')
 
     def _on_y_axes_changed(self, event):
         """Update Y-axes in current config."""
@@ -629,7 +809,14 @@ class CleanElectrochemicalExplorer(param.Parameterized):
                     y_axes.append(item[1])
                 else:
                     y_axes.append(item)
-        self.current_config['y_axes'] = y_axes
+        
+        # Only update if actually changed and dataset is available
+        if self.current_config['y_axes'] != y_axes:
+            self.current_config['y_axes'] = y_axes
+            
+            # Update range slider limits only if dataset is loaded
+            if self.dataset is not None:
+                self._update_range_slider_limits('y')
 
     def _on_group_changed(self, event):
         """Update grouping in current config."""
@@ -670,6 +857,9 @@ class CleanElectrochemicalExplorer(param.Parameterized):
                 self.dataset = dataset
 
             logger.info(f"Dataset loaded: {len(self.dataset)} rows")
+            
+            # Update range sliders based on loaded data
+            self._update_range_slider_limits('both')
 
         except Exception as e:
             raise Exception(f"Failed to load dataset: {e}")
@@ -680,7 +870,22 @@ class CleanElectrochemicalExplorer(param.Parameterized):
             return None
 
         try:
-            df = self.dataset.copy()
+            # Start with full dataset reference (no copy)
+            df = self.dataset
+            
+            # Apply technique filtering if analysis type is selected
+            if config['analysis_type'] and 'technique_name' in df.columns:
+                analysis_config = self.registry.get_analysis(config['analysis_type'])
+                if hasattr(analysis_config, 'applicable_techniques'):
+                    # Lowercase comparison for robustness
+                    applicable_lower = [t.lower() for t in analysis_config.applicable_techniques]
+                    df = df[df['technique_name'].str.lower().isin(applicable_lower)]
+                    
+                    # Handle empty result - message user and return None
+                    if df.empty:
+                        self._update_status(f"No {config['analysis_name']} data available for selected cells", "warning")
+                        return None
+            
             x_col = config['x_axis']
             y_cols = config['y_axes']
             group_col = config['group_by'] if config['group_by'] else None
@@ -732,7 +937,18 @@ class CleanElectrochemicalExplorer(param.Parameterized):
 
     def _update_plot_grid(self):
         """Update plot grid layout based on number of plots."""
-        self.plot_grid.clear()
+        # Create new GridSpec instance to clear all previous content
+        old_grid = self.plot_grid
+        self.plot_grid = pn.GridSpec(sizing_mode='stretch_both', min_height=500)
+        
+        # Update the parent container reference
+        # Find the main_content Row and replace the old grid with new one
+        for layout in self.panel:
+            if isinstance(layout, pn.Row) and old_grid in layout:
+                # Find the index of the old grid and replace it
+                grid_index = list(layout).index(old_grid)
+                layout[grid_index] = self.plot_grid
+                break
 
         num_plots = len(self.plot_configs)
 
