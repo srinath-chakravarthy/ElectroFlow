@@ -44,7 +44,7 @@ CREATE TABLE segments (
                 end_time_s REAL NOT NULL,
                 point_count INTEGER NOT NULL,
                 segment_metadata TEXT DEFAULT '{}',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, capacity_ah REAL, end_current_a REAL, start_current_a REAL, duration_s REAL NOT NULL DEFAULT 0.0, analysis_results TEXT DEFAULT "{}", start_potential_v REAL, end_potential_v REAL, energy_wh REAL, analysis_status TEXT DEFAULT "pending",
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, capacity_ah REAL, end_current_a REAL, start_current_a REAL, duration_s REAL NOT NULL DEFAULT 0.0, analysis_results TEXT DEFAULT "{}", start_potential_v REAL, end_potential_v REAL, energy_wh REAL, analysis_status TEXT DEFAULT "pending", start_timestamp TEXT, discharge_cumulative_ah REAL DEFAULT 0.0, capacity_cumulative_ah REAL DEFAULT 0.0, charge_cumulative_ah REAL DEFAULT 0.0, energy_absolute_cumulative_wh REAL DEFAULT 0.0, energy_charge_cumulative_wh REAL DEFAULT 0.0, energy_discharge_cumulative_wh REAL DEFAULT 0.0, capacity_absolute_cumulative_ah REAL DEFAULT 0.0, energy_cumulative_wh REAL DEFAULT 0.0, exp_discharge_cap_ah REAL DEFAULT 0.0, exp_discharge_energy_wh REAL DEFAULT 0.0, exp_time_cumulative_s REAL DEFAULT 0.0, exp_charge_cap_ah REAL DEFAULT 0.0, exp_charge_energy_wh REAL DEFAULT 0.0,
                 FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE,
                 UNIQUE(file_id, segment_index)
             );

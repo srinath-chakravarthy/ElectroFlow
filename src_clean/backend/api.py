@@ -333,6 +333,7 @@ class BackendAPI:
             'acquisition_start': data_file.metadata.acquisition_start,
             'acquisition_duration_s': data_file.metadata.acquisition_duration_s,
             'temperature_c': options.get('temperature_c', 25.0),
+            'channel_id': options.get('channel_id', 1),
             'parquet_file_path': str(parquet_path),
             'metadata': metadata_dict
         }
@@ -347,8 +348,8 @@ class BackendAPI:
                 # Add file to database
                 self.db.add_file(cell['id'], file_info)
                 
-                # Add segments
-                self.db.add_segments(file_id, segments)
+                # Add segments with cell information
+                self.db.add_segments(file_id, segments, cell['id'], cell['name'])
                 
                 # NEW: Update experiment accumulation for entire cell
                 self._update_cell_experiment_accumulation(cell['id'])

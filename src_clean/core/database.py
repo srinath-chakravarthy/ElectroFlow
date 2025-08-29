@@ -419,8 +419,8 @@ class DatabaseManager:
                     INSERT INTO files 
                     (file_id, cell_id, original_filename, paired_filename, file_hash,
                      file_size_bytes, instrument_model, acquisition_start, 
-                     acquisition_duration_s, temperature_c, parquet_file_path, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     acquisition_duration_s, temperature_c, parquet_file_path, metadata_json, channel_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     file_info['file_id'], cell_id, file_info['original_filename'],
                     file_info.get('paired_filename'), file_info['file_hash'],
@@ -429,7 +429,8 @@ class DatabaseManager:
                     file_info.get('acquisition_start'), 
                     file_info.get('acquisition_duration_s', 0.0),
                     file_info.get('temperature_c', 25.0),
-                    file_info.get('parquet_file_path'), metadata_json
+                    file_info.get('parquet_file_path'), metadata_json,
+                    file_info.get('channel_id', 1)
                 ))
                 
                 conn.commit()
@@ -586,7 +587,7 @@ class DatabaseManager:
     # SEGMENT OPERATIONS
     # =============================================================================
     
-    def add_segments(self, file_id: str, segments: List[Dict[str, Any]]) -> int:
+    def add_segments(self, file_id: str, segments: List[Dict[str, Any]], cell_id: int = None, cell_name: str = None) -> int:
         """Add segments for a file with atomic transaction."""
         with self.get_connection() as conn:
             conn.execute("BEGIN")
@@ -604,8 +605,9 @@ class DatabaseManager:
                          energy_wh, start_timestamp, capacity_cumulative_ah, energy_cumulative_wh,
                          charge_cumulative_ah, discharge_cumulative_ah, energy_charge_cumulative_wh,
                          energy_discharge_cumulative_wh, capacity_absolute_cumulative_ah, 
-                         energy_absolute_cumulative_wh, analysis_status, analysis_results, segment_metadata)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         energy_absolute_cumulative_wh, analysis_status, analysis_results, segment_metadata,
+                         cell_id, cell_name)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         file_id, segment['segment_index'], segment.get('technique_id'),
                         segment['technique_name'], segment['fundamental_technique'],
@@ -619,7 +621,8 @@ class DatabaseManager:
                         segment.get('charge_cumulative_ah'), segment.get('discharge_cumulative_ah'),
                         segment.get('energy_charge_cumulative_wh'), segment.get('energy_discharge_cumulative_wh'),
                         segment.get('capacity_absolute_cumulative_ah'), segment.get('energy_absolute_cumulative_wh'),
-                        segment.get('analysis_status', 'pending'), analysis_results_json, metadata_json
+                        segment.get('analysis_status', 'pending'), analysis_results_json, metadata_json,
+                        cell_id, cell_name
                     ))
                 
                 conn.commit()
