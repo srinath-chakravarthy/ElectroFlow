@@ -606,6 +606,66 @@ class BackendAPI:
             logger.error(f"Failed to get segments for technique '{technique}': {e}")
             return []
     
+    def clear_derived_data(self, file_id: str) -> ProcessingResult:
+        """Clear only derived data (segments, parquet cache) - preserve raw files."""
+        try:
+            # Get file info first to access file paths
+            file_info = self.db.get_file_by_id(file_id)
+            if not file_info:
+                return ProcessingResult(
+                    success=False,
+                    error=f"File {file_id} not found in database"
+                )
+            
+            # Get cell info to construct parquet paths
+            cell = self.db.get_cell_by_id(file_info['cell_id'])
+            if not cell:
+                return ProcessingResult(
+                    success=False,
+                    error=f"Cell not found for file {file_id}"
+                )
+            
+            cell_name = cell['name']
+            cleared_items = []
+            
+            # Delete parquet cache files only (keep raw files)
+            from src_clean.core.config import get_config
+            config = get_config()
+            cell_processed_dir = config.get_cell_processed_directory(cell_name)
+            
+            # Delete parquet files
+            if file_info.get('data_file_path'):
+                parquet_path = Path(file_info['data_file_path'])
+                if parquet_path.exists():
+                    parquet_path.unlink()
+                    cleared_items.append(f"parquet: {parquet_path.name}")
+            
+            # Delete segments from database directly
+            with self.db.get_connection() as conn:
+                cursor = conn.execute("DELETE FROM segments WHERE file_id = ?", (file_id,))
+                segments_deleted = cursor.rowcount
+                cleared_items.append(f"segments: {segments_deleted}")
+                
+                # Delete file record from database
+                cursor = conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
+                cleared_items.append("database record")
+                
+                # Explicit commit to ensure deletion
+                conn.commit()
+            
+            logger.info(f"Cleared derived data for file {file_id}: {', '.join(cleared_items)}")
+            return ProcessingResult(
+                success=True,
+                message=f"Cleared derived data: {', '.join(cleared_items)}"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error clearing derived data for file {file_id}: {e}")
+            return ProcessingResult(
+                success=False,
+                error=f"Failed to clear derived data: {str(e)}"
+            )
+    
     def delete_file(self, file_id: str) -> ProcessingResult:
         """Delete a file and all associated data (parquet + raw files)."""
         try:
@@ -936,10 +996,10 @@ class BackendAPI:
                 'temperature_c': file_info.get('temperature_c', 25.0)
             }
             
-            # Delete existing processed data
-            delete_success = self.delete_file(file_id)
-            if not delete_success:
-                logger.warning(f"Failed to delete existing data for {file_id}, continuing anyway")
+            # Clear existing derived data (preserve raw files)
+            clear_result = self.clear_derived_data(file_id)
+            if not clear_result.success:
+                logger.warning(f"Failed to clear existing data for {file_id}: {clear_result.error}, continuing anyway")
             
             # Reprocess using the same raw files
             logger.info(f"Reprocessing file {file_id} from raw files")
