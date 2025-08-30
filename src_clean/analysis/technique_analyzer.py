@@ -52,7 +52,7 @@ class TechniqueAnalyzer:
         """
         try:
             # Extract segment data
-            segment_data = data.slice(start_row, end_row - start_row)
+            segment_data = data.slice(start_row, end_row - start_row + 1)
             
             if segment_data.height == 0:
                 return {'analysis_type': 'empty', 'success': False}
