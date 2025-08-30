@@ -31,7 +31,8 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src_clean"))
 
-from src_clean.backend import get_backend_api
+from src_clean.backend import create_test_backend_api
+from src_clean.core.config import set_test_config, reset_config
 from src_clean.core.database import DatabaseManager
 from src_clean.core.exceptions import *
 import logging
@@ -107,23 +108,22 @@ class BackendTestHarness:
         self.api = None
         self.temp_db_dir = None
         self.test_cells_created = []
-        self.original_data_dir = None
+        self.original_config = None
         
     def setup(self):
         """Setup isolated test environment."""
         # Create temporary directory for test database
         self.temp_db_dir = Path(tempfile.mkdtemp(prefix="backend_test_"))
         
-        # Initialize backend API with test database
-        self.api = get_backend_api()
+        # Setup isolated test configuration
+        test_db_path = self.temp_db_dir / "test_electrochemical.db"
         
-        # Store original data directory and set to test location
-        self.original_data_dir = self.api.data_dir
-        self.api.data_dir = self.temp_db_dir
+        # Create completely isolated test config
+        test_config = set_test_config(self.temp_db_dir, test_db_path)
+        test_config.ensure_directories()
         
-        # Initialize test database
-        self.api.db.db_path = self.temp_db_dir / "test_electrochemical.db"
-        self.api.db._init_database()
+        # Create isolated backend API with test config
+        self.api = create_test_backend_api(self.temp_db_dir, test_db_path)
         
         logger.info(f"✅ Test environment setup: {self.temp_db_dir}")
         
@@ -139,9 +139,10 @@ class BackendTestHarness:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup cell {cell_name}: {e}")
             
-            # Restore original data directory
-            if self.original_data_dir:
-                self.api.data_dir = self.original_data_dir
+            # Reset config and backend singletons
+            reset_config()
+            from src_clean.backend import reset_backend_api
+            reset_backend_api()
             
             # Remove temporary directory
             if self.temp_db_dir and self.temp_db_dir.exists():

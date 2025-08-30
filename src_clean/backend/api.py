@@ -2840,3 +2840,25 @@ def get_backend_api(data_dir: Path = None, db_path: Path = None) -> BackendAPI:
     if _backend_instance is None:
         _backend_instance = BackendAPI(data_dir, db_path)
     return _backend_instance
+
+def reset_backend_api() -> None:
+    """Reset backend API singleton to None (for test isolation)."""
+    global _backend_instance
+    _backend_instance = None
+
+def create_test_backend_api(test_data_dir: Path, test_db_path: Path) -> BackendAPI:
+    """
+    Create isolated backend API instance for testing.
+    
+    Args:
+        test_data_dir: Temporary test data directory
+        test_db_path: Temporary test database path
+        
+    Returns:
+        Isolated BackendAPI instance
+    """
+    # Reset singleton to ensure fresh instance
+    reset_backend_api()
+    
+    # Create new instance with test paths
+    return BackendAPI(data_dir=test_data_dir, db_path=test_db_path)

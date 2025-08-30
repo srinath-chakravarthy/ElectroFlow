@@ -210,6 +210,38 @@ def reload_config(project_root: Optional[Path] = None) -> Config:
     _config_instance = Config(project_root)
     return _config_instance
 
+def reset_config() -> None:
+    """Reset config singleton to None (for test isolation)."""
+    global _config_instance
+    _config_instance = None
+
+def set_test_config(test_data_dir: Path, test_db_path: Path) -> Config:
+    """
+    Create isolated test configuration without .env dependency.
+    
+    Args:
+        test_data_dir: Temporary test data directory
+        test_db_path: Temporary test database path
+        
+    Returns:
+        Test Config instance with isolated paths
+    """
+    global _config_instance
+    
+    # Create config with test-specific paths
+    test_config = Config(project_root=test_data_dir.parent)
+    test_config.data_dir = test_data_dir
+    test_config.db_path = test_db_path
+    test_config.db_name = test_db_path.name
+    
+    # Override other paths to be test-relative
+    test_config.log_dir = test_data_dir / 'logs'
+    test_config.full_log_path = test_config.log_dir / 'test.log'
+    
+    # Set as global instance for test duration
+    _config_instance = test_config
+    return test_config
+
 
 # Convenience functions for common configuration access
 def get_data_dir() -> Path:
