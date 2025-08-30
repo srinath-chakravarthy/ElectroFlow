@@ -49,8 +49,7 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
-# Database files (generated)
-data_clean/electrochemical.db*
-data_clean/cells/
+# Data directory (generated/user data)
+data_clean/
 *.db-shm
 *.db-wal
