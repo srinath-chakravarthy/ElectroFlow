@@ -14,6 +14,7 @@ import panel as pn
 import param
 import pandas as pd
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 
 # Import DataViewer for plotting functionality
 from .data_viewer import DataViewer
@@ -793,8 +794,9 @@ class CellFileManagement(param.Parameterized):
             self.modal_status_display.visible = True
             return
             
-        # Check file uploads
-        if not (self.metadata_dropper.value and self.data_dropper.value):
+        # Check file uploads - FileDropper.value is dictionary
+        if not (self.metadata_dropper.value and self.data_dropper.value and 
+                len(self.metadata_dropper.value) > 0 and len(self.data_dropper.value) > 0):
             self.modal_status_display.object = "<div style='color: #D32F2F; padding: 10px; background: #FFEBEE; border-radius: 4px;'>Please upload both metadata and data files</div>"
             self.modal_status_display.visible = True
             return
@@ -810,23 +812,47 @@ class CellFileManagement(param.Parameterized):
             self.modal_progress_bar.value = 20
             self.modal_status_display.object = "<div style='color: #1976D2; padding: 10px; background: #E3F2FD; border-radius: 4px;'>📋 Validating file formats...</div>"
             
-            metadata_path = self.metadata_dropper.value[0] if self.metadata_dropper.value else None
-            data_path = self.data_dropper.value[0] if self.data_dropper.value else None
-            channel_id = self.channel_input.value
+            # FileDropper stores files as dictionary: filename -> content
+            from tempfile import TemporaryDirectory
             
-            if not metadata_path or not data_path:
-                raise Exception("Missing file paths")
-            
-            # Stage 2: Process files with API
-            self.modal_progress_bar.value = 50
-            self.modal_status_display.object = "<div style='color: #1976D2; padding: 10px; background: #E3F2FD; border-radius: 4px;'>⚡ Processing files...</div>"
-            
-            result = self.api.process_dual_files(
-                metadata_path=metadata_path, 
-                data_path=data_path, 
-                cell_name=self.selected_cell, 
-                channel_id=channel_id
-            )
+            with TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                
+                # Extract files from FileDropper dictionary
+                metadata_filename = list(self.metadata_dropper.value.keys())[0]
+                metadata_content = self.metadata_dropper.value[metadata_filename]
+                
+                data_filename = list(self.data_dropper.value.keys())[0]
+                data_content = self.data_dropper.value[data_filename]
+                
+                # Save to temporary files
+                metadata_path = temp_path / metadata_filename
+                if isinstance(metadata_content, str):
+                    metadata_path.write_text(metadata_content, encoding='utf-8')
+                else:
+                    metadata_path.write_bytes(metadata_content)
+                    
+                data_path = temp_path / data_filename
+                if isinstance(data_content, str):
+                    data_path.write_text(data_content, encoding='utf-8')
+                else:
+                    data_path.write_bytes(data_content)
+                
+                channel_id = self.channel_input.value
+                
+                if not metadata_path or not data_path:
+                    raise Exception("Missing file paths")
+                
+                # Stage 2: Process files with API
+                self.modal_progress_bar.value = 50
+                self.modal_status_display.object = "<div style='color: #1976D2; padding: 10px; background: #E3F2FD; border-radius: 4px;'>⚡ Processing files...</div>"
+                
+                result = self.api.process_dual_files(
+                    metadata_path=metadata_path, 
+                    data_path=data_path, 
+                    cell_name=self.selected_cell, 
+                    channel_id=channel_id
+                )
             
             # Handle processing result
             if result.success:
@@ -834,9 +860,9 @@ class CellFileManagement(param.Parameterized):
                 self.modal_progress_bar.value = 100
                 self.modal_status_display.object = f"<div style='color: #2E7D32; padding: 10px; background: #E8F5E8; border-radius: 4px;'>✅ Successfully processed files for {self.selected_cell}<br>File ID: {result.file_id}</div>"
                 
-                # Reset droppers and refresh data
-                self.metadata_dropper.value = []
-                self.data_dropper.value = []
+                # Reset droppers and refresh data (FileDropper uses empty dict)
+                self.metadata_dropper.value = {}
+                self.data_dropper.value = {}
                 self._refresh_file_data()
                 
             else:
