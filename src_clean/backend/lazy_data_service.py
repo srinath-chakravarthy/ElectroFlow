@@ -308,6 +308,14 @@ class LazyDataService:
     def _resolve_segment_file_path(self, segment_info: Dict[str, Any]) -> Optional[Path]:
         """Resolve file path from segment file info."""
         try:
+            # First try the direct path from database
+            parquet_file_path = segment_info.get('parquet_file_path')
+            if parquet_file_path:
+                file_path = Path(parquet_file_path)
+                if file_path.exists():
+                    return file_path
+            
+            # Fallback: construct path from cell_name and file_id
             cell_name = segment_info.get('cell_name', '')
             file_id = segment_info.get('file_id', '')
             
