@@ -2828,6 +2828,280 @@ class BackendAPI:
                 'error': str(e)
             }
 
+    # =============================================================================
+    # SEGMENT INSPECTOR - RAW DATA VIEWER INTEGRATION
+    # =============================================================================
+    
+    def get_segment_raw_data_for_perspective(self, segment_id: str, analysis_context: dict = None) -> bytes:
+        """
+        Get raw data + analytical metadata for segment inspection modal.
+        
+        Args:
+            segment_id: Target segment ID from Explorer click
+            analysis_context: Current Explorer state (technique, temperature, etc.)
+            
+        Returns:
+            Arrow table bytes (zero-copy ready for Perspective)
+        """
+        try:
+            logger.info(f"Loading segment raw data for perspective: segment_id={segment_id}")
+            
+            # Step 1: Query raw data using LazyDataService
+            raw_data_df = self.lazy_data_service.get_segment_raw_data(segment_id)
+            
+            if raw_data_df.is_empty():
+                logger.warning(f"No raw data found for segment {segment_id}")
+                return self._create_empty_arrow_table()
+            
+            logger.debug(f"Raw data loaded: {raw_data_df.shape}")
+            
+            # Step 2: Add segment metadata (analytical results)
+            enhanced_df = self._add_segment_metadata(raw_data_df, segment_id, analysis_context)
+            
+            # Step 3: Add analytical fits if requested
+            if analysis_context and analysis_context.get('include_fits', True):
+                enhanced_df = self._add_analytical_fits(enhanced_df, segment_id)
+            
+            # Step 4: Clean data for Perspective compatibility
+            clean_df = self._clean_data_for_perspective(enhanced_df)
+            
+            # Step 5: Convert to Arrow for zero-copy transfer
+            arrow_table = clean_df.to_arrow()
+            
+            # Serialize to bytes
+            import pyarrow as pa
+            sink = pa.BufferOutputStream()
+            writer = pa.ipc.new_stream(sink, arrow_table.schema)
+            writer.write_table(arrow_table)
+            writer.close()
+            arrow_bytes = sink.getvalue().to_pybytes()
+            
+            logger.info(f"Generated segment inspection data: {len(clean_df)} points, {len(clean_df.columns)} columns, {len(arrow_bytes)} bytes")
+            return arrow_bytes
+            
+        except Exception as e:
+            logger.error(f"Failed to get segment data for perspective: {e}")
+            return self._create_empty_arrow_table()
+    
+    def _add_segment_metadata(self, raw_data_df: pl.DataFrame, segment_id: str, context: dict) -> pl.DataFrame:
+        """Add analytical metadata as constant columns."""
+        try:
+            # Get segment analytics using existing database methods
+            analytics = self._get_segment_analytics_summary(segment_id)
+            
+            # Add metadata as literal columns (efficient broadcast)
+            enhanced_df = raw_data_df.with_columns([
+                pl.lit(analytics.get('resistance_ohm', None)).alias('computed_resistance_ohm'),
+                pl.lit(analytics.get('time_constant_s', None)).alias('computed_time_constant_s'),
+                pl.lit(analytics.get('r_squared', None)).alias('fit_r_squared'),
+                pl.lit(analytics.get('analysis_method', 'unknown')).alias('analysis_method'),
+                pl.lit(analytics.get('cell_name', 'unknown')).alias('cell_name'),
+                pl.lit(analytics.get('technique_name', 'unknown')).alias('technique_name'),
+                pl.lit(segment_id).alias('segment_id'),
+            ])
+            
+            # Add context-specific metadata if available
+            if context:
+                enhanced_df = enhanced_df.with_columns([
+                    pl.lit(context.get('temperature_c', None)).alias('context_temperature_c'),
+                    pl.lit(context.get('current_technique', 'All')).alias('explorer_technique_filter'),
+                ])
+            
+            logger.debug(f"Metadata added: {len(enhanced_df.columns)} total columns")
+            return enhanced_df
+            
+        except Exception as e:
+            logger.warning(f"Failed to add segment metadata: {e}")
+            return raw_data_df
+    
+    def _add_analytical_fits(self, enhanced_df: pl.DataFrame, segment_id: str) -> pl.DataFrame:
+        """Add analytical fit curves to raw data."""
+        try:
+            # Get fit parameters from analytics
+            analytics = self._get_segment_analytics_summary(segment_id)
+            fit_params = analytics.get('fit_parameters', {})
+            fit_method = analytics.get('analysis_method', 'unknown')
+            
+            if not fit_params or fit_method == 'unknown':
+                logger.debug(f"No fit parameters available for segment {segment_id}")
+                return enhanced_df
+            
+            # Generate fit curve using existing patterns
+            time_points = enhanced_df['time_s'].to_numpy()
+            fit_curve = self._generate_fit_curve(time_points, fit_params, fit_method)
+            
+            if fit_curve is not None:
+                # Add fit curve and residuals
+                enhanced_df = enhanced_df.with_columns([
+                    pl.Series('fit_voltage_v', fit_curve),
+                    pl.Series('residual_voltage_v', enhanced_df['potential_v'] - fit_curve),
+                ])
+                logger.debug(f"Analytical fits added for {fit_method}")
+            
+            return enhanced_df
+            
+        except Exception as e:
+            logger.warning(f"Failed to add analytical fits: {e}")
+            return enhanced_df
+    
+    def _clean_data_for_perspective(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Clean data for Perspective compatibility."""
+        try:
+            # Convert to pandas for cleaning (Perspective prefers pandas)
+            pandas_df = df.to_pandas()
+            
+            # Clean NaN values similar to existing Perspective methods
+            for col in pandas_df.columns:
+                if pandas_df[col].isnull().any():
+                    # Get the actual data type by examining non-null values
+                    non_null_values = pandas_df[col].dropna()
+                    
+                    if len(non_null_values) == 0:
+                        # All values are null, keep as float
+                        pandas_df[col] = pandas_df[col].fillna(0.0)
+                    elif non_null_values.dtype in ['float64', 'float32']:
+                        pandas_df[col] = pandas_df[col].fillna(0.0)
+                    elif non_null_values.dtype in ['int64', 'int32']:
+                        pandas_df[col] = pandas_df[col].fillna(0)
+                    elif non_null_values.dtype == 'bool' or col.endswith('_flag') or col.endswith('_bool'):
+                        pandas_df[col] = pandas_df[col].fillna(False).astype('bool')
+                    else:
+                        # String/object columns
+                        pandas_df[col] = pandas_df[col].astype('object').fillna('N/A')
+            
+            # Convert back to Polars
+            return pl.from_pandas(pandas_df)
+            
+        except Exception as e:
+            logger.warning(f"Data cleaning failed: {e}")
+            return df
+    
+    def _get_segment_analytics_summary(self, segment_id: str) -> dict:
+        """Get analytical summary for segment using existing systems."""
+        try:
+            # Get segment data from database
+            segment = self.db.get_segment_by_id(segment_id)
+            if not segment:
+                logger.warning(f"No segment found for ID {segment_id}")
+                return {}
+            
+            # Extract analytics from JSON results
+            analysis_results = segment.get('analysis_results')
+            if not analysis_results:
+                return {
+                    'cell_name': segment.get('cell_name', 'unknown'),
+                    'technique_name': segment.get('technique_name', 'unknown'),
+                    'analysis_method': 'no_analysis'
+                }
+            
+            # Parse JSON if needed
+            if isinstance(analysis_results, str):
+                import json
+                analysis_results = json.loads(analysis_results)
+            
+            # Extract key analytics
+            summary = {
+                'cell_name': segment.get('cell_name', 'unknown'),
+                'technique_name': segment.get('technique_name', 'unknown'),
+                'capacity_ah': segment.get('capacity_ah', 0.0),
+                'energy_wh': segment.get('energy_wh', 0.0),
+                'duration_s': segment.get('duration_s', 0.0)
+            }
+            
+            # Extract fit parameters if available
+            all_coeffs = analysis_results.get('all_fit_coefficients', {})
+            if all_coeffs:
+                # Try exponential fits first
+                exp_fits = all_coeffs.get('exponential_fits', {})
+                if exp_fits:
+                    # Use potential_v fit if available
+                    potential_fit = exp_fits.get('potential_v', {})
+                    if potential_fit:
+                        summary.update({
+                            'resistance_ohm': potential_fit.get('tau', None),
+                            'r_squared': potential_fit.get('r_squared', None),
+                            'analysis_method': 'exponential_decay',
+                            'fit_parameters': potential_fit
+                        })
+                
+                # Try sqrt(t) fits if no exponential
+                if 'analysis_method' not in summary:
+                    sqrt_fits = all_coeffs.get('sqrt_fits', {})
+                    if sqrt_fits:
+                        potential_fit = sqrt_fits.get('potential_v', {})
+                        if potential_fit:
+                            summary.update({
+                                'time_constant_s': potential_fit.get('sqrt_coeff', None),
+                                'r_squared': potential_fit.get('r_squared', None),
+                                'analysis_method': 'sqrt_diffusion',
+                                'fit_parameters': potential_fit
+                            })
+            
+            return summary
+            
+        except Exception as e:
+            logger.warning(f"Failed to get segment analytics summary: {e}")
+            return {}
+    
+    def _generate_fit_curve(self, time_points, fit_params: dict, fit_method: str):
+        """Generate analytical fit curve based on stored parameters."""
+        try:
+            import numpy as np
+            
+            if fit_method == 'exponential_decay':
+                # V(t) = V∞ + A*exp(-t/τ)
+                v_inf = fit_params.get('v_inf', 0.0)
+                amplitude = fit_params.get('amplitude', 0.0)
+                tau = fit_params.get('tau', 1.0)
+                
+                if tau <= 0:
+                    return None
+                
+                return v_inf + amplitude * np.exp(-time_points / tau)
+                
+            elif fit_method == 'sqrt_diffusion':
+                # V(t) = V₀ + A*sqrt(t)
+                v_0 = fit_params.get('v_0', 0.0)
+                sqrt_coeff = fit_params.get('sqrt_coeff', 0.0)
+                
+                return v_0 + sqrt_coeff * np.sqrt(time_points)
+            
+            else:
+                logger.debug(f"Unknown fit method: {fit_method}")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"Failed to generate fit curve: {e}")
+            return None
+    
+    def _create_empty_arrow_table(self) -> bytes:
+        """Create empty Arrow table for error cases."""
+        try:
+            import pyarrow as pa
+            
+            empty_df = pl.DataFrame({
+                'time_s': [0.0],
+                'potential_v': [0.0],
+                'current_a': [0.0],
+                'error_message': ['No data available'],
+                'segment_id': ['none']
+            })
+            
+            arrow_table = empty_df.to_arrow()
+            
+            # Serialize to bytes
+            sink = pa.BufferOutputStream()
+            writer = pa.ipc.new_stream(sink, arrow_table.schema)
+            writer.write_table(arrow_table)
+            writer.close()
+            
+            return sink.getvalue().to_pybytes()
+            
+        except Exception as e:
+            logger.error(f"Failed to create empty arrow table: {e}")
+            # Return minimal bytes if even empty table fails
+            return b''
+
 # =============================================================================
 # GLOBAL INSTANCE
 # =============================================================================

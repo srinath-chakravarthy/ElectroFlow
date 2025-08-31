@@ -257,6 +257,82 @@ class LazyDataService:
         """Get number of cached queries."""
         return len(self._query_cache)
     
+    def get_segment_raw_data(self, segment_id: str) -> pl.DataFrame:
+        """
+        Get raw data for specific segment ID.
+        
+        Args:
+            segment_id: Target segment identifier
+            
+        Returns:
+            Raw electrochemical data for the segment
+        """
+        try:
+            from src_clean.core.database import DatabaseManager
+            
+            # Get segment file info from database
+            db_manager = DatabaseManager(self.config.db_path)
+            segment_info = db_manager.get_segment_file_info(segment_id)
+            
+            if not segment_info:
+                self.logger.warning(f"No file info found for segment {segment_id}")
+                return pl.DataFrame()
+            
+            # Get file path for the segment
+            file_path = self._resolve_segment_file_path(segment_info)
+            if not file_path:
+                self.logger.warning(f"Could not resolve file path for segment {segment_id}")
+                return pl.DataFrame()
+            
+            # Create lazy query for the specific file
+            lazy_frame = pl.scan_parquet(str(file_path))
+            
+            # Filter for the specific segment using row range
+            start_row = segment_info.get('start_row', 0)
+            end_row = segment_info.get('end_row', 0)
+            
+            if start_row >= 0 and end_row > start_row:
+                # Use slice for row-based filtering (Polars uses 0-based indexing)
+                segment_data = lazy_frame.slice(start_row, end_row - start_row).collect()
+            else:
+                self.logger.warning(f"Invalid row range for segment {segment_id}: {start_row}-{end_row}")
+                return pl.DataFrame()
+            
+            self.logger.debug(f"Loaded segment {segment_id} data: {segment_data.shape}")
+            return segment_data
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get segment raw data: {e}")
+            return pl.DataFrame()
+    
+    def _resolve_segment_file_path(self, segment_info: Dict[str, Any]) -> Optional[Path]:
+        """Resolve file path from segment file info."""
+        try:
+            cell_name = segment_info.get('cell_name', '')
+            file_id = segment_info.get('file_id', '')
+            
+            if not cell_name or not file_id:
+                return None
+            
+            # Use standard processed file path
+            file_path = (
+                self.config.data_dir / cell_name / 'processed' / f"{file_id}.parquet"
+            )
+            
+            if file_path.exists():
+                return file_path
+            
+            # Try legacy path structure
+            legacy_path = self.config.data_dir / "processed" / f"{file_id}.parquet"
+            if legacy_path.exists():
+                return legacy_path
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to resolve segment file path: {e}")
+            return None
+    
     def _resolve_file_path(self, file_info: Dict[str, Any]) -> Optional[Path]:
         """Resolve file path from file info."""
         # Try direct path first

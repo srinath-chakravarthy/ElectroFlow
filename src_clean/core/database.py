@@ -1603,6 +1603,92 @@ class DatabaseManager:
             
             return segments
 
+    def get_segment_file_info(self, segment_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get file information for a specific segment ID.
+        
+        Args:
+            segment_id: Target segment identifier
+            
+        Returns:
+            Dictionary with file path, row range, and cell info
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT 
+                        s.id,
+                        s.file_id,
+                        s.start_row,
+                        s.end_row,
+                        s.point_count,
+                        s.technique_name,
+                        c.name as cell_name,
+                        f.parquet_file_path,
+                        f.original_filename
+                    FROM segments s
+                    LEFT JOIN files f ON s.file_id = f.file_id
+                    LEFT JOIN cells c ON f.cell_id = c.id
+                    WHERE s.id = ?
+                """, (segment_id,))
+                
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                
+                return {
+                    'segment_id': row[0],
+                    'file_id': row[1],
+                    'start_row': row[2],
+                    'end_row': row[3],
+                    'point_count': row[4],
+                    'technique_name': row[5],
+                    'cell_name': row[6],
+                    'parquet_file_path': row[7],
+                    'original_filename': row[8]
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to get segment file info for {segment_id}: {e}")
+            return None
+
+    def get_segment_by_id(self, segment_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get complete segment data by ID.
+        
+        Args:
+            segment_id: Target segment identifier
+            
+        Returns:
+            Complete segment dictionary or None
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT 
+                        s.*,
+                        c.name as cell_name,
+                        f.original_filename,
+                        ft.technique_name as fundamental_technique
+                    FROM segments s
+                    LEFT JOIN files f ON s.file_id = f.file_id
+                    LEFT JOIN cells c ON f.cell_id = c.id
+                    LEFT JOIN fundamental_techniques ft ON s.technique_id = ft.technique_id
+                    WHERE s.id = ?
+                """, (segment_id,))
+                
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                
+                # Convert to dictionary using column names
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+                
+        except Exception as e:
+            logger.error(f"Failed to get segment by ID {segment_id}: {e}")
+            return None
+
     # =============================================================================
     # UTILITY OPERATIONS
     # =============================================================================
