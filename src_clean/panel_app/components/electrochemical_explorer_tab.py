@@ -921,15 +921,21 @@ class CleanElectrochemicalExplorer(param.Parameterized):
             if config['y_range'][0] is not None:
                 plot_kwargs['ylim'] = config['y_range']
 
-            # Create plot based on type
+            # Create plot based on type with click handling
             if plot_type == 'scatter':
-                return df.hvplot.scatter(**plot_kwargs)
+                plot = df.hvplot.scatter(**plot_kwargs)
             elif plot_type == 'line':
-                return df.hvplot.line(**plot_kwargs)
+                plot = df.hvplot.line(**plot_kwargs)
             elif plot_type == 'histogram':
-                return df.hvplot.hist(y=y_cols[0], bins=30, **{k: v for k, v in plot_kwargs.items() if k not in ['x', 'xlim']})
+                plot = df.hvplot.hist(y=y_cols[0], bins=30, **{k: v for k, v in plot_kwargs.items() if k not in ['x', 'xlim']})
             else:
-                return df.hvplot.scatter(**plot_kwargs)
+                plot = df.hvplot.scatter(**plot_kwargs)
+            
+            # Add click handling for segment inspection (scatter and line plots only)
+            if plot_type in ['scatter', 'line'] and 'id' in df.columns:
+                plot = self._add_click_handling(plot, df)
+            
+            return plot
 
         except Exception as e:
             logger.error(f"Plot creation failed: {e}")
@@ -980,6 +986,167 @@ class CleanElectrochemicalExplorer(param.Parameterized):
         """Update status display."""
         self.status_alert.object = message
         self.status_alert.alert_type = alert_type
+
+    # === SEGMENT INSPECTOR CLICK HANDLING ===
+    
+    def _add_click_handling(self, plot, df):
+        """Add click handling to plot for segment inspection."""
+        try:
+            import holoviews as hv
+            
+            # Convert hvplot to holoviews object for tap stream
+            hv_plot = plot
+            
+            # Create tap stream for click detection
+            tap_stream = hv.streams.Tap(source=hv_plot, x=0, y=0)
+            
+            # Set up click callback
+            def handle_click(x, y):
+                if x is not None and y is not None:
+                    self._handle_plot_click(x, y, df)
+            
+            tap_stream.add_subscriber(handle_click)
+            
+            logger.debug("Click handling added to plot")
+            return hv_plot
+            
+        except Exception as e:
+            logger.warning(f"Failed to add click handling: {e}")
+            return plot
+    
+    def _handle_plot_click(self, x, y, df):
+        """Handle click on plot point for segment inspection."""
+        try:
+            logger.debug(f"Plot click detected at x={x}, y={y}")
+            
+            # Find closest segment to click coordinates
+            segment_id = self._find_closest_segment(x, y, df)
+            
+            if segment_id:
+                self._update_status(f"Opening inspector for segment {segment_id}...", "info")
+                
+                # Extract current Explorer context
+                analysis_context = self._extract_current_context()
+                
+                # Call API for segment data
+                arrow_data = self.api.get_segment_raw_data_for_perspective(segment_id, analysis_context)
+                
+                # Open Perspective modal
+                self._open_segment_inspector_modal(arrow_data, segment_id)
+                
+                self._update_status(f"Opened inspector for segment {segment_id}", "success")
+            else:
+                self._update_status("No segment found near click location", "warning")
+        
+        except Exception as e:
+            logger.error(f"Failed to handle plot click: {e}")
+            self._update_status(f"Error opening segment inspector: {str(e)}", "danger")
+    
+    def _find_closest_segment(self, click_x, click_y, df):
+        """Find segment ID closest to click coordinates."""
+        try:
+            if 'id' not in df.columns:
+                return None
+            
+            # Get current plot configuration
+            config = self.current_config
+            x_col = config['x_axis']
+            y_cols = config['y_axes']
+            
+            if not y_cols or x_col not in df.columns or y_cols[0] not in df.columns:
+                return None
+            
+            # Calculate distance to click point
+            x_values = df[x_col].values
+            y_values = df[y_cols[0]].values  # Use first Y axis
+            
+            # Normalize coordinates for distance calculation
+            x_range = x_values.max() - x_values.min()
+            y_range = y_values.max() - y_values.min()
+            
+            if x_range == 0 or y_range == 0:
+                return None
+            
+            # Calculate normalized distances
+            x_norm = (x_values - click_x) / x_range
+            y_norm = (y_values - click_y) / y_range
+            distances = (x_norm ** 2 + y_norm ** 2) ** 0.5
+            
+            # Find closest point
+            closest_idx = distances.argmin()
+            segment_id = df.iloc[closest_idx]['id']
+            
+            logger.debug(f"Closest segment: {segment_id} at distance {distances[closest_idx]:.4f}")
+            return str(segment_id)
+            
+        except Exception as e:
+            logger.warning(f"Failed to find closest segment: {e}")
+            return None
+    
+    def _extract_current_context(self) -> dict:
+        """Extract current Explorer tab state for API context."""
+        return {
+            'selected_cells': self.selected_cells,
+            'current_technique': getattr(self, 'current_technique', 'All'),
+            'temperature_c': getattr(self, 'current_temperature', None),
+            'include_fits': True,  # Default to include analytical fits
+            'plot_type': self.current_config.get('plot_type', 'scatter'),
+            'analysis_type': self.current_config.get('analysis_type', ''),
+            'explorer_tab': 'electrochemical_explorer'
+        }
+    
+    def _open_segment_inspector_modal(self, arrow_data: bytes, segment_id: str):
+        """Open Perspective modal with segment data."""
+        try:
+            # Create Perspective pane with Arrow data (zero-copy)
+            perspective_pane = pn.pane.Perspective(
+                arrow_data,  # Direct Arrow bytes - zero copy!
+                plugin="d3_xy_scatter",  # Start with scatter plot
+                columns=["time_s", "potential_v"],  # X, Y axes
+                settings=True,  # Allow user configuration
+                width=1000,
+                height=700,
+                theme='material'  # Professional theme
+            )
+            
+            # Create modal content
+            modal_content = pn.Column(
+                pn.pane.HTML(f"<h3>🔬 Segment {segment_id} Inspector</h3>"),
+                pn.pane.HTML("<p>Hover over points to see raw data + analytical metadata</p>"),
+                perspective_pane,
+                pn.Row(
+                    pn.widgets.Button(name="Export Data", button_type="primary"),
+                    pn.widgets.Button(name="Close", button_type="light"),
+                    sizing_mode='stretch_width'
+                ),
+                sizing_mode='stretch_width'
+            )
+            
+            # Show modal using Panel's modal system
+            self._show_modal(modal_content)
+            
+        except Exception as e:
+            logger.error(f"Failed to open segment inspector modal: {e}")
+            self._update_status("Error creating segment inspector", "danger")
+    
+    def _show_modal(self, content):
+        """Show modal using Panel's modal system."""
+        try:
+            # Create modal template
+            modal = pn.template.MaterialTemplate(
+                title="Segment Inspector",
+                sidebar=[],
+                main=[content],
+                header_background='#2596be',
+            )
+            
+            # Open in new window/tab (Panel 1.0+ approach)
+            modal.show(port=5008, autoreload=False, threaded=True)
+            
+        except Exception as e:
+            logger.error(f"Failed to show modal: {e}")
+            # Fallback: Show in current interface
+            self._update_status("Modal display error - check logs", "danger")
 
 
 # Wrapper class for integration
