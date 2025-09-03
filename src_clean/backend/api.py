@@ -2866,6 +2866,10 @@ class BackendAPI:
             clean_df = self._clean_data_for_perspective(enhanced_df)
             
             # Step 5: Convert to Arrow for zero-copy transfer
+            # Capture metrics before conversion
+            points_count = len(clean_df)
+            columns_count = len(clean_df.columns)
+            
             arrow_table = clean_df.to_arrow()
             
             # Serialize to bytes
@@ -2876,7 +2880,7 @@ class BackendAPI:
             writer.close()
             arrow_bytes = sink.getvalue().to_pybytes()
             
-            logger.info(f"Generated segment inspection data: {len(clean_df)} points, {len(clean_df.columns)} columns, {len(arrow_bytes)} bytes")
+            logger.info(f"Generated segment inspection data: {points_count} points, {columns_count} columns, {len(arrow_bytes)} bytes")
             return arrow_bytes
             
         except Exception as e:

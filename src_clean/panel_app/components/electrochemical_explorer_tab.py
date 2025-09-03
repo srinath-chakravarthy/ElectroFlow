@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-pn.extension('tabulator', 'modal')
+pn.extension('tabulator', 'modal', 'perspective')
 
 
 class CleanElectrochemicalExplorer(param.Parameterized):
@@ -203,6 +203,8 @@ class CleanElectrochemicalExplorer(param.Parameterized):
         # === CELL SELECTION ===
         self._create_cell_selection()
 
+        # === SEGMENT INSPECTOR === (Separate modal server)
+
         # === MAIN CONTROLS ===
         self._create_main_controls()
 
@@ -261,6 +263,8 @@ class CleanElectrochemicalExplorer(param.Parameterized):
             button_type="primary",  # Valid Panel button types: default, primary, success, warning, danger, light
             width=120
         )
+
+    # Segment inspector now uses dynamic tabs - no modal components needed
 
     def _create_main_controls(self):
         """Create main control bar - clean and centered."""
@@ -438,6 +442,7 @@ class CleanElectrochemicalExplorer(param.Parameterized):
             main_content,
             self.status_alert,
             self.cell_modal,  # Modal overlay
+            # Segment inspector moved to dynamic tabs
             sizing_mode='stretch_both',
             min_height=600
         )
@@ -452,6 +457,8 @@ class CleanElectrochemicalExplorer(param.Parameterized):
         # Modal buttons
         self.modal_apply_btn.on_click(self._on_modal_apply)
         self.modal_cancel_btn.on_click(self._on_modal_cancel)
+        
+        # Segment inspector now uses dynamic tabs - no modal callbacks needed
 
         # Analysis selection
         self.analysis_select.param.watch(self._on_analysis_changed, 'value')
@@ -1031,7 +1038,7 @@ class CleanElectrochemicalExplorer(param.Parameterized):
                 # Call API for segment data
                 arrow_data = self.api.get_segment_raw_data_for_perspective(segment_id, analysis_context)
                 
-                # Open Perspective modal
+                # Open Perspective in separate modal
                 self._open_segment_inspector_modal(arrow_data, segment_id)
                 
                 self._update_status(f"Opened inspector for segment {segment_id}", "success")
@@ -1098,18 +1105,24 @@ class CleanElectrochemicalExplorer(param.Parameterized):
     def _open_segment_inspector_modal(self, arrow_data: bytes, segment_id: str):
         """Open Perspective modal with segment data."""
         try:
-            # Create Perspective pane with Arrow data (zero-copy)
+            # Convert Arrow bytes back to DataFrame for Perspective compatibility
+            import pyarrow as pa
+            reader = pa.ipc.open_stream(pa.py_buffer(arrow_data))
+            arrow_table = reader.read_all()
+            df_for_perspective = arrow_table.to_pandas()
+            
+            # Create Perspective pane with DataFrame
             perspective_pane = pn.pane.Perspective(
-                arrow_data,  # Direct Arrow bytes - zero copy!
+                df_for_perspective,  # Use DataFrame for Panel compatibility
                 plugin="d3_xy_scatter",  # Start with scatter plot
-                columns=["time_s", "potential_v"],  # X, Y axes
+                columns=["time_s", "potential_v"],  # X, Y axes (original working config)
                 settings=True,  # Allow user configuration
                 width=1000,
                 height=700,
                 theme='material'  # Professional theme
             )
             
-            # Create modal content
+            # Create modal content (simplified - no complex close button)
             modal_content = pn.Column(
                 pn.pane.HTML(f"<h3>🔬 Segment {segment_id} Inspector</h3>"),
                 pn.pane.HTML("<p>Hover over points to see raw data + analytical metadata</p>"),
@@ -1122,7 +1135,7 @@ class CleanElectrochemicalExplorer(param.Parameterized):
                 sizing_mode='stretch_width'
             )
             
-            # Show modal using Panel's modal system
+            # Show modal using Panel's modal system (original working approach)
             self._show_modal(modal_content)
             
         except Exception as e:
@@ -1132,7 +1145,7 @@ class CleanElectrochemicalExplorer(param.Parameterized):
     def _show_modal(self, content):
         """Show modal using Panel's modal system."""
         try:
-            # Create modal template
+            # Create modal template (original working approach)
             modal = pn.template.MaterialTemplate(
                 title="Segment Inspector",
                 sidebar=[],
@@ -1140,13 +1153,14 @@ class CleanElectrochemicalExplorer(param.Parameterized):
                 header_background='#2596be',
             )
             
-            # Open in new window/tab (Panel 1.0+ approach)
+            # Open in new window/tab (Panel 1.0+ approach - original working)
             modal.show(port=5008, autoreload=False, threaded=True)
             
         except Exception as e:
             logger.error(f"Failed to show modal: {e}")
             # Fallback: Show in current interface
             self._update_status("Modal display error - check logs", "danger")
+    
 
 
 # Wrapper class for integration
