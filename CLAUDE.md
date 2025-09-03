@@ -1,4 +1,4 @@
-# Battery Data Analyzer - AI Assistant Technical Guide
+yes # Battery Data Analyzer - AI Assistant Technical Guide
 
 **Version:** 6.3.1 Enhanced Multi-Plot Explorer with Scientific Data Filtering  
 **Last Updated:** August 29, 2025  
@@ -218,14 +218,11 @@ python -m src_clean.cli.main group-voltage-correlation 16 --correlation-type pea
 - **Test Infrastructure**: Added comprehensive Explorer backend testing (tests/test_explorer_backend.py)
 - **Database Analysis**: Identified empty database issue (0 cells, 0 files, 0 segments) despite existing file directories
 
-### 🎯 **NEXT SESSION PRIORITY: Raw Data Plotting Integration**
+### 🎯 **NEXT SESSION PRIORITIES: Platform Enhancement & Research Tools**
 
-**Implementation files ready for integration:**
-- `test_segment_inspector.py` - Complete workflow validation
-- `test_segment_inspector_implementation.py` - Structure validation
-- `Raw_data_inspector_for_explorer_tab.md` - Integration plan
+**Three Focus Areas**: (1) Enhanced BioLogic parser with universal schema extension, (2) Jupyter notebook interface for UI functionality replication, (3) Advanced Jupyter data functionality for research workflows.
 
-**6-Step Integration Plan:**
+**Full Roadmap**: See `docs/DEVELOPMENT_ROADMAP.md` for detailed implementation plans and current status baselines.
 1. **Backend API Method** - Add `get_segment_data_for_perspective()` to `src_clean/backend/api.py`
 2. **LazyDataService Integration** - Add `get_segment_raw_data()` method
 3. **Analytics Integration** - Metadata and fit curve addition
