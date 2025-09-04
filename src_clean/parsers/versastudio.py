@@ -332,6 +332,9 @@ class VersaStudioParser(DualFileParser):
             # Add missing universal columns
             universal_df = add_missing_universal_columns(universal_df)
             
+            # VersaStudio enhancement: populate electrode-specific columns from available data
+            universal_df = self._enhance_versastudio_electrode_columns(universal_df)
+            
             # Add timestamps using UniversalProcessor
             universal_df = self.universal_processor.add_timestamps(universal_df, metadata.acquisition_start)
             
@@ -470,8 +473,44 @@ class VersaStudioParser(DualFileParser):
             logger.warning(f"Unit conversion failed: {e}")
             return df
     
+    def _enhance_versastudio_electrode_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Enhance VersaStudio data with electrode-specific columns.
+        
+        VersaStudio provides cell-level measurements (2-electrode), so we populate:
+        - working_electrode_potential_v from potential_v (cell voltage)  
+        - WE impedance columns from cell impedance columns
+        - CE impedance columns remain null (no separate CE data available)
+        """
+        expressions = []
+        
+        # Column 1: WE voltage from cell voltage
+        if 'potential_v' in df.columns:
+            expressions.append(
+                pl.col('potential_v').alias('working_electrode_potential_v')
+            )
+        
+        # Columns 2-5: WE impedance from cell impedance  
+        impedance_mappings = {
+            'impedance_real_ohm': 'we_impedance_real_ohm',
+            'impedance_imag_ohm': 'we_impedance_imag_ohm', 
+            'impedance_mag_ohm': 'we_impedance_mag_ohm',
+            'impedance_phase_deg': 'we_impedance_phase_deg'
+        }
+        
+        for source_col, target_col in impedance_mappings.items():
+            if source_col in df.columns:
+                expressions.append(
+                    pl.col(source_col).alias(target_col)
+                )
+        
+        # Apply all enhancements at once
+        if expressions:
+            df = df.with_columns(expressions)
+        
+        # CE impedance columns remain null (already handled by add_missing_universal_columns)
+        return df
 
-    
     def _update_metadata_from_data(self, metadata: FileMetadata, df: pl.DataFrame) -> FileMetadata:
         """Update metadata with statistics from actual data."""
         try:

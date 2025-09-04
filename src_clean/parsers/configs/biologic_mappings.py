@@ -188,6 +188,58 @@ log_dtypes = {
     0x0922: ("|u1", "averaging_points"),
 }
 
+# =============================================================================
+# UNIVERSAL SCHEMA MAPPING - BioLogic to Universal Schema (ENHANCED)
+# =============================================================================
+
+BIOLOGIC_TO_UNIVERSAL_MAPPING = {
+    # Core electrochemical measurements
+    "time": "time_s",
+    "I": "current_a",                    # Convert mA → A with factor
+    "(Q-Qo)": "capacity_ah",            # Convert C → Ah with factor
+    "dQ": "capacity_delta_ah",          # Convert C → Ah with factor  
+    "|Energy|": "energy_wh",            # Energy measurements
+    "Temperature": "temperature_c",      # Temperature monitoring
+    "cycle number": "battery_cycle",     # Cycle tracking
+    
+    # NEW COLUMN 1: Working electrode voltage (vs reference)
+    "Ewe": "working_electrode_potential_v",
+    
+    # Counter electrode voltage (already supported)
+    "Ece": "ce_potential_v",
+    
+    # Calculate cell voltage: potential_v = Ewe - Ece (done in parser logic)
+    
+    # Existing impedance columns (WE-CE cell impedance)
+    "Re(Z)": "impedance_real_ohm",
+    "Im(Z)": "impedance_imag_ohm",
+    "|Z|": "impedance_mag_ohm",
+    "Phase(Z)": "impedance_phase_deg",
+    "freq": "frequency_hz",
+    
+    # NEW COLUMNS 2-5: WE impedance (electrode-specific)
+    # Note: Need to identify if BioLogic provides separate WE impedance data
+    # For now, map same impedance data to both cell and WE columns
+    # "Re(Zwe)": "we_impedance_real_ohm",     # If available
+    # "Im(Zwe)": "we_impedance_imag_ohm",     # If available  
+    # "|Zwe|": "we_impedance_mag_ohm",        # If available
+    # "Phase(Zwe)": "we_impedance_phase_deg", # If available
+    
+    # NEW COLUMNS 6-9: CE impedance (electrode-specific)  
+    # Note: Need to identify if BioLogic provides separate CE impedance data
+    # "Re(Zce)": "ce_impedance_real_ohm",     # If available
+    # "Im(Zce)": "ce_impedance_imag_ohm",     # If available
+    # "|Zce|": "ce_impedance_mag_ohm",        # If available
+    # "Phase(Zce)": "ce_impedance_phase_deg", # If available
+}
+
+# Unit conversion factors for BioLogic data
+BIOLOGIC_UNIT_CONVERSIONS = {
+    "I": 1e-3,              # mA → A
+    "(Q-Qo)": 1/3600,       # C → Ah  
+    "dQ": 1/3600,           # C → Ah
+}
+
 # External device data types
 extdev_dtypes = {
     0x0036: ("pascal", "Analog IN 1"),

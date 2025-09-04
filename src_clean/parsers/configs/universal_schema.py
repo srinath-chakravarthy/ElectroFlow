@@ -175,6 +175,53 @@ UNIVERSAL_SCHEMA = {
         'description': 'Phase'
     },
     
+    # Electrode-Specific Measurements (9 NEW columns for BioLogic enhancement)
+    'working_electrode_potential_v': {
+        'type': pl.Float64,
+        'units': 'V',
+        'description': 'Working electrode potential vs reference'
+    },
+    'we_impedance_real_ohm': {
+        'type': pl.Float64,
+        'units': 'Ω',
+        'description': 'Working electrode impedance real component'
+    },
+    'we_impedance_imag_ohm': {
+        'type': pl.Float64,
+        'units': 'Ω',
+        'description': 'Working electrode impedance imaginary component'
+    },
+    'we_impedance_mag_ohm': {
+        'type': pl.Float64,
+        'units': 'Ω',
+        'description': 'Working electrode impedance magnitude'
+    },
+    'we_impedance_phase_deg': {
+        'type': pl.Float64,
+        'units': 'deg',
+        'description': 'Working electrode impedance phase'
+    },
+    'ce_impedance_real_ohm': {
+        'type': pl.Float64,
+        'units': 'Ω',
+        'description': 'Counter electrode impedance real component'
+    },
+    'ce_impedance_imag_ohm': {
+        'type': pl.Float64,
+        'units': 'Ω',
+        'description': 'Counter electrode impedance imaginary component'
+    },
+    'ce_impedance_mag_ohm': {
+        'type': pl.Float64,
+        'units': 'Ω',
+        'description': 'Counter electrode impedance magnitude'
+    },
+    'ce_impedance_phase_deg': {
+        'type': pl.Float64,
+        'units': 'deg',
+        'description': 'Counter electrode impedance phase'
+    },
+    
     # Status & Advanced (8 columns)
     'current_range': {
         'type': pl.Utf8,
@@ -224,7 +271,7 @@ UNIVERSAL_SCHEMA = {
 }
 
 # Schema metadata
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.1.0"  # Updated for BioLogic electrode-specific enhancement
 TOTAL_COLUMNS = len(UNIVERSAL_SCHEMA)
 
 # =============================================================================
