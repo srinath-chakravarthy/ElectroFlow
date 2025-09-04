@@ -5,6 +5,7 @@ Handles MPR binary format parsing using YADG logic.
 No inheritance - pure utility class.
 """
 
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import numpy as np
@@ -15,7 +16,8 @@ from .configs.biologic_mappings import (
     conflict_columns,
     flag_columns,
     technique_dependent_ids,
-    module_header_dtypes
+    module_header_dtypes,
+    log_dtypes
 )
 
 
@@ -47,12 +49,17 @@ class MPRReader:
             raise ValueError("Invalid MPR file format")
 
         # Process modules
-        return self._process_modules(mpr_bytes)
+        data_df, log_metadata = self._process_modules(mpr_bytes)
+        
+        # Store log metadata for timestamp processing
+        self.last_log_metadata = log_metadata
+        return data_df
 
-    def _process_modules(self, content: bytes) -> pl.DataFrame:
-        """Process all modules and extract data."""
+    def _process_modules(self, content: bytes) -> tuple[pl.DataFrame, dict]:
+        """Process all modules and extract data with log metadata."""
         modules = content.split(b"MODULE")[1:]
         data_df = None
+        log_metadata = {}
         technique = ""
 
         if self.debug:
@@ -77,11 +84,151 @@ class MPRReader:
                 technique = self._extract_technique(module_data)
             elif name == "VMP data":
                 data_df = self._process_data_module(module_data, version, technique)
+            elif name == "VMP LOG":
+                log_metadata = self._process_log_module(module_data)
 
         if data_df is None:
             raise ValueError("No data module found in MPR file")
 
-        return data_df
+        return data_df, log_metadata
+
+    def _process_log_module(self, module_data: bytes) -> dict:
+        """
+        Process BioLogic log module to extract acquisition timestamp and metadata.
+        
+        Log module contains:
+        - OLE timestamp (0x0249) - Microsoft OLE date format
+        - Device info, software versions, channel data
+        """
+        log_metadata = {}
+        
+        if self.debug:
+            print(f"Processing log module, size: {len(module_data)}")
+        
+        # Extract log fields using YADG mappings
+        for offset, (dtype_str, field_name) in log_dtypes.items():
+            try:
+                if offset + self._get_dtype_size(dtype_str) <= len(module_data):
+                    if dtype_str == "pascal":
+                        value = self._read_pascal_string(module_data, offset)
+                    else:
+                        dtype = np.dtype(dtype_str)
+                        value = np.frombuffer(module_data, offset=offset, dtype=dtype, count=1)[0]
+                        
+                        # Convert numpy types to Python types
+                        if hasattr(value, 'item'):
+                            value = value.item()
+                    
+                    log_metadata[field_name] = value
+                    
+                    if self.debug and field_name == "ole_timestamp":
+                        print(f"Extracted OLE timestamp: {value}")
+                        
+            except Exception as e:
+                if self.debug:
+                    print(f"Could not extract {field_name} at offset 0x{offset:04x}: {e}")
+                continue
+        
+        return log_metadata
+    
+    def _get_dtype_size(self, dtype_str: str) -> int:
+        """Get size in bytes for a numpy dtype string."""
+        if dtype_str == "pascal":
+            return 256  # Conservative estimate for pascal strings
+        else:
+            return np.dtype(dtype_str).itemsize
+    
+    def _read_pascal_string(self, data: bytes, offset: int) -> str:
+        """Read a Pascal string (length-prefixed) from binary data."""
+        try:
+            if offset >= len(data):
+                return ""
+            
+            length = data[offset]
+            if offset + 1 + length > len(data):
+                return ""
+            
+            string_bytes = data[offset + 1:offset + 1 + length]
+            return string_bytes.decode('ascii', errors='ignore').strip()
+        except Exception:
+            return ""
+
+    def _convert_ole_timestamp(self, ole_float: float) -> datetime:
+        """
+        Convert Microsoft OLE timestamp to Python datetime.
+        
+        OLE timestamp format:
+        - Float64 representing days since 1900-01-01 00:00:00
+        - Integer part = days, fractional part = time of day
+        
+        Args:
+            ole_float: OLE timestamp value
+            
+        Returns:
+            Python datetime object
+        """
+        try:
+            # OLE epoch: January 1, 1900 (but treat as January 2, 1900 due to Excel bug)
+            # This matches the YADG implementation
+            ole_epoch = datetime(1899, 12, 30)  # Adjusted for Excel/OLE bug
+            
+            # Extract days and fractional day
+            days = int(ole_float)
+            fraction = ole_float - days
+            
+            # Calculate total seconds from fractional day
+            seconds_in_day = fraction * 24 * 60 * 60
+            
+            # Create datetime
+            acquisition_datetime = ole_epoch + \
+                                 timedelta(days=days, seconds=seconds_in_day)
+            
+            if self.debug:
+                print(f"Converted OLE {ole_float} → {acquisition_datetime}")
+                
+            return acquisition_datetime
+            
+        except Exception as e:
+            if self.debug:
+                print(f"OLE timestamp conversion failed: {e}")
+            # Return epoch time as fallback
+            return datetime(1970, 1, 1)
+
+    def _add_absolute_timestamps(self, df: pl.DataFrame, acquisition_start: datetime) -> pl.DataFrame:
+        """
+        Add absolute timestamp column to DataFrame.
+        
+        Calculates: timestamp = acquisition_start + time_s for each data point
+        
+        Args:
+            df: DataFrame with time_s column
+            acquisition_start: Experiment start datetime
+            
+        Returns:
+            DataFrame with added timestamp column
+        """
+        if 'time_s' not in df.columns:
+            if self.debug:
+                print("Warning: No time_s column found, cannot calculate absolute timestamps")
+            return df
+        
+        try:
+            # Convert acquisition_start to Polars datetime literal
+            start_lit = pl.lit(acquisition_start)
+            
+            # Calculate absolute timestamps: acquisition_start + time_s
+            df = df.with_columns([
+                (start_lit + pl.duration(seconds=pl.col('time_s'))).alias('timestamp')
+            ])
+            
+            if self.debug:
+                print(f"Added absolute timestamps starting from {acquisition_start}")
+                
+        except Exception as e:
+            if self.debug:
+                print(f"Failed to add absolute timestamps: {e}")
+        
+        return df
 
     def _read_module_header(self, module: bytes) -> Optional[Dict]:
         """Read module header using YADG logic."""
@@ -325,23 +472,40 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             return False
 
     def parse_metadata(self, file_path: Path) -> 'FileMetadata':
-        """Extract metadata from MPR file."""
+        """Extract metadata from MPR file with timestamp extraction."""
         try:
             # Basic file metadata
             file_size = file_path.stat().st_size
             file_hash = self._calculate_file_hash(file_path)
 
-            # TODO: Extract from MPR settings/log modules
-            # For now, create minimal metadata
+            # Extract acquisition timestamp from log metadata if available
+            acquisition_start = datetime.now()  # Default fallback
+            software_version = 'Unknown'
+            
+            if hasattr(self, 'last_log_metadata') and self.last_log_metadata:
+                log_data = self.last_log_metadata
+                
+                # Extract OLE timestamp if available
+                if 'ole_timestamp' in log_data:
+                    ole_timestamp = log_data['ole_timestamp']
+                    if ole_timestamp and ole_timestamp > 0:
+                        acquisition_start = self._convert_ole_timestamp(ole_timestamp)
+                        if self.debug:
+                            print(f"Using extracted acquisition timestamp: {acquisition_start}")
+                
+                # Extract software version if available
+                if 'ec_lab_version' in log_data:
+                    software_version = log_data.get('ec_lab_version', 'Unknown')
+
             metadata = {
                 'original_filename': file_path.name,
                 'file_hash': file_hash,
                 'file_size_bytes': file_size,
                 'parser_version': self.PARSER_VERSION,
-                'acquisition_start': datetime.now(),  # TODO: Extract from file
+                'acquisition_start': acquisition_start,  # Now extracted from file
                 'acquisition_duration_s': 0.0,  # TODO: Calculate from data
                 'instrument_model': 'BioLogic',
-                'software_version': 'Unknown',  # TODO: Extract from log module
+                'software_version': software_version,  # Now extracted from log
                 'total_points': 0,  # TODO: Extract from data
                 'technique_count': 1,  # TODO: Extract from settings
                 'actionid_mappings': {},  # TODO: Extract technique mappings
@@ -376,8 +540,14 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
                 # BioLogic enhancement: populate electrode-specific columns from available data
                 universal_df = self._enhance_biologic_electrode_columns(universal_df)
 
-            # Extract metadata
+            # Extract metadata (needed for timestamps)
             metadata = self.parse_metadata(file_path)
+            
+            # Add absolute timestamps using extracted acquisition_start
+            if INTEGRATED_MODE and hasattr(metadata, 'acquisition_start'):
+                universal_df = self.mpr_reader._add_absolute_timestamps(universal_df, metadata.acquisition_start)
+            elif isinstance(metadata, dict) and 'acquisition_start' in metadata:
+                universal_df = self.mpr_reader._add_absolute_timestamps(universal_df, metadata['acquisition_start'])
 
             if INTEGRATED_MODE:
                 return DataFile(
