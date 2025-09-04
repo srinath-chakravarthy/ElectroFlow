@@ -31,7 +31,7 @@ yes # Battery Data Analyzer - AI Assistant Technical Guide
 ## Current System Status
 
 ### Production Components
-- **Universal Data Processing**: VersaStudio files to 29-column standardized format
+- **Universal Data Processing**: Multi-instrument files to 47-column standardized format (VersaStudio + BioLogic)
 - **Registry Analysis System**: Auto-scaling platform with developer tooling
 - **Multi-Plot Explorer**: Complete Tab 3 with technique filtering and multi-series analysis
 - **Cross-File Experiment Tracking**: Database-level accumulation across multiple files
@@ -39,7 +39,9 @@ yes # Battery Data Analyzer - AI Assistant Technical Guide
 - **Group Management**: Templated groups with CASCADE operations
 - **Multi-Interface Access**: Panel web app, CLI, Python API, Jupyter
 
-### Latest Completions (August 2025)
+### Latest Completions (August-September 2025)
+- **Universal Schema Column Consistency (Sep 4)**: Fixed BioLogic parser column selection to return proper universal schema names instead of raw instrument columns, ensuring 47-column consistency across all parsers
+- **YADG Control Splitting Integration (Sep 4)**: Implemented mode-dependent control column interpretation for BioLogic files, enabling proper current data extraction from galvanostatic vs potentiostatic techniques
 - **FileDropper Dictionary Fix (Aug 30)**: Resolved "Error:0" in file upload with proper dictionary pattern implementation
 - **Test Config Isolation (Aug 30)**: Complete test suite isolation preventing production database contamination
 - **Explorer Backend Testing (Aug 30)**: Comprehensive validation suite (13/14 tests passing) - backend ready for UI debugging
@@ -64,12 +66,13 @@ Expert Electrochemical Insights
 Panel Web App / CLI / Python API
 ```
 
-### Universal Schema (29 columns)
+### Universal Schema (47 columns)
 - **Time**: `time_s`, `timestamp`
 - **Electrochemical**: `potential_v`, `current_a`, `power_w`
 - **Technique**: `technique_id`, `segment_number`
 - **Impedance**: `impedance_real_ohm`, `impedance_imag_ohm`, `impedance_mag_ohm`, `impedance_phase_deg`
-- **Analysis**: 20+ additional columns
+- **Electrode-Specific**: `working_electrode_potential_v`, `we_impedance_*`, `ce_impedance_*`
+- **Analytics**: Battery metrics, cumulative tracking, temperature, status flags
 
 ### Database Schema
 ```sql
@@ -177,10 +180,18 @@ python -m src_clean.cli.main group-voltage-correlation 16 --correlation-type pea
 
 ## Key Technical Systems
 
-### VersaStudio Processing
+### Multi-Instrument Processing
+
+#### VersaStudio Processing
 - **ActionID Mapping**: 23→Rest, 20→EIS, 8→Galvanostatic
 - **Loop Expansion**: Complex hierarchical structures with iteration handling
 - **Dual File System**: .par (metadata) + .par.csv (calibrated data)
+
+#### BioLogic Processing (NEW)
+- **YADG Control Splitting**: Mode-dependent interpretation of control column (galvanostatic vs potentiostatic)
+- **Technique Mapping**: Btech→Ftech classification (GCPL→cc, CV→cv, PEIS→eis)
+- **Binary MPR Format**: Native parsing with electrode-specific impedance data
+- **Column Consistency**: Fixed to return universal schema names (`current_a`, `time_s`) not raw names (`I`, `time`)
 
 ### Analytics Engine
 - **sqrt(t) + Exponential Fitting**: Automatic best-fit selection with R² comparison
@@ -246,12 +257,12 @@ python -m src_clean.cli.main group-voltage-correlation 16 --correlation-type pea
 **Previous Roadmap Completed**: Universal schema enhancement and timestamp extraction completed. Now focusing on technique mapping as primary development track.
 
 ### 📋 **Current System State**
-- **Branch**: feature/test-isolation-config (3 commits ahead - Phase 1 complete)
-- **Universal Schema**: Enhanced to v2.1.0 with 9 electrode-specific columns  
-- **BioLogic Parser**: Phase 1 architectural restructuring complete, column mapping fix needed
-- **Architecture**: Clean separation achieved - MPRReader (binary) + BiologicParser (integration)
-- **Issue**: Column mapping logic not working in restructured architecture - needs debugging
-- **Documentation**: Updated with Phase 1 completion status and column mapping issue
+- **Branch**: prod (clean working tree - column consistency fixes merged)
+- **Universal Schema**: v2.1.0 with 47 columns including electrode-specific impedance measurements
+- **BioLogic Parser**: ✅ **COMPLETE** - YADG control splitting + universal schema column consistency
+- **VersaStudio Parser**: ✅ **VALIDATED** - confirmed proper universal schema column selection
+- **Platform Consistency**: Both parsers now return identical 47-column universal schema format
+- **Parser Architecture**: Clean MPRReader (binary) + BiologicParser (integration) + YADG technique mode handling
 
 ---
 

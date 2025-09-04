@@ -17,7 +17,7 @@ from pathlib import Path
 import polars as pl
 
 # Add project root to Python path for imports
-project_root = Path(__file__).parent.parent.parent  # Adjust based on your project structure
+project_root = Path(__file__).parent.parent  # scripts/ -> project root
 sys.path.insert(0, str(project_root))
 
 # =============================================================================
@@ -25,8 +25,9 @@ sys.path.insert(0, str(project_root))
 # =============================================================================
 
 # 🔥 UPDATE THIS PATH TO YOUR ACTUAL MPR FILE
-MPR_FILE_PATH = Path(r"/Users/srinathchakravarthy/Desktop/AR3677_3Electrode_GITT_EIS_1st_charge_interlayer_05_GCPL_C05.mpr")
+# MPR_FILE_PATH = Path(r"/Users/srinathchakravarthy/Desktop/AR3677_3Electrode_GITT_EIS_1st_charge_interlayer_05_GCPL_C05.mpr")
 
+MPR_FILE_PATH = Path(r"/Users/srinathchakravarthy/Desktop/AR3677_3Electrode_Redo_formation_after_GITT_to_check_04_MB_C05.mpr")
 # Alternative paths to try (add your common locations)
 ALTERNATIVE_PATHS = [
     Path(r"C:\Users\YourName\Desktop\sample.mpr"),

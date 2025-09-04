@@ -445,6 +445,8 @@ class ElectrochemicalApp(param.Parameterized):
                 if hasattr(self.group_management_tab, '_update_status'):
                     self.group_management_tab._update_status(f"Error refreshing tab: {str(e)}", "error")
 
+    # Removed dynamic tab methods - using separate modal server approach
+
     def __panel__(self):
         """Return the professional Panel layout."""
         return self.layout

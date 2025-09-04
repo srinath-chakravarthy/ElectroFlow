@@ -233,10 +233,7 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
                 # Only select columns that actually exist
                 available_cols = [col for col in mapped_cols if col in universal_df.columns]
                 
-                if available_cols:
-                    return universal_df.select(available_cols)
-                else:
-                    return universal_df
+                return universal_df.select(available_cols)
             else:
                 return df
                 
