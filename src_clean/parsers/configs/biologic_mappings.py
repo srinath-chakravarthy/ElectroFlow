@@ -195,7 +195,9 @@ log_dtypes = {
 BIOLOGIC_TO_UNIVERSAL_MAPPING = {
     # Core electrochemical measurements
     "time": "time_s",
-    "I": "current_a",                    # Convert mA → A with factor
+    # Current mapping with priority: control_I preferred over I if both present
+    "control_I": "current_a",            # Convert mA → A with factor (control current from YADG splitting) - PREFERRED
+    "I": "current_a",                    # Convert mA → A with factor (direct current) - FALLBACK
     "Temperature": "temperature_c",      # Temperature monitoring
     
     # Working electrode voltage (vs reference)
@@ -228,7 +230,8 @@ BIOLOGIC_TO_UNIVERSAL_MAPPING = {
 
 # Unit conversion factors for BioLogic data
 BIOLOGIC_UNIT_CONVERSIONS = {
-    "I": 1e-3,              # mA → A
+    "I": 1e-3,              # mA → A (direct current)
+    "control_I": 1e-3,      # mA → A (control current from YADG splitting)
 }
 
 # =============================================================================

@@ -105,23 +105,26 @@ def check_imports():
 
 
 def validate_column_definitions():
-    """Validate column definitions in detail."""
-    print("\n🧪 Validating column definitions...")
+    """Validate column definitions and technique mappings."""
+    print("\n🧪 Validating column definitions and technique mappings...")
 
     try:
-        from src_clean.parsers.configs.biologic_mappings import data_columns
+        from src_clean.parsers.configs.biologic_mappings import (
+            data_columns, 
+            BIOLOGIC_TO_UNIVERSAL_MAPPING,
+            BTECH_TO_FTECH_BASE_MAPPING
+        )
 
         # Check specific important columns
         important_columns = [
             (4, "time"),
             (6, "Ewe"),
             (8, "I"),
-            (13, "(Q-Qo)"),
-            (74, "|Energy|"),
+            (131, "Ns"),  # Sequence number for technique mapping
             (206, "Temperature")
         ]
 
-        print("✅ Key columns found:")
+        print("✅ Key data columns found:")
         for col_id, expected_name in important_columns:
             if col_id in data_columns:
                 dtype, name, unit = data_columns[col_id]
@@ -130,7 +133,26 @@ def validate_column_definitions():
             else:
                 print(f"   ⚠️  Missing column {col_id}: {expected_name}")
 
-        print(f"✅ Total columns defined: {len(data_columns)}")
+        print(f"✅ Total data columns defined: {len(data_columns)}")
+        
+        # Check universal schema mappings
+        print(f"\n✅ Universal schema mappings: {len(BIOLOGIC_TO_UNIVERSAL_MAPPING)}")
+        print("   Key mappings:")
+        key_mappings = ["time", "I", "Ewe", "Ece", "Temperature", "Re(Z)", "|Z|"]
+        for biologic_col in key_mappings:
+            if biologic_col in BIOLOGIC_TO_UNIVERSAL_MAPPING:
+                universal_col = BIOLOGIC_TO_UNIVERSAL_MAPPING[biologic_col]
+                print(f"     {biologic_col} → {universal_col}")
+        
+        # Check technique mappings
+        print(f"\n✅ Technique mappings: {len(BTECH_TO_FTECH_BASE_MAPPING)}")
+        print("   Key technique mappings:")
+        key_techniques = ["GCPL", "CV", "PEIS", "OCV", "CA", "CP"]
+        for btech in key_techniques:
+            if btech in BTECH_TO_FTECH_BASE_MAPPING:
+                ftech = BTECH_TO_FTECH_BASE_MAPPING[btech]
+                print(f"     {btech} → {ftech}")
+
         return True
 
     except Exception as e:
@@ -222,6 +244,15 @@ def run_biologic_parser(file_path: Path):
         print("✅ Full parsing successful!")
         print(f"📊 Universal DataFrame shape: {universal_df.shape}")
         print(f"📋 Universal columns: {list(universal_df.columns)}")
+        
+        # Check technique mapping results
+        if hasattr(parser.mpr_reader, 'last_technique_parameters'):
+            tech_params = parser.mpr_reader.last_technique_parameters
+            btech_name = tech_params.get('_btech_name', 'Unknown')
+            ftech_name = tech_params.get('_ftech_name', 'Unknown')
+            print(f"🔧 Technique detected: {btech_name} (Btech) → {ftech_name} (Ftech)")
+        else:
+            print("⚠️  No technique parameters found")
 
         # Show sample universal data
         if SHOW_SAMPLE_DATA and len(universal_df) > 0:
@@ -237,6 +268,113 @@ def run_biologic_parser(file_path: Path):
         return None
 
 
+def inspect_technique_mapping(raw_df: pl.DataFrame, universal_df: pl.DataFrame):
+    """Inspect technique mapping results in detail."""
+    print("\n🔍 Inspecting technique mapping results...")
+    
+    ns_values = None
+    
+    # Check for Ns column in raw data
+    if "Ns" in raw_df.columns:
+        ns_values = raw_df["Ns"].unique().sort()
+        print(f"✅ Ns (sequence) values found: {ns_values.to_list()}")
+        print(f"✅ Total Ns sequences: {len(ns_values)}")
+    else:
+        print("⚠️  No Ns column found in raw data")
+    
+    # Check for segment_number in universal data
+    if "segment_number" in universal_df.columns:
+        segment_values = universal_df["segment_number"].unique().sort()
+        print(f"✅ Segment numbers generated: {segment_values.to_list()}")
+        print(f"✅ Total segments: {len(segment_values)}")
+        
+        # Show mapping relationship
+        if ns_values is not None:
+            print(f"\n🔄 Ns → segment_number mapping:")
+            for ns_val in ns_values:
+                ns_mask = raw_df["Ns"] == ns_val
+                corresponding_segment = universal_df[ns_mask]["segment_number"][0]
+                row_count = ns_mask.sum()
+                print(f"   Ns={ns_val} → segment={corresponding_segment} ({row_count} rows)")
+    else:
+        print("⚠️  No segment_number column found in universal data")
+    
+    # Check for technique_id in universal data
+    if "technique_id" in universal_df.columns:
+        technique_ids = universal_df["technique_id"].unique()
+        print(f"✅ Technique IDs found: {technique_ids.to_list()}")
+        
+        # Map back to technique names
+        technique_id_map = {
+            0: "unknown", 1: "cv", 7: "cp", 8: "cc", 20: "eis", 23: "rest"
+        }
+        for tech_id in technique_ids:
+            tech_name = technique_id_map.get(tech_id, f"unknown_id_{tech_id}")
+            print(f"   ID {tech_id} = {tech_name}")
+    else:
+        print("⚠️  No technique_id column found in universal data")
+
+
+def detailed_dataframe_inspection(raw_df: pl.DataFrame, universal_df: pl.DataFrame):
+    """Detailed inspection of DataFrames for PyCharm debugging."""
+    print("\n🔬 Detailed DataFrame inspection for PyCharm debugging...")
+    
+    # Raw DataFrame details
+    print(f"\n📊 Raw DataFrame Details:")
+    print(f"   Shape: {raw_df.shape}")
+    print(f"   Memory usage: ~{raw_df.estimated_size()/1024/1024:.2f} MB")
+    print(f"   Columns ({len(raw_df.columns)}):")
+    
+    # Show column types and sample values
+    for i, col in enumerate(raw_df.columns[:8]):  # First 8 columns
+        col_type = raw_df[col].dtype
+        non_null_count = raw_df[col].count()
+        sample_val = raw_df[col][0] if len(raw_df) > 0 else "N/A"
+        print(f"     {i+1:2d}. {col:<20} | {str(col_type):<12} | {non_null_count:>7} rows | sample: {sample_val}")
+    
+    if len(raw_df.columns) > 8:
+        print(f"     ... and {len(raw_df.columns) - 8} more columns")
+    
+    # Universal DataFrame details
+    print(f"\n📊 Universal DataFrame Details:")
+    print(f"   Shape: {universal_df.shape}")
+    print(f"   Memory usage: ~{universal_df.estimated_size()/1024/1024:.2f} MB")
+    print(f"   Columns ({len(universal_df.columns)}):")
+    
+    # Key universal columns to highlight
+    key_universal_cols = [
+        "time_s", "current_a", "working_electrode_potential_v", "ce_potential_v", 
+        "temperature_c", "technique_id", "segment_number", "impedance_real_ohm"
+    ]
+    
+    for col in key_universal_cols:
+        if col in universal_df.columns:
+            col_type = universal_df[col].dtype
+            non_null_count = universal_df[col].count()
+            sample_val = universal_df[col][0] if len(universal_df) > 0 else "N/A"
+            print(f"     ✅ {col:<30} | {str(col_type):<12} | {non_null_count:>7} rows | sample: {sample_val}")
+        else:
+            print(f"     ❌ {col:<30} | Missing")
+    
+    # Additional universal columns
+    other_cols = [col for col in universal_df.columns if col not in key_universal_cols]
+    if other_cols:
+        print(f"\n   Additional columns ({len(other_cols)}):")
+        for col in other_cols[:5]:  # Show first 5 additional
+            col_type = universal_df[col].dtype
+            non_null_count = universal_df[col].count()
+            print(f"     📋 {col:<30} | {str(col_type):<12} | {non_null_count:>7} rows")
+        if len(other_cols) > 5:
+            print(f"     ... and {len(other_cols) - 5} more columns")
+    
+    print(f"\n🔍 PyCharm Debugging Tips:")
+    print(f"   • Set breakpoint after this function returns")
+    print(f"   • Use 'raw_df' variable to inspect BioLogic native data")
+    print(f"   • Use 'universal_df' variable to inspect mapped universal schema")
+    print(f"   • Check technique_id and segment_number columns for mapping results")
+    print(f"   • Look for Ns column in raw data vs segment_number in universal")
+
+
 def compare_raw_vs_universal(raw_df: pl.DataFrame, universal_df: pl.DataFrame):
     """Compare raw biologic DataFrame vs universal schema DataFrame."""
     print("\n🔍 Comparing raw vs universal DataFrames...")
@@ -245,21 +383,31 @@ def compare_raw_vs_universal(raw_df: pl.DataFrame, universal_df: pl.DataFrame):
     print(f"📊 Universal DataFrame: {universal_df.shape}")
 
     print(f"\n📋 Raw columns: {list(raw_df.columns[:10])}")
-    print(f"📋 Universal columns: {list(universal_df.columns)}")
+    if len(raw_df.columns) > 10:
+        print(f"              ... and {len(raw_df.columns) - 10} more raw columns")
+    
+    print(f"📋 Universal columns: {list(universal_df.columns[:15])}")
+    if len(universal_df.columns) > 15:
+        print(f"                   ... and {len(universal_df.columns) - 15} more universal columns")
 
     # Check for common time/potential/current columns
     mappings_found = []
     if "time" in raw_df.columns and "time_s" in universal_df.columns:
         mappings_found.append("time → time_s")
-    if "Ewe" in raw_df.columns and "potential_v" in universal_df.columns:
-        mappings_found.append("Ewe → potential_v")
+    if "Ewe" in raw_df.columns and "working_electrode_potential_v" in universal_df.columns:
+        mappings_found.append("Ewe → working_electrode_potential_v")
     if "I" in raw_df.columns and "current_a" in universal_df.columns:
         mappings_found.append("I → current_a")
+    if "Temperature" in raw_df.columns and "temperature_c" in universal_df.columns:
+        mappings_found.append("Temperature → temperature_c")
 
     if mappings_found:
         print(f"✅ Schema mappings found: {mappings_found}")
     else:
         print("⚠️  No obvious schema mappings detected")
+    
+    # Call technique mapping inspection
+    inspect_technique_mapping(raw_df, universal_df)
 
 
 def run_parser_info():
@@ -379,6 +527,10 @@ def main():
                     universal_df = parser_result['universal_data']
 
                 compare_raw_vs_universal(raw_df, universal_df)
+                
+                # Step 9: Detailed DataFrame inspection for PyCharm debugging
+                print("\n" + "=" * 60)
+                detailed_dataframe_inspection(raw_df, universal_df)
 
         # 🔥 FINAL PYCHARM BREAKPOINT HERE
         # Inspect: mpr_file, raw_df, parser_result, universal_df
@@ -390,6 +542,7 @@ def main():
         print("   - raw_df: Raw biologic DataFrame")
         print("   - parser_result: Full parsing result")
         print("   - universal_df: Universal schema DataFrame")
+        print("   - Both DataFrames ready for PyCharm debugger inspection!")
 
         # Keep variables in scope for PyCharm inspection
         locals_for_inspection = {

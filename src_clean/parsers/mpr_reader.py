@@ -238,6 +238,58 @@ class MPRReader:
             # Return epoch time as fallback
             return datetime(1970, 1, 1)
 
+    def _split_control_column(self, data_dict: dict) -> dict:
+        """
+        Split BioLogic control column based on technique mode (YADG approach).
+        
+        BioLogic stores control data in a single 'control' column, but the meaning
+        depends on the technique mode:
+        - Mode 1, 3: Galvanostatic control → control = current data
+        - Mode 2: Potentiostatic control → control = voltage data
+        
+        Args:
+            data_dict: Raw data dictionary from binary parsing
+            
+        Returns:
+            Modified data dictionary with control_I and control_V columns
+        """
+        if "control" not in data_dict or "flags" not in data_dict:
+            return data_dict
+            
+        if self.debug:
+            print("Splitting control column based on technique mode...")
+            
+        # Extract mode from flags using bitmask (YADG logic)
+        control_I_values = []
+        control_V_values = []
+        
+        for control_val, flag_val in zip(data_dict["control"], data_dict["flags"]):
+            # Mode uses first 2 bits of flags
+            mode = int(flag_val) & 0b00000011
+            
+            if mode in {1, 3}:  # Galvanostatic modes
+                control_I_values.append(control_val)
+                control_V_values.append(float('nan'))
+            elif mode == 2:     # Potentiostatic mode
+                control_I_values.append(float('nan'))
+                control_V_values.append(control_val)
+            else:
+                # Unknown mode
+                control_I_values.append(float('nan'))
+                control_V_values.append(float('nan'))
+        
+        # Add new columns and remove original
+        data_dict["control_I"] = control_I_values
+        data_dict["control_V"] = control_V_values
+        del data_dict["control"]
+        
+        if self.debug:
+            non_nan_I = sum(1 for x in control_I_values if not (isinstance(x, float) and np.isnan(x)))
+            non_nan_V = sum(1 for x in control_V_values if not (isinstance(x, float) and np.isnan(x)))
+            print(f"Control splitting: {non_nan_I} current values, {non_nan_V} voltage values")
+        
+        return data_dict
+
     def _add_absolute_timestamps(self, df: pl.DataFrame, acquisition_start: datetime) -> pl.DataFrame:
         """
         Add absolute timestamp column to DataFrame.
@@ -513,6 +565,9 @@ class MPRReader:
                 data_dict = {}
                 for name in names:
                     data_dict[name] = values[name]
+
+                # Apply YADG control splitting before DataFrame creation
+                data_dict = self._split_control_column(data_dict)
 
                 # Create Polars DataFrame
                 df = pl.DataFrame(data_dict)

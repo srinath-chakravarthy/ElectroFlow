@@ -183,8 +183,23 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             
             expressions = []
             
+            # Handle current_a with priority: control_I preferred over I
+            if "control_I" in df.columns:
+                # Use control_I (preferred)
+                conversion_factor = BIOLOGIC_UNIT_CONVERSIONS.get("control_I", 1)
+                expressions.append(
+                    (pl.col("control_I") * conversion_factor).alias("current_a")
+                )
+            elif "I" in df.columns:
+                # Use I as fallback
+                conversion_factor = BIOLOGIC_UNIT_CONVERSIONS.get("I", 1)
+                expressions.append(
+                    (pl.col("I") * conversion_factor).alias("current_a")
+                )
+            
+            # Handle all other mappings (excluding current_a conflicts)
             for biologic_col, universal_col in BIOLOGIC_TO_UNIVERSAL_MAPPING.items():
-                if biologic_col in df.columns:
+                if universal_col != "current_a" and biologic_col in df.columns:
                     # Apply unit conversion if needed
                     if biologic_col in BIOLOGIC_UNIT_CONVERSIONS:
                         conversion_factor = BIOLOGIC_UNIT_CONVERSIONS[biologic_col]
@@ -209,10 +224,19 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             
             if expressions:
                 universal_df = df.with_columns(expressions)
-                # Select only mapped columns
-                mapped_cols = list(BIOLOGIC_TO_UNIVERSAL_MAPPING.values()) + ["potential_v"]
+                
+                # Get all possible mapped columns
+                mapped_cols = [col for col in BIOLOGIC_TO_UNIVERSAL_MAPPING.values() if col != "current_a"]
+                mapped_cols.append("current_a")  # Add current_a explicitly
+                mapped_cols.append("potential_v")  # Add potential_v
+                
+                # Only select columns that actually exist
                 available_cols = [col for col in mapped_cols if col in universal_df.columns]
-                return universal_df.select(available_cols)
+                
+                if available_cols:
+                    return universal_df.select(available_cols)
+                else:
+                    return universal_df
             else:
                 return df
                 
