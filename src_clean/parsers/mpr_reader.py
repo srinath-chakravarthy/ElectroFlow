@@ -32,6 +32,7 @@ from .configs.biologic_mappings import (
     module_header_dtypes,
     log_dtypes
 )
+from .configs.biologic_techniques import technique_params_dtypes
 
 
 class MPRReader:
@@ -40,6 +41,7 @@ class MPRReader:
     def __init__(self, debug: bool = False):
         self.debug = debug
         self.last_log_metadata = {}
+        self.last_technique_parameters = {}
 
     def parse_mpr_file(self, file_path: Path) -> pl.DataFrame:
         """
@@ -61,18 +63,28 @@ class MPRReader:
             raise ValueError("Invalid MPR file format")
 
         # Process modules
-        data_df, log_metadata = self._process_modules(mpr_bytes)
+        data_df, log_metadata, technique_parameters = self._process_modules(mpr_bytes)
         
-        # Store log metadata for timestamp processing
+        # Store metadata for access by BiologicParser
         self.last_log_metadata = log_metadata
+        self.last_technique_parameters = technique_parameters
+        
+        if self.debug and technique_parameters:
+            print(f"Technique parameters extracted: {technique_parameters.get('_technique_name', 'Unknown')}")
+            print(f"Number of sequences: {technique_parameters.get('_ns', 0)}")
+        
+        if self.debug and 'ole_timestamp' in log_metadata:
+            print(f"OLE timestamp extracted: {log_metadata['ole_timestamp']}")
+        
         return data_df
 
-    def _process_modules(self, content: bytes) -> tuple[pl.DataFrame, dict]:
-        """Process all modules and extract data with log metadata."""
+    def _process_modules(self, content: bytes) -> tuple[pl.DataFrame, dict, dict]:
+        """Process all modules and extract data with log metadata and technique parameters."""
         modules = content.split(b"MODULE")[1:]
         data_df = None
         log_metadata = {}
         technique = ""
+        technique_parameters = {}
 
         if self.debug:
             print(f"Found {len(modules)} modules")
@@ -94,6 +106,7 @@ class MPRReader:
 
             if name == "VMP Set":
                 technique = self._extract_technique(module_data)
+                technique_parameters = self._extract_technique_parameters(module_data, technique)
             elif name == "VMP data":
                 data_df = self._process_data_module(module_data, version, technique)
             elif name == "VMP LOG":
@@ -102,15 +115,18 @@ class MPRReader:
         if data_df is None:
             raise ValueError("No data module found in MPR file")
 
-        return data_df, log_metadata
+        return data_df, log_metadata, technique_parameters
 
     def _process_log_module(self, module_data: bytes) -> dict:
         """
         Process BioLogic log module to extract acquisition timestamp and metadata.
         
         Log module contains:
-        - OLE timestamp (0x0249) - Microsoft OLE date format
+        - OLE timestamp (offset 0x0249) - Microsoft OLE date format
         - Device info, software versions, channel data
+        
+        Uses YADG-compatible approach with proper module header validation
+        to ensure correct offset calculations for timestamp extraction.
         """
         log_metadata = {}
         
@@ -134,12 +150,20 @@ class MPRReader:
                     log_metadata[field_name] = value
                     
                     if self.debug and field_name == "ole_timestamp":
-                        print(f"Extracted OLE timestamp: {value}")
+                        print(f"Extracted OLE timestamp at 0x{offset:04x}: {value}")
                         
             except Exception as e:
                 if self.debug:
                     print(f"Could not extract {field_name} at offset 0x{offset:04x}: {e}")
                 continue
+        
+        # Validate OLE timestamp
+        ole_timestamp = log_metadata.get('ole_timestamp')
+        if self.debug:
+            if ole_timestamp and 1000 < ole_timestamp < 100000:
+                print(f"Valid OLE timestamp: {ole_timestamp}")
+            else:
+                print(f"Invalid OLE timestamp: {ole_timestamp}")
         
         return log_metadata
     
@@ -151,7 +175,10 @@ class MPRReader:
             return np.dtype(dtype_str).itemsize
     
     def _read_pascal_string(self, data: bytes, offset: int) -> str:
-        """Read a Pascal string (length-prefixed) from binary data."""
+        """Read a Pascal string (length-prefixed) from binary data.
+        
+        Uses windows-1252 encoding for YADG compatibility.
+        """
         try:
             if offset >= len(data):
                 return ""
@@ -161,7 +188,7 @@ class MPRReader:
                 return ""
             
             string_bytes = data[offset + 1:offset + 1 + length]
-            return string_bytes.decode('ascii', errors='ignore').strip()
+            return string_bytes.decode('windows-1252', errors='ignore').strip()
         except Exception:
             return ""
 
@@ -243,7 +270,7 @@ class MPRReader:
         return df
 
     def _read_module_header(self, module: bytes) -> Optional[Dict]:
-        """Read module header using YADG logic."""
+        """Read module header using YADG logic with proper format selection."""
         for dtype in module_header_dtypes:
             try:
                 if len(module) < dtype.itemsize:
@@ -259,7 +286,13 @@ class MPRReader:
                     else:
                         header[field_name] = field_value
 
-                return header
+                # YADG's validation logic: check if length makes sense
+                length = header.get("length", header.get("max_length", 0))
+                expected_size = dtype.itemsize + length
+                
+                if len(module) >= expected_size:
+                    return header
+                    
             except (ValueError, IndexError, struct.error):
                 continue
 
@@ -268,27 +301,143 @@ class MPRReader:
         return None
 
     def _get_header_size(self, module: bytes) -> int:
-        """Get header size for module data offset."""
+        """Get header size for module data offset using YADG validation.
+        
+        Uses YADG's approach: try each header dtype and validate that
+        module_length == header_size + data_length. This ensures correct
+        offset calculations for subsequent data reading.
+        
+        Critical for timestamp extraction - incorrect header sizes cause
+        corrupted OLE timestamp values.
+        """
+        for mhd in module_header_dtypes:
+            try:
+                if len(module) >= mhd.itemsize:
+                    # Read header and validate length matches
+                    header_bytes = module[:mhd.itemsize]
+                    header = np.frombuffer(header_bytes, dtype=mhd, count=1)[0]
+                    
+                    # Convert to dict for easier access
+                    header_dict = {}
+                    for field_name in mhd.names:
+                        value = header[field_name]
+                        # Decode bytes fields
+                        if isinstance(value, bytes):
+                            header_dict[field_name] = value.decode('windows-1252', errors='ignore').strip()
+                        else:
+                            header_dict[field_name] = value
+                    
+                    # Validate: total module length should match header + data length
+                    expected_length = mhd.itemsize + header_dict["length"]
+                    if len(module) == expected_length:
+                        return mhd.itemsize
+            except (UnicodeDecodeError, ValueError, KeyError):
+                continue
+        
+        # Fallback to first matching size if validation fails
         for dtype in module_header_dtypes:
             if len(module) >= dtype.itemsize:
                 return dtype.itemsize
         return 0
 
     def _extract_technique(self, module_data: bytes) -> str:
-        """Extract technique name from settings module - basic implementation."""
+        """Extract technique name from settings module using YADG mapping."""
         if len(module_data) > 0:
             technique_id = module_data[0]
-            # Basic technique mapping - will be enhanced with parameter extraction
-            technique_map = {
-                0x04: "GCPL",
-                0x0B: "OCV", 
-                0x1D: "PEIS",
-                0x1E: "GEIS",
-                0x18: "CA",
-                0x19: "CP"
-            }
-            return technique_map.get(technique_id, f"Unknown_{technique_id:02x}")
+            if self.debug:
+                print(f"Technique ID from settings: 0x{technique_id:02x}")
+            
+            # Use YADG technique mapping
+            if technique_id in technique_params_dtypes:
+                technique_name, _ = technique_params_dtypes[technique_id]
+                if self.debug:
+                    print(f"Identified technique: {technique_name}")
+                return technique_name
+            else:
+                unknown_name = f"Unknown_{technique_id:02x}"
+                if self.debug:
+                    print(f"Unknown technique ID: 0x{technique_id:02x}")
+                return unknown_name
         return "Unknown"
+
+    def _extract_technique_parameters(self, module_data: bytes, technique: str) -> dict:
+        """
+        Extract technique parameters from settings module using YADG logic.
+        
+        Based on YADG's approach for parameter sequence extraction.
+        Returns structured parameter data for technique interpretation.
+        """
+        if len(module_data) == 0:
+            return {}
+        
+        technique_id = module_data[0]
+        if technique_id not in technique_params_dtypes:
+            if self.debug:
+                print(f"No parameter structure for technique 0x{technique_id:02x}")
+            return {}
+        
+        technique_name, params_dtypes_list = technique_params_dtypes[technique_id]
+        
+        if self.debug:
+            print(f"Extracting parameters for {technique_name} (0x{technique_id:02x})")
+        
+        # Try multiple possible parameter offsets (from YADG mpr.py)
+        offsets = [0x0572, 0x1845, 0x1846, 0x1847]
+        
+        for offset in offsets:
+            if offset + 4 > len(module_data):
+                continue
+                
+            try:
+                # Get number of parameter sequences
+                n_params = np.frombuffer(module_data, offset=offset + 0x0002, dtype="<u2", count=1)[0]
+                
+                if self.debug:
+                    print(f"Trying offset 0x{offset:04x}, found {n_params} parameter sequences")
+                
+                # Try each dtype structure
+                for params_dtype, version_info in params_dtypes_list:
+                    if len(params_dtype) == n_params:
+                        if self.debug:
+                            print(f"Using parameter structure with {len(params_dtype)} parameters")
+                        
+                        # Get number of sequences
+                        ns = np.frombuffer(module_data, offset=offset, dtype="<u2", count=1)[0]
+                        
+                        if offset + 0x0004 + ns * params_dtype.itemsize > len(module_data):
+                            continue
+                        
+                        # Extract parameter sequences
+                        rawparams = np.frombuffer(
+                            module_data, 
+                            offset=offset + 0x0004, 
+                            dtype=params_dtype, 
+                            count=ns
+                        )
+                        
+                        # Convert to parameter dictionary
+                        params = {}
+                        for field_name in params_dtype.names:
+                            params[field_name] = [param[field_name] for param in rawparams]
+                        
+                        params['_ns'] = ns  # Store number of sequences
+                        params['_technique_id'] = technique_id
+                        params['_technique_name'] = technique_name
+                        
+                        if self.debug:
+                            print(f"Successfully extracted {ns} parameter sequences for {technique_name}")
+                            print(f"Parameter fields: {list(params_dtype.names)}")
+                        
+                        return params
+                        
+            except Exception as e:
+                if self.debug:
+                    print(f"Failed to extract parameters at offset 0x{offset:04x}: {e}")
+                continue
+        
+        if self.debug:
+            print(f"No valid parameter structure found for {technique_name}")
+        return {}
 
     def _process_data_module(self, module_data: bytes, version: int, technique: str) -> pl.DataFrame:
         """Process data module and extract measurement data."""
@@ -296,71 +445,132 @@ class MPRReader:
             if len(module_data) < 5:
                 raise ValueError("Data module too small")
 
-            # Read data header
-            n_datapoints = int.from_bytes(module_data[0:4], byteorder='little')
-            n_columns = module_data[4]
-            
-            if self.debug:
-                print(f"Data module: {n_datapoints} points, {n_columns} columns")
+            # Read data header using YADG approach
+            n_datapoints = np.frombuffer(module_data, offset=0x0000, dtype="<u4", count=1)[0]
+            n_columns = np.frombuffer(module_data, offset=0x0004, dtype="|u1", count=1)[0]
 
-            # Read column IDs
-            column_ids = list(module_data[5:5+n_columns])
-            
-            # Determine data start offset based on version
-            data_offsets = [0x195, 0x196, 0x3ef]  # Common offsets
-            data_offset = data_offsets[0]  # Default
-            
+            if self.debug:
+                print(f"Data points: {n_datapoints}, Columns: {n_columns}")
+
+            if n_datapoints == 0 or n_columns == 0:
+                raise ValueError("No data points or columns")
+
+            # Version-specific column ID parsing (following YADG logic)
+            if version in {10, 11}:
+                column_ids = np.frombuffer(module_data, offset=0x005, dtype=">u2", count=n_columns)
+                data_offset = 0x3EF
+            elif version in {2, 3}:
+                column_ids = np.frombuffer(module_data, offset=0x005, dtype="<u2", count=n_columns)
+                data_offset = 0x195 if version == 2 else 0x196
+            else:
+                # Default approach
+                column_ids = np.frombuffer(module_data, offset=0x005, dtype="<u2", count=n_columns)
+                data_offset = 0x195
+
+            if self.debug:
+                print(f"Column IDs: {list(column_ids)}")
+                print(f"Using data offset: 0x{data_offset:X}")
+
             if data_offset >= len(module_data):
                 raise ValueError("Data offset beyond module size")
             
-            # Parse column information
-            column_info = []
-            for col_id in column_ids:
-                if col_id in data_columns:
-                    dtype_str, name, unit = data_columns[col_id]
-                    # Handle technique-dependent column names
-                    if col_id in technique_dependent_ids:
-                        name = technique_dependent_ids[col_id].get(technique, name)
-                    column_info.append((dtype_str, name, unit))
-                else:
-                    # Handle flag columns or unknown columns
-                    column_info.append(('<f4', f'unknown_{col_id}', None))
+            # Parse columns using YADG logic
+            names, dtypes, units, flags = self._parse_columns(list(column_ids), technique)
             
-            # Calculate row size and extract data
-            row_size = sum(np.dtype(dtype).itemsize for dtype, _, _ in column_info)
-            data_section = module_data[data_offset:]
-            
-            if len(data_section) < n_datapoints * row_size:
+            if self.debug:
+                print(f"Parsed column names: {names}")
+                print(f"Parsed dtypes: {dtypes}")
+
+            # Create numpy dtype for structured array
+            data_dtype = np.dtype(list(zip(names, dtypes)))
+
+            # Parse binary data using YADG approach
+            try:
+                values = np.frombuffer(module_data, offset=data_offset, dtype=data_dtype, count=n_datapoints)
+
+                # Convert to dictionary
+                data_dict = {}
+                for name in names:
+                    data_dict[name] = values[name]
+
+                # Create Polars DataFrame
+                df = pl.DataFrame(data_dict)
+
                 if self.debug:
-                    print(f"Warning: Expected {n_datapoints * row_size} bytes, got {len(data_section)}")
-                n_datapoints = len(data_section) // row_size
-            
-            # Extract data arrays
-            data_dict = {}
-            current_offset = 0
-            
-            for dtype_str, name, unit in column_info:
-                dtype = np.dtype(dtype_str)
-                
-                # Extract column data
-                column_data = []
-                for i in range(n_datapoints):
-                    row_start = i * row_size + current_offset
-                    if row_start + dtype.itemsize <= len(data_section):
-                        value = np.frombuffer(data_section[row_start:row_start + dtype.itemsize], 
-                                            dtype=dtype, count=1)[0]
-                        column_data.append(value)
-                    else:
-                        column_data.append(np.nan)
-                
-                data_dict[name] = column_data
-                current_offset += dtype.itemsize
-            
-            # Create Polars DataFrame
-            return pl.DataFrame(data_dict)
+                    print(f"Created DataFrame: {df.shape}")
+
+                return df
+
+            except Exception as e:
+                raise ValueError(f"Failed to parse data: {e}")
             
         except Exception as e:
             if self.debug:
                 print(f"Error processing data module: {e}")
             # Return minimal DataFrame
             return pl.DataFrame({"time": [0], "current": [0], "potential": [0]})
+
+    def _parse_columns(self, column_ids: List[int], technique: str = "") -> Tuple[List, List, List, Dict]:
+        """Parse column IDs using YADG logic."""
+        names = []
+        dtypes = []
+        units = []
+        flags = {}
+
+        for col_id in column_ids:
+            idd = col_id % 256
+
+            # Check flag columns first
+            if col_id in flag_columns:
+                bitmask, name = flag_columns[col_id]
+                flags[name] = bitmask
+                if "flags" not in names:
+                    names.append("flags")
+                    dtypes.append("|u1")
+                    units.append(None)
+
+            # Check regular data columns
+            elif idd in data_columns:
+                dtype, name, unit = data_columns[idd]
+
+                # Handle technique-dependent naming
+                if idd in technique_dependent_ids:
+                    name = technique_dependent_ids[idd].get(technique, name)
+
+                # Handle duplicates
+                if name in names:
+                    name = f"duplicate_{name}"
+
+                names.append(name)
+                dtypes.append(dtype)
+                units.append(unit)
+
+            # Check conflict columns
+            elif idd in conflict_columns:
+                resolved = False
+                for cid, cvals in conflict_columns[idd].items():
+                    if cid in column_ids:
+                        dtype, name, unit = cvals
+                        names.append(name)
+                        dtypes.append(dtype)
+                        units.append(unit)
+                        resolved = True
+                        break
+
+                if not resolved:
+                    # Fallback
+                    name = f"unknown_{len(names)}"
+                    names.append(name)
+                    dtypes.append("<f4")
+                    units.append(None)
+
+            else:
+                # Unknown columns
+                name = f"unknown_{len(names)}"
+                if self.debug:
+                    print(f"Unknown column ID {col_id} assigned to '{name}'")
+                names.append(name)
+                dtypes.append("<f4")
+                units.append(None)
+
+        return names, dtypes, units, flags
