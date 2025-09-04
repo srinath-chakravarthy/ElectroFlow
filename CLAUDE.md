@@ -218,25 +218,32 @@ python -m src_clean.cli.main group-voltage-correlation 16 --correlation-type pea
 - **Test Infrastructure**: Added comprehensive Explorer backend testing (tests/test_explorer_backend.py)
 - **Database Analysis**: Identified empty database issue (0 cells, 0 files, 0 segments) despite existing file directories
 
-### 🎯 **NEXT SESSION PRIORITIES: Platform Enhancement & Research Tools**
+### 🎯 **NEXT SESSION PRIORITIES: BioLogic Technique Mapping Implementation**
 
-**Three Focus Areas**: (1) Enhanced BioLogic parser with universal schema extension, (2) Jupyter notebook interface for UI functionality replication, (3) Advanced Jupyter data functionality for research workflows.
+**Primary Focus**: BioLogic technique sequence-to-segment conversion system for database compatibility.
 
-**Full Roadmap**: See `docs/DEVELOPMENT_ROADMAP.md` for detailed implementation plans and current status baselines.
-1. **Backend API Method** - Add `get_segment_data_for_perspective()` to `src_clean/backend/api.py`
-2. **LazyDataService Integration** - Add `get_segment_raw_data()` method
-3. **Analytics Integration** - Metadata and fit curve addition
-4. **Explorer UI Click Handling** - Add click detection to existing plots
-5. **Perspective Modal** - Arrow format display integration
-6. **Testing and Polish** - Error cases and performance validation
+**Current Session Completed**:
+- ✅ Universal schema enhancement with 9 electrode-specific columns
+- ✅ BioLogic OLE timestamp extraction and absolute timestamp calculation  
+- ✅ Architecture design for technique mapping implementation
 
-**Expected Outcome:** Point-and-click segment inspection in Explorer Tab opening Perspective modal with raw data + analytical metadata.
+**Phase 1 Implementation Tasks**:
+1. **File Restructuring**: Extract MPRReader to separate module, copy biologic_techniques.py from YADG
+2. **Parameter Extraction**: Integrate YADG technique parameter parsing logic
+3. **Technique Interpretation**: Build sequence-to-segment conversion functions
+4. **System Integration**: Database compatibility and registry system validation
+
+**Technical Challenge**: Convert BioLogic composite techniques (GCPL→charge/rest cycles, GEIS→galvanostatic/EIS sequences) into fundamental technique segments (1-5) compatible with existing registry-driven analysis system.
+
+**Documentation**: See `docs/BIOLOGIC_TECHNIQUE_MAPPING_ARCHITECTURE.md` for complete implementation plan.
+**Previous Roadmap Completed**: Universal schema enhancement and timestamp extraction completed. Now focusing on technique mapping as primary development track.
 
 ### 📋 **Current System State**
-- **Branch**: prod (clean working tree)
-- **Database**: Empty but file directories intact (`data_clean/cells/test/`, `Test cell/`)
-- **Backend Testing**: 13/14 tests passing - backend validated
-- **UI Status**: Functional but no cells visible due to empty database
+- **Branch**: feature/test-isolation-config (2 commits ahead)
+- **Universal Schema**: Enhanced to v2.1.0 with 9 electrode-specific columns
+- **BioLogic Parser**: Timestamp extraction implemented, technique mapping in progress
+- **Architecture**: Clean separation designed for technique interpretation layer
+- **Documentation**: Complete technical specifications for next phase implementation
 
 ---
 
