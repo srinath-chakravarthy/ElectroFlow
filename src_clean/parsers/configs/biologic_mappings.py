@@ -196,48 +196,68 @@ BIOLOGIC_TO_UNIVERSAL_MAPPING = {
     # Core electrochemical measurements
     "time": "time_s",
     "I": "current_a",                    # Convert mA → A with factor
-    "(Q-Qo)": "capacity_ah",            # Convert C → Ah with factor
-    "dQ": "capacity_delta_ah",          # Convert C → Ah with factor  
-    "|Energy|": "energy_wh",            # Energy measurements
     "Temperature": "temperature_c",      # Temperature monitoring
-    "cycle number": "battery_cycle",     # Cycle tracking
     
-    # NEW COLUMN 1: Working electrode voltage (vs reference)
+    # Working electrode voltage (vs reference)
     "Ewe": "working_electrode_potential_v",
     
-    # Counter electrode voltage (already supported)
+    # Counter electrode voltage
     "Ece": "ce_potential_v",
     
     # Calculate cell voltage: potential_v = Ewe - Ece (done in parser logic)
     
-    # Existing impedance columns (WE-CE cell impedance)
+    # Cell impedance columns (WE-CE combined)
     "Re(Z)": "impedance_real_ohm",
-    "Im(Z)": "impedance_imag_ohm",
+    "-Im(Z)": "impedance_imag_ohm",
     "|Z|": "impedance_mag_ohm",
     "Phase(Z)": "impedance_phase_deg",
     "freq": "frequency_hz",
     
-    # NEW COLUMNS 2-5: WE impedance (electrode-specific)
-    # Note: Need to identify if BioLogic provides separate WE impedance data
-    # For now, map same impedance data to both cell and WE columns
-    # "Re(Zwe)": "we_impedance_real_ohm",     # If available
-    # "Im(Zwe)": "we_impedance_imag_ohm",     # If available  
-    # "|Zwe|": "we_impedance_mag_ohm",        # If available
-    # "Phase(Zwe)": "we_impedance_phase_deg", # If available
+    # Working electrode impedance (electrode-specific)
+    "Re(Zwe-ce)": "we_impedance_real_ohm",      # WE impedance vs CE
+    "-Im(Zwe-ce)": "we_impedance_imag_ohm",     # WE impedance vs CE
+    "|Zwe-ce|": "we_impedance_mag_ohm",         # WE impedance vs CE
+    "Phase(Zwe-ce)": "we_impedance_phase_deg",  # WE impedance vs CE (calculated)
     
-    # NEW COLUMNS 6-9: CE impedance (electrode-specific)  
-    # Note: Need to identify if BioLogic provides separate CE impedance data
-    # "Re(Zce)": "ce_impedance_real_ohm",     # If available
-    # "Im(Zce)": "ce_impedance_imag_ohm",     # If available
-    # "|Zce|": "ce_impedance_mag_ohm",        # If available
-    # "Phase(Zce)": "ce_impedance_phase_deg", # If available
+    # Counter electrode impedance (electrode-specific)  
+    "Re(Zce)": "ce_impedance_real_ohm",
+    "-Im(Zce)": "ce_impedance_imag_ohm",
+    "|Zce|": "ce_impedance_mag_ohm",
+    "Phase(Zce)": "ce_impedance_phase_deg",
 }
 
 # Unit conversion factors for BioLogic data
 BIOLOGIC_UNIT_CONVERSIONS = {
     "I": 1e-3,              # mA → A
-    "(Q-Qo)": 1/3600,       # C → Ah  
-    "dQ": 1/3600,           # C → Ah
+}
+
+# =============================================================================
+# BTECH TO FTECH MAPPING - BioLogic Technique to Fundamental Technique
+# =============================================================================
+
+# BioLogic Technique (Btech) to Fundamental Technique (Ftech) Mapping
+BTECH_TO_FTECH_BASE_MAPPING = {
+    # Simple 1:1 mappings
+    "OCV": "rest",      # Open Circuit Voltage
+    "CV": "cv",         # Cyclic Voltammetry  
+    "PEIS": "eis",      # Potentio EIS
+    "GEIS": "eis",      # Galvano EIS
+    "WAIT": "rest",     # Wait = Rest
+    "LSV": "cv",        # Linear Sweep = CV variant
+    
+    # Potentiostatic vs Galvanostatic clarification
+    "CA": "cp",         # Chronoamperometry = Potentiostatic (voltage pulse)
+    "CP": "cc",         # Chronopotentiometry = Galvanostatic  
+    "coV": "cp",        # Constant Voltage = Potentiostatic
+    "coC": "cc",        # Constant Current = Galvanostatic
+    
+    # Complex techniques - use primary Ftech (Ns will handle sequences)
+    "GCPL": "cc",       # Galvanostatic Cycling (primary technique)
+    "CVA": "cv",        # Cyclic Voltammetry Advanced (primary)
+    "BCD": "cc",        # Battery Capacity Determination (primary)
+    "ZIR": "eis",       # EIS with IR compensation
+    "MP": "unknown",    # Modular Potentio (user-configurable)
+    "MB": "unknown",    # Modulo Bat (too complex)
 }
 
 # External device data types

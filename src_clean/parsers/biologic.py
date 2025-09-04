@@ -5,7 +5,7 @@ Integrates MPRReader with electrochemical data analysis platform.
 Handles technique interpretation and universal schema conversion.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any
 import hashlib
@@ -133,11 +133,31 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
                 
                 # BioLogic enhancement: populate electrode-specific columns from available data
                 universal_df = self._enhance_biologic_electrode_columns(universal_df)
+                
+                # Add technique information to universal schema
+                if hasattr(self.mpr_reader, 'last_technique_parameters'):
+                    ftech_name = self.mpr_reader.last_technique_parameters.get('_ftech_name', 'unknown')
+                    technique_id = self._get_technique_id_from_ftech(ftech_name)
+                    
+                    universal_df = universal_df.with_columns([
+                        pl.lit(technique_id).alias('technique_id')  # Use existing universal column
+                    ])
+                    
+                    # Generate proper segment numbers based on Ns changes
+                    universal_df = self._generate_segment_numbers(universal_df)
 
             # Extract metadata (needed for timestamps)
             metadata = self.parse_metadata(file_path)
             
-            # Note: Absolute timestamps already added in MPRReader if available
+            # Add absolute timestamps using extracted OLE timestamp from MPRReader
+            if hasattr(self.mpr_reader, 'last_log_metadata') and self.mpr_reader.last_log_metadata:
+                ole_timestamp = self.mpr_reader.last_log_metadata.get('ole_timestamp')
+                if ole_timestamp and ole_timestamp > 1000 and ole_timestamp < 100000:  # Reasonable OLE timestamp range
+                    try:
+                        acquisition_start = self._convert_ole_timestamp(ole_timestamp)
+                        universal_df = self._add_absolute_timestamps(universal_df, acquisition_start)
+                    except Exception as e:
+                        pass  # Continue without timestamps if conversion fails
 
             if INTEGRATED_MODE:
                 return DataFile(
@@ -231,33 +251,49 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
         """
         Enhance BioLogic data with electrode-specific impedance columns.
         
-        BioLogic may provide electrode-specific impedance data. For now:
-        - Map cell impedance to WE impedance columns (same data)
-        - CE impedance columns remain null (until separate CE data identified)
+        With updated mappings, electrode-specific impedance data is directly mapped
+        from BioLogic columns (Zwe-ce, Zce) to universal schema. No additional 
+        processing needed - all electrode impedance handled in main mapping.
         """
-        expressions = []
-        
-        # Columns 2-5: Map cell impedance to WE impedance (same data for now)
-        we_impedance_mappings = {
-            'impedance_real_ohm': 'we_impedance_real_ohm',
-            'impedance_imag_ohm': 'we_impedance_imag_ohm',
-            'impedance_mag_ohm': 'we_impedance_mag_ohm',
-            'impedance_phase_deg': 'we_impedance_phase_deg'
-        }
-        
-        for source_col, target_col in we_impedance_mappings.items():
-            if source_col in df.columns:
-                expressions.append(
-                    pl.col(source_col).alias(target_col)
-                )
-        
-        # Apply enhancements
-        if expressions:
-            df = df.with_columns(expressions)
-        
-        # CE impedance columns remain null (already handled by add_missing_universal_columns)
-        # TODO: Investigate if BioLogic provides separate CE impedance data
+        # No additional processing needed - electrode impedance columns 
+        # now directly mapped in BIOLOGIC_TO_UNIVERSAL_MAPPING
         return df
+
+    def _get_technique_id_from_ftech(self, ftech_name: str) -> int:
+        """Map fundamental technique to existing technique_id system."""
+        ftech_to_id_mapping = {
+            'rest': 23,    # OCV/Rest ActionID from VersaStudio
+            'cv': 1,       # CV ActionID  
+            'cc': 8,       # Galvanostatic ActionID
+            'cp': 7,       # Potentiostatic ActionID
+            'eis': 20,     # EIS ActionID
+            'pulse': 9,    # Pulse ActionID
+            'unknown': 0   # Unknown
+        }
+        return ftech_to_id_mapping.get(ftech_name, 0)
+
+    def _generate_segment_numbers(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Generate proper segment numbers based on Ftech changes.
+        
+        Each unique Ns value represents a different Ftech step within the Btech.
+        Map each Ns to sequential segment numbers for universal schema.
+        """
+        if 'Ns' not in df.columns:
+            # No Ns data - single segment
+            return df.with_columns(pl.lit(1).alias('segment_number'))
+        
+        # Create mapping DataFrame with Polars-optimized operations
+        unique_ns_df = (
+            df
+            .select('Ns')
+            .unique()
+            .sort('Ns')
+            .with_row_index(name='segment_number', offset=1)  # Sequential numbering starting from 1
+        )
+        
+        # Join back to original DataFrame using Polars join (vectorized)
+        return df.join(unique_ns_df, on='Ns', how='left')
 
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA-256 hash of file."""
@@ -266,6 +302,71 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             for chunk in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(chunk)
         return sha256_hash.hexdigest()
+
+    def _convert_ole_timestamp(self, ole_float: float) -> datetime:
+        """
+        Convert Microsoft OLE timestamp to Python datetime.
+        
+        OLE timestamp format:
+        - Float64 representing days since 1900-01-01 00:00:00
+        - Integer part = days, fractional part = time of day
+        
+        Args:
+            ole_float: OLE timestamp value
+            
+        Returns:
+            Python datetime object
+        """
+        try:
+            # OLE epoch: January 1, 1900 (but treat as January 2, 1900 due to Excel bug)
+            # This matches the YADG implementation
+            ole_epoch = datetime(1899, 12, 30)  # Adjusted for Excel/OLE bug
+            
+            # Extract days and fractional day
+            days = int(ole_float)
+            fraction = ole_float - days
+            
+            # Calculate total seconds from fractional day
+            seconds_in_day = fraction * 24 * 60 * 60
+            
+            # Create datetime
+            acquisition_datetime = ole_epoch + timedelta(days=days, seconds=seconds_in_day)
+                
+            return acquisition_datetime
+            
+        except Exception as e:
+            # Return epoch time as fallback
+            return datetime(1970, 1, 1)
+
+    def _add_absolute_timestamps(self, df: pl.DataFrame, acquisition_start: datetime) -> pl.DataFrame:
+        """
+        Add absolute timestamp column to DataFrame.
+        
+        Calculates: timestamp = acquisition_start + time_s for each data point
+        
+        Args:
+            df: DataFrame with time_s column
+            acquisition_start: Experiment start datetime
+            
+        Returns:
+            DataFrame with added timestamp column
+        """
+        if 'time_s' not in df.columns:
+            return df
+        
+        try:
+            # Convert acquisition_start to Polars datetime literal
+            start_lit = pl.lit(acquisition_start)
+            
+            # Calculate absolute timestamps: acquisition_start + time_s
+            df = df.with_columns([
+                (start_lit + pl.duration(seconds=pl.col('time_s'))).alias('timestamp')
+            ])
+                
+        except Exception as e:
+            pass
+        
+        return df
 
     def get_parser_info(self) -> Dict[str, Any]:
         """Get parser information."""

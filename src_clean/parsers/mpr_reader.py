@@ -106,7 +106,12 @@ class MPRReader:
 
             if name == "VMP Set":
                 technique = self._extract_technique(module_data)
+                ftech = self._map_btech_to_ftech(technique)
                 technique_parameters = self._extract_technique_parameters(module_data, technique)
+                
+                # Store both Btech and Ftech for later use
+                technique_parameters['_btech_name'] = technique  # BioLogic technique
+                technique_parameters['_ftech_name'] = ftech      # Fundamental technique
             elif name == "VMP data":
                 data_df = self._process_data_module(module_data, version, technique)
             elif name == "VMP LOG":
@@ -359,6 +364,22 @@ class MPRReader:
                     print(f"Unknown technique ID: 0x{technique_id:02x}")
                 return unknown_name
         return "Unknown"
+
+    def _map_btech_to_ftech(self, btech_name: str, ns_value: int = None) -> str:
+        """
+        Map BioLogic technique (Btech) to fundamental technique (Ftech).
+        
+        Args:
+            btech_name: BioLogic technique name (e.g., "GCPL", "CV")
+            ns_value: Sequence number within Btech (for future complex mapping)
+            
+        Returns:
+            Fundamental technique name (e.g., "cc", "rest", "cv")
+        """
+        from .configs.biologic_mappings import BTECH_TO_FTECH_BASE_MAPPING
+        
+        # For now, use base mapping (Ns-specific mapping can be added later)
+        return BTECH_TO_FTECH_BASE_MAPPING.get(btech_name, "unknown")
 
     def _extract_technique_parameters(self, module_data: bytes, technique: str) -> dict:
         """
