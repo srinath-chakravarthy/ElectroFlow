@@ -219,24 +219,26 @@ python -m src_clean.cli.main group-voltage-correlation 16 --correlation-type pea
 - **YADG Techniques Integration**: Copied and adapted `biologic_techniques.py` for parameter parsing support
 - **Architecture Validation**: BiologicParser imports and instantiates successfully
 
-### ⚠️ **CURRENT ISSUE: Column Mapping Logic Not Working**
+### 💡 **STRATEGIC DECISION: Combined Phase 2 Implementation**
 
-**Problem**: The restructured parser is not quite working yet - column mapping logic is not functioning like before.
+**Decision**: Combine column mapping fix with Phase 2 technique mapping for maximum efficiency.
 
-### 🎯 **NEXT SESSION PRIORITIES: Column Mapping Fix + Phase 2**
+**Rationale**: Avoid duplicate work - technique mapping will require column processing changes anyway, so implement both together for cleaner development progression.
 
-**Immediate Focus**: Resolve column mapping logic to restore full parser functionality before continuing Phase 2.
+### 🎯 **NEXT SESSION PRIORITIES: Enhanced Phase 2 Implementation**
+
+**Expanded Scope**: Combined column mapping fix + technique parameter extraction for architectural coherence.
 
 **Status**: 
 - ✅ **Phase 1 Complete** - File restructuring with clean architectural separation achieved
-- ❌ **Column Mapping Broken** - Universal schema conversion not working correctly in new architecture
-- 🎯 **Next Priority** - Fix column mapping integration to restore full parser functionality
+- ⚠️ **Known Issue** - Column mapping produces `unknown_*` columns (will fix in Phase 2)
+- 🎯 **Next Priority** - Enhanced Phase 2 with comprehensive BioLogic data processing
 
-**Critical Tasks**:
-1. **Debug Column Mapping** - Fix `_map_to_universal_schema()` import issues in restructured architecture
-2. **Validate Integration** - Ensure `biologic_mappings.py` works with new MPRReader/BiologicParser structure
-3. **End-to-End Testing** - Test with actual MPR files to verify complete data pipeline
-4. **Phase 2 Preparation** - Once column mapping fixed, begin parameter extraction enhancement
+**Enhanced Phase 2 Tasks**:
+1. **Fix Column Mapping** - Resolve `unknown_*` columns → proper BioLogic names (`time`, `Ewe`, `I`)
+2. **Parameter Extraction** - Integrate YADG technique parameter parsing logic
+3. **Technique Identification** - Extract technique ID and parameter sequences from settings
+4. **Context Integration** - Design column mapping with technique parameter awareness
 
 **Technical Challenge**: Convert BioLogic composite techniques (GCPL→charge/rest cycles, GEIS→galvanostatic/EIS sequences) into fundamental technique segments (1-5) compatible with existing registry-driven analysis system.
 

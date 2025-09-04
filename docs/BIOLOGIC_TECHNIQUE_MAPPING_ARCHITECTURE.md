@@ -306,31 +306,32 @@ registry.get_analysis('impedance_analysis').get_compatible_segments()
 - Testable components with each layer independently unit testable
 - YADG integration preserved with proven parameter parsing logic available
 
-### **⚠️ CURRENT ISSUE: Column Mapping Logic**
-**Problem**: The new parser structure is not quite working yet - the column mapping logic is not functioning like before.
+### **💡 STRATEGIC DECISION: Combined Phase 2 Implementation**
+**Decision**: Combine column mapping fix with Phase 2 technique mapping for more efficient development.
 
-**Technical Details**:
-- BiologicParser successfully imports and instantiates 
-- MPRReader binary parsing logic is functional
-- **Missing**: Proper integration between raw binary data extraction and universal schema mapping
-- **Root Cause**: Column mapping dependencies may not be properly connected in the restructured architecture
+**Rationale**:
+- **Efficiency**: Avoid duplicate work - fixing column mapping now then changing again for technique mapping
+- **Architecture**: Technique mapping will require changes to column processing anyway
+- **Cohesion**: Column mapping can be designed with technique parameter context from the start
+- **Development Flow**: Cleaner progression from architectural separation to full implementation
 
-**Required Resolution**:
-- Investigate column mapping import issues in `_map_to_universal_schema()`
-- Ensure `biologic_mappings.py` configurations are correctly accessed
-- Validate end-to-end data flow: binary parsing → column mapping → universal schema
-- Test with actual MPR files to verify data extraction pipeline
+### **⚠️ KNOWN ISSUE: Column Mapping Logic** 
+**Current State**: MPRReader produces `unknown_*` columns instead of proper BioLogic names (`time`, `Ewe`, `I`)
 
-### **🎯 NEXT SESSION PRIORITY: Column Mapping Fix**
-**Immediate Focus**: Resolve column mapping logic to restore full parser functionality
+**Technical Root Cause**: Column ID mapping from YADG `biologic_mappings` not properly integrated in restructured architecture.
 
-**Critical Tasks**:
-1. Debug column mapping import issues in restructured BiologicParser
-2. Validate `biologic_mappings.py` integration with new architecture
-3. Test end-to-end MPR file parsing with real data
-4. Ensure universal schema conversion works correctly
+**Resolution Strategy**: Will be addressed comprehensively in Phase 2 alongside technique mapping implementation.
 
-**Expected Outcome**: Fully functional BioLogic parser ready for Phase 2 parameter extraction enhancement.
+### **🎯 ENHANCED PHASE 2: Column Mapping + Technique Mapping**
+**Expanded Scope**: Combined implementation for maximum efficiency and architectural coherence
+
+**Enhanced Phase 2 Tasks**:
+1. **Fix Column Mapping**: Resolve `unknown_*` columns → proper BioLogic column names
+2. **Parameter Extraction**: Integrate YADG technique parameter parsing logic  
+3. **Technique Identification**: Extract technique ID and parameter sequences from settings module
+4. **Column Context Integration**: Design column mapping with technique parameter awareness
+
+**Expected Outcome**: Fully functional BioLogic parser with proper column names AND technique parameter extraction ready for Phase 3 sequence-to-segment conversion.
 
 ### **🚀 Future Development Path**
 - Phase 2: Parameter extraction and technique identification
