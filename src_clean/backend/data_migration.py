@@ -287,3 +287,29 @@ class DataMigrationManager:
             logger.info(f"Copied data file: {data_path.name} -> {target_data_path}")
         
         return target_metadata_path, target_data_path
+
+    def copy_single_file_to_cell(self, cell_name: str, file_path: Path) -> Path:
+        """
+        Copy single file to the correct cell directory structure.
+        
+        Args:
+            cell_name: Target cell name
+            file_path: Source file path (e.g., .mpr)
+            
+        Returns:
+            Path to target file location
+        """
+        # Ensure cell directory structure exists
+        self.ensure_cell_directory_structure(cell_name)
+        
+        raw_dir = self.config.get_cell_raw_directory(cell_name)
+        
+        # Target path
+        target_file_path = raw_dir / file_path.name
+        
+        # Copy file if it doesn't already exist
+        if not target_file_path.exists():
+            shutil.copy2(file_path, target_file_path)
+            logger.info(f"Copied single file: {file_path.name} -> {target_file_path}")
+        
+        return target_file_path

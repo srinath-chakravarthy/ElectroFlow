@@ -60,6 +60,12 @@ class CoreMetricsCalculator:
             start_current = first_row.get('current_a')
             end_current = last_row.get('current_a')
             
+            # Electrode potential boundaries (BioLogic-specific)
+            start_we_potential = first_row.get('working_electrode_potential_v')
+            end_we_potential = last_row.get('working_electrode_potential_v')
+            start_ce_potential = first_row.get('ce_potential_v')
+            end_ce_potential = last_row.get('ce_potential_v')
+            
             # Final integrated values (computed by parser)
             final_capacity = float(last_row.get('capacity_ah') or 0)
             final_energy = float(last_row.get('energy_wh') or 0)
@@ -87,6 +93,10 @@ class CoreMetricsCalculator:
                 'end_potential_v': end_voltage,
                 'start_current_a': start_current,
                 'end_current_a': end_current,
+                'start_we_potential_v': start_we_potential,
+                'end_we_potential_v': end_we_potential,
+                'start_ce_potential_v': start_ce_potential,
+                'end_ce_potential_v': end_ce_potential,
                 
                 # Final integrated values
                 'capacity_ah': final_capacity,
@@ -122,6 +132,10 @@ class CoreMetricsCalculator:
             'end_potential_v': None,
             'start_current_a': None,
             'end_current_a': None,
+            'start_we_potential_v': None,
+            'end_we_potential_v': None,
+            'start_ce_potential_v': None,
+            'end_ce_potential_v': None,
             'capacity_ah': None,
             'energy_wh': None,
             'point_count': 0,

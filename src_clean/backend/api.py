@@ -25,7 +25,7 @@ from src_clean.core.exceptions import (
     ElectrochemicalAnalysisError, DatabaseError, ProcessingError,
     RecordNotFoundError
 )
-from src_clean.parsers import get_parser_factory, auto_parse_dual_files
+from src_clean.parsers import get_parser_factory, auto_parse_dual_files, auto_parse_file
 from src_clean.analysis import FundamentalAnalytics
 from src_clean.backend.lazy_data_service import get_lazy_data_service
 from src_clean.analysis.registry import get_analysis_registry
@@ -227,6 +227,73 @@ class BackendAPI:
     # FILE PROCESSING
     # =============================================================================
     
+    def process_single_file(self, file_path: Path, cell_name: str, **options) -> ProcessingResult:
+        """
+        Process single file (.mpr, .mps, .mpt) atomically.
+        
+        Args:
+            file_path: Path to single file (e.g., .mpr)
+            cell_name: Target cell name
+            **options: Processing options (temperature_c, etc.)
+            
+        Returns:
+            ProcessingResult with processed data
+        """
+        try:
+            # Get or create cell
+            cell = self.get_cell_by_name(cell_name)
+            if not cell:
+                create_result = self.create_cell(cell_name)
+                if not create_result.success:
+                    return create_result
+                cell = self.get_cell_by_name(cell_name)
+            
+            # Ensure file is in the correct cell directory structure
+            logger.info(f"Ensuring proper file storage for cell: {cell_name}")
+            standardized_file_path = self.migration_manager.copy_single_file_to_cell(
+                cell_name, file_path
+            )
+            
+            # Parse file using auto-detection
+            data_file = auto_parse_file(standardized_file_path)
+            
+            # Generate unique file ID
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_id = f"{cell_name}_{file_path.stem}_{timestamp}"
+            
+            # Store processed data atomically
+            self._store_single_data_file_atomic(data_file, file_id, cell, file_path, options)
+            
+            # Generate summary
+            summary = self._generate_processing_summary(data_file)
+            
+            # Automatically refresh template groups for this cell after successful file processing
+            try:
+                self.refresh_template_groups(cell_name)
+            except Exception as e:
+                logger.warning(f"Failed to refresh template groups for {cell_name}: {e}")
+            
+            return ProcessingResult(
+                success=True,
+                file_id=file_id,
+                message=summary,
+                data=data_file.universal_data  # Include data for immediate use
+            )
+            
+        except Exception as e:
+            error_info = format_error_for_user(e)
+            
+            # Clean up on failure - use the cleanup framework 
+            if 'file_id' in locals():
+                cleanup_result = self._cleanup_failed_processing(file_id, cell['id'])
+                if not cleanup_result.success:
+                    logger.warning(f"Cleanup after failed processing incomplete: {cleanup_result.error}")
+            
+            return ProcessingResult(
+                success=False,
+                error=error_info['message']
+            )
+
     def process_dual_files(self, metadata_path: Path, data_path: Path, 
                           cell_name: str, **options) -> ProcessingResult:
         """
@@ -369,6 +436,83 @@ class BackendAPI:
                 if parquet_path.exists():
                     parquet_path.unlink()
                 raise ProcessingError(f"Failed to store data file: {str(e)}")
+
+    def _store_single_data_file_atomic(self, data_file: DataFile, file_id: str, 
+                                     cell: Dict[str, Any], file_path: Path, 
+                                     options: Dict[str, Any]):
+        """Store single DataFile atomically with database transaction."""
+        # Use per-cell processed directory structure
+        cell_name = cell['name']
+        processed_dir = self.data_dir / "cells" / cell_name / "processed"
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Prepare file information  
+        parquet_path = processed_dir / f"{file_id}.parquet"
+        
+        # Convert metadata to JSON-serializable format
+        metadata_dict = {
+            'original_filename': data_file.metadata.original_filename,
+            'file_hash': data_file.metadata.file_hash,
+            'file_size_bytes': data_file.metadata.file_size_bytes,
+            'parser_version': data_file.metadata.parser_version,
+            'acquisition_start': data_file.metadata.acquisition_start.isoformat(),
+            'acquisition_duration_s': data_file.metadata.acquisition_duration_s,
+            'instrument_model': data_file.metadata.instrument_model,
+            'software_version': data_file.metadata.software_version,
+            'total_points': data_file.metadata.total_points,
+            'technique_count': data_file.metadata.technique_count,
+            'actionid_mappings': data_file.metadata.actionid_mappings,
+            'notes': data_file.metadata.notes,
+            'temperature_c': data_file.metadata.temperature_c,
+            'user_metadata': data_file.metadata.user_metadata or {}
+        }
+        
+        file_info = {
+            'file_id': file_id,
+            'original_filename': file_path.name,
+            'paired_filename': None,  # Single file - no paired file
+            'file_hash': self._calculate_file_hash(file_path),
+            'file_size_bytes': file_path.stat().st_size,
+            'instrument_model': data_file.metadata.instrument_model,
+            'acquisition_start': data_file.metadata.acquisition_start,
+            'acquisition_duration_s': data_file.metadata.acquisition_duration_s,
+            'temperature_c': options.get('temperature_c', 25.0),
+            'channel_id': options.get('channel_id', 1),
+            'parquet_file_path': str(parquet_path),
+            'metadata': metadata_dict
+        }
+        
+        # Generate segments
+        segments = self._generate_segments(data_file, file_id)
+        
+        # Atomic database transaction
+        with self.db.get_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                # Add file to database
+                self.db.add_file(cell['id'], file_info)
+                
+                # Add segments with cell information
+                self.db.add_segments(file_id, segments, cell['id'], cell['name'])
+                
+                # Update experiment accumulation for entire cell
+                self._update_cell_experiment_accumulation(cell['id'])
+                
+                # Write parquet file
+                data_file.universal_data.write_parquet(parquet_path)
+                
+                # Update processing status
+                self.db.update_file_status(file_id, 'completed')
+                
+                conn.commit()
+                logger.info(f"Successfully stored single data file: {file_id}")
+                
+            except Exception as e:
+                conn.rollback()
+                # Clean up parquet file on failure
+                if parquet_path.exists():
+                    parquet_path.unlink()
+                raise ProcessingError(f"Failed to store single data file: {str(e)}")
     
     def _generate_segments(self, data_file: DataFile, file_id: str) -> List[Dict[str, Any]]:
         """Generate segment information from DataFile with analytics."""
@@ -974,20 +1118,25 @@ class BackendAPI:
             metadata_filename = file_info['original_filename']
             data_filename = file_info['paired_filename']
             
-            metadata_path = raw_dir / metadata_filename
-            data_path = raw_dir / data_filename
+            primary_file_path = raw_dir / metadata_filename
             
-            if not metadata_path.exists():
+            if not primary_file_path.exists():
                 return ProcessingResult(
                     success=False,
-                    error=f"Raw metadata file not found: {metadata_path}"
+                    error=f"Raw file not found: {primary_file_path}"
                 )
             
-            if not data_path.exists():
-                return ProcessingResult(
-                    success=False,
-                    error=f"Raw data file not found: {data_path}"
-                )
+            # Check if this is a single-file (BioLogic) or dual-file (VersaStudio) processing
+            is_single_file = data_filename is None
+            
+            if not is_single_file:
+                # Dual file processing - check data file exists
+                data_path = raw_dir / data_filename
+                if not data_path.exists():
+                    return ProcessingResult(
+                        success=False,
+                        error=f"Raw data file not found: {data_path}"
+                    )
             
             # Cell info already retrieved above
             
@@ -1003,12 +1152,22 @@ class BackendAPI:
             
             # Reprocess using the same raw files
             logger.info(f"Reprocessing file {file_id} from raw files")
-            result = self.process_dual_files(
-                metadata_path=metadata_path,
-                data_path=data_path,
-                cell_name=cell['name'],
-                **options
-            )
+            
+            if is_single_file:
+                # Single file processing for BioLogic
+                result = self.process_single_file(
+                    file_path=primary_file_path,
+                    cell_name=cell['name'],
+                    **options
+                )
+            else:
+                # Dual file processing for VersaStudio
+                result = self.process_dual_files(
+                    metadata_path=primary_file_path,
+                    data_path=data_path,
+                    cell_name=cell['name'],
+                    **options
+                )
             
             if result.success:
                 logger.info(f"Successfully reprocessed file: {file_id}")

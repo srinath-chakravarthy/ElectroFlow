@@ -338,14 +338,28 @@ class FileUploader(param.Parameterized):
         self._refresh_file_list()
 
     def _check_upload_ready(self, event):
-        """Check if upload is ready with visual feedback."""
+        """Check if upload is ready with visual feedback - supports both single and dual file modes."""
         
         # FileDropper.value is a dictionary mapping filenames to content
         has_metadata = self.metadata_dropper.value is not None and len(self.metadata_dropper.value) > 0
         has_data = self.data_dropper.value is not None and len(self.data_dropper.value) > 0
         
+        # Determine file types if files are present
+        is_biologic_single = False
+        is_versastudio_dual = False
+        
+        if has_metadata:
+            metadata_filename = list(self.metadata_dropper.value.keys())[0]
+            if metadata_filename.lower().endswith('.mpr'):
+                is_biologic_single = True
+            elif metadata_filename.lower().endswith('.par'):
+                is_versastudio_dual = has_data  # VersaStudio requires both files
+        
         print(f"Check upload ready - Metadata: {has_metadata}, Data: {has_data}, Cell: {self.current_cell}")
-        self.upload_btn.disabled = not (has_metadata and has_data and self.current_cell)
+        print(f"BioLogic single: {is_biologic_single}, VersaStudio dual: {is_versastudio_dual}")
+        
+        # Enable upload if we have a valid configuration and a cell
+        self.upload_btn.disabled = not ((is_biologic_single or is_versastudio_dual) and self.current_cell)
         print(f"Button disabled: {self.upload_btn.disabled}")
 
     def _update_processing_status(self, message, status_type="info"):
@@ -372,9 +386,23 @@ class FileUploader(param.Parameterized):
             return
 
         # FileDropper stores files as dictionary mapping filenames to content
-        if not (self.metadata_dropper.value and self.data_dropper.value and 
-                len(self.metadata_dropper.value) > 0 and len(self.data_dropper.value) > 0):
-            self.status_message = "Both .par and .par.csv files required"
+        has_metadata = self.metadata_dropper.value and len(self.metadata_dropper.value) > 0
+        has_data = self.data_dropper.value and len(self.data_dropper.value) > 0
+        
+        if not has_metadata:
+            self.status_message = "Upload .mpr file OR both .par and .par.csv files"
+            return
+            
+        # Determine processing mode based on file type
+        metadata_filename = list(self.metadata_dropper.value.keys())[0]
+        is_biologic = metadata_filename.lower().endswith('.mpr')
+        is_versastudio = metadata_filename.lower().endswith('.par')
+        
+        if is_versastudio and not has_data:
+            self.status_message = "VersaStudio requires both .par and .par.csv files"
+            return
+        elif not (is_biologic or is_versastudio):
+            self.status_message = "Unsupported file type. Upload .mpr or .par/.csv files"
             return
 
         # Show processing state
@@ -391,29 +419,38 @@ class FileUploader(param.Parameterized):
                 metadata_filename = list(self.metadata_dropper.value.keys())[0]
                 metadata_content = self.metadata_dropper.value[metadata_filename]
                 
-                data_filename = list(self.data_dropper.value.keys())[0]
-                data_content = self.data_dropper.value[data_filename]
-
-                # Save uploaded files temporarily
-                metadata_path = temp_path / metadata_filename
+                # Save primary file temporarily
+                primary_file_path = temp_path / metadata_filename
                 if isinstance(metadata_content, str):
-                    metadata_path.write_text(metadata_content, encoding='utf-8')
+                    primary_file_path.write_text(metadata_content, encoding='utf-8')
                 else:
-                    metadata_path.write_bytes(metadata_content)
+                    primary_file_path.write_bytes(metadata_content)
 
-                data_path = temp_path / data_filename
-                if isinstance(data_content, str):
-                    data_path.write_text(data_content, encoding='utf-8')
+                # Process based on file type
+                if is_biologic:
+                    # Single file processing for BioLogic
+                    result = self.api.process_single_file(
+                        primary_file_path,
+                        self.current_cell,
+                        temperature_c=self.temperature_input.value
+                    )
                 else:
-                    data_path.write_bytes(data_content)
-
-                # Process files
-                result = self.api.process_dual_files(
-                    metadata_path,
-                    data_path,
-                    self.current_cell,
-                    temperature_c=self.temperature_input.value
-                )
+                    # Dual file processing for VersaStudio
+                    data_filename = list(self.data_dropper.value.keys())[0]
+                    data_content = self.data_dropper.value[data_filename]
+                    
+                    data_path = temp_path / data_filename
+                    if isinstance(data_content, str):
+                        data_path.write_text(data_content, encoding='utf-8')
+                    else:
+                        data_path.write_bytes(data_content)
+                    
+                    result = self.api.process_dual_files(
+                        primary_file_path,
+                        data_path,
+                        self.current_cell,
+                        temperature_c=self.temperature_input.value
+                    )
 
                 if result.success:
                     self.status_message = f"Successfully processed {result.file_id}"

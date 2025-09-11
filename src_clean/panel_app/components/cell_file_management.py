@@ -608,20 +608,17 @@ class CellFileManagement(param.Parameterized):
         if not self.selected_cell:
             return
             
-        # Create instrument selector
-        instrument_selector = pn.widgets.RadioButtonGroup(
-            name="Instrument",
-            options=["VersaStudio"],  # Only VersaStudio available for now
-            value="VersaStudio",
-            button_type="primary",
-            margin=(5, 5)
-        )
-        
-        # Add note about BioLogic coming soon
-        instrument_note = pn.pane.HTML(
-            "<small style='color: #666; font-style: italic;'>BioLogic support coming soon</small>",
-            margin=(0, 5)
-        )
+        # Supported instruments info
+        supported_instruments_info = pn.pane.HTML("""
+        <div style='background: #E3F2FD; border: 1px solid #BBDEFB; border-radius: 4px; 
+                    padding: 10px; margin: 5px 0;'>
+            <div style='font-weight: 500; color: #1976D2; margin-bottom: 5px;'>📁 Supported File Types:</div>
+            <div style='font-size: 13px; color: #424242;'>
+                • <strong>VersaStudio:</strong> Upload both .par and .par.csv files<br>
+                • <strong>BioLogic:</strong> Upload single .mpr file
+            </div>
+        </div>
+        """, margin=(5, 5))
         
         # Create channel input
         self.channel_input = pn.widgets.NumberInput(
@@ -653,10 +650,8 @@ class CellFileManagement(param.Parameterized):
         # Create modal content (no header needed - Modal provides title)
         modal_content = pn.Column(
             
-            # Instrument selection
-            pn.pane.HTML("<label style='font-weight: 500; color: #555; margin-bottom: 5px;'>Select Instrument:</label>"),
-            instrument_selector,
-            instrument_note,
+            # Supported file types info
+            supported_instruments_info,
             
             # File droppers
             pn.pane.HTML("""
@@ -668,12 +663,12 @@ class CellFileManagement(param.Parameterized):
             
             pn.Row(
                 pn.Column(
-                    pn.pane.HTML("<label style='font-size: 13px; color: #666; margin-bottom: 5px;'>Metadata File (.par):</label>"),
+                    pn.pane.HTML("<label style='font-size: 13px; color: #666; margin-bottom: 5px;'>Primary File (.mpr or .par):</label>"),
                     self.metadata_dropper,
                     width=300
                 ),
                 pn.Column(
-                    pn.pane.HTML("<label style='font-size: 13px; color: #666; margin-bottom: 5px;'>Data File (.par.csv):</label>"),
+                    pn.pane.HTML("<label style='font-size: 13px; color: #666; margin-bottom: 5px;'>Data File (.par.csv - VersaStudio only):</label>"),
                     self.data_dropper,
                     width=300
                 ),
@@ -781,11 +776,23 @@ class CellFileManagement(param.Parameterized):
         self.cell_notes.value = ""
         
     def _check_upload_ready(self, event):
-        """Check if file upload is ready."""
+        """Check if file upload is ready - supports both single and dual file modes."""
         has_metadata = self.metadata_dropper.value is not None and len(self.metadata_dropper.value) > 0
         has_data = self.data_dropper.value is not None and len(self.data_dropper.value) > 0
         
-        self.process_files_modal_btn.disabled = not (has_metadata and has_data)
+        # Determine file types if files are present
+        is_biologic_single = False
+        is_versastudio_dual = False
+        
+        if has_metadata:
+            metadata_filename = list(self.metadata_dropper.value.keys())[0]
+            if metadata_filename.lower().endswith('.mpr'):
+                is_biologic_single = True
+            elif metadata_filename.lower().endswith('.par'):
+                is_versastudio_dual = has_data  # VersaStudio requires both files
+        
+        # Enable upload if we have a valid configuration and a cell is selected
+        self.process_files_modal_btn.disabled = not ((is_biologic_single or is_versastudio_dual) and self.selected_cell)
         
     def _on_process_files(self, event):
         """Handle file processing from modal with progress tracking."""
@@ -795,9 +802,26 @@ class CellFileManagement(param.Parameterized):
             return
             
         # Check file uploads - FileDropper.value is dictionary
-        if not (self.metadata_dropper.value and self.data_dropper.value and 
-                len(self.metadata_dropper.value) > 0 and len(self.data_dropper.value) > 0):
-            self.modal_status_display.object = "<div style='color: #D32F2F; padding: 10px; background: #FFEBEE; border-radius: 4px;'>Please upload both metadata and data files</div>"
+        has_metadata = self.metadata_dropper.value and len(self.metadata_dropper.value) > 0
+        has_data = self.data_dropper.value and len(self.data_dropper.value) > 0
+        
+        if not has_metadata:
+            self.modal_status_display.object = "<div style='color: #D32F2F; padding: 10px; background: #FFEBEE; border-radius: 4px;'>Please upload at least a metadata file (.mpr or .par)</div>"
+            self.modal_status_display.visible = True
+            return
+            
+        # Determine file type and validate accordingly
+        metadata_filename = list(self.metadata_dropper.value.keys())[0]
+        is_biologic = metadata_filename.lower().endswith('.mpr')
+        is_versastudio = metadata_filename.lower().endswith('.par')
+        
+        if is_versastudio and not has_data:
+            self.modal_status_display.object = "<div style='color: #D32F2F; padding: 10px; background: #FFEBEE; border-radius: 4px;'>VersaStudio files require both .par and .par.csv files</div>"
+            self.modal_status_display.visible = True
+            return
+            
+        if not (is_biologic or is_versastudio):
+            self.modal_status_display.object = "<div style='color: #D32F2F; padding: 10px; background: #FFEBEE; border-radius: 4px;'>Unsupported file type. Upload .mpr or .par/.csv files</div>"
             self.modal_status_display.visible = True
             return
         
@@ -818,40 +842,45 @@ class CellFileManagement(param.Parameterized):
             with TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
                 
-                # Extract files from FileDropper dictionary
+                # Extract metadata file from FileDropper dictionary
                 metadata_filename = list(self.metadata_dropper.value.keys())[0]
                 metadata_content = self.metadata_dropper.value[metadata_filename]
                 
-                data_filename = list(self.data_dropper.value.keys())[0]
-                data_content = self.data_dropper.value[data_filename]
-                
-                # Save to temporary files
-                metadata_path = temp_path / metadata_filename
+                # Save metadata file to temporary path
+                primary_file_path = temp_path / metadata_filename
                 if isinstance(metadata_content, str):
-                    metadata_path.write_text(metadata_content, encoding='utf-8')
+                    primary_file_path.write_text(metadata_content, encoding='utf-8')
                 else:
-                    metadata_path.write_bytes(metadata_content)
-                    
-                data_path = temp_path / data_filename
-                if isinstance(data_content, str):
-                    data_path.write_text(data_content, encoding='utf-8')
-                else:
-                    data_path.write_bytes(data_content)
+                    primary_file_path.write_bytes(metadata_content)
                 
-                channel_id = self.channel_input.value
-                
-                if not metadata_path or not data_path:
-                    raise Exception("Missing file paths")
-                
-                # Stage 2: Process files with API
+                # Stage 2: Process files with API based on file type
                 self.modal_progress_bar.value = 50
                 self.modal_status_display.object = "<div style='color: #1976D2; padding: 10px; background: #E3F2FD; border-radius: 4px;'>⚡ Processing files...</div>"
                 
-                result = self.api.process_dual_files(
-                    metadata_path=metadata_path, 
-                    data_path=data_path, 
-                    cell_name=self.selected_cell, 
-                    channel_id=channel_id
+                # Process based on file type
+                if is_biologic:
+                    # Single file processing for BioLogic
+                    result = self.api.process_single_file(
+                        primary_file_path,
+                        self.selected_cell,
+                        temperature_c=self.temperature_input.value
+                    )
+                else:
+                    # Dual file processing for VersaStudio
+                    data_filename = list(self.data_dropper.value.keys())[0]
+                    data_content = self.data_dropper.value[data_filename]
+                    
+                    data_path = temp_path / data_filename
+                    if isinstance(data_content, str):
+                        data_path.write_text(data_content, encoding='utf-8')
+                    else:
+                        data_path.write_bytes(data_content)
+                    
+                    result = self.api.process_dual_files(
+                        primary_file_path, 
+                        data_path, 
+                        self.selected_cell, 
+                        temperature_c=self.temperature_input.value
                 )
             
             # Handle processing result

@@ -15,10 +15,9 @@ from .mpr_reader import MPRReader
 
 # Import from existing infrastructure
 try:
-    from ..base import SingleFileParser
-    from ..configs.universal_schema import add_missing_universal_columns
-    from ...core.data_models import DataFile, FileMetadata
-    from ...core.exceptions import DataParsingError, MetadataExtractionError
+    from .base import SingleFileParser
+    from ..core.data_models import DataFile, FileMetadata, add_missing_universal_columns
+    from ..core.exceptions import DataParsingError, MetadataExtractionError
 
     INTEGRATED_MODE = True
 except ImportError:
@@ -124,7 +123,10 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             # Parse raw binary data
             raw_df = self.mpr_reader.parse_mpr_file(file_path)
 
-            # Convert to universal schema
+            # Generate segment numbers from raw BioLogic Ns data BEFORE universal schema conversion
+            raw_df = self._add_segment_numbers_to_raw_data(raw_df)
+
+            # Convert to universal schema (segment_number will be included)
             universal_df = self._map_to_universal_schema(raw_df)
 
             # Add missing universal columns
@@ -142,9 +144,7 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
                     universal_df = universal_df.with_columns([
                         pl.lit(technique_id).alias('technique_id')  # Use existing universal column
                     ])
-                    
-                    # Generate proper segment numbers based on Ns changes
-                    universal_df = self._generate_segment_numbers(universal_df)
+                
 
             # Extract metadata (needed for timestamps)
             metadata = self.parse_metadata(file_path)
@@ -162,7 +162,8 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             if INTEGRATED_MODE:
                 return DataFile(
                     universal_data=universal_df,
-                    metadata=metadata
+                    metadata=metadata,
+                    processing_timestamp=datetime.now()
                 )
             else:
                 return {
@@ -293,28 +294,81 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
         }
         return ftech_to_id_mapping.get(ftech_name, 0)
 
+    def _add_segment_numbers_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Add segment numbers to raw BioLogic data based on Ns (sequence) changes.
+        
+        This processes the raw data BEFORE universal schema conversion.
+        BioLogic uses Ns column to indicate technique sequence changes.
+        Each unique Ns value represents a separate segment.
+        """
+        # Check if we have the raw Ns column from BioLogic
+        if 'Ns' in df.columns:
+            # Create segment numbers based on Ns changes
+            # Use Polars shift() to detect where Ns changes from previous row
+            df_with_segments = df.with_columns([
+                # Mark Ns changes: True where Ns differs from previous row
+                (pl.col('Ns') != pl.col('Ns').shift(1)).alias('ns_change')
+            ]).with_columns([
+                # Cumulative sum of Ns changes gives us segment numbers
+                # Add 1 to start segment numbering from 1 instead of 0
+                (pl.col('ns_change').cast(pl.Int32).cum_sum() + 1).alias('segment_number')
+            ]).drop('ns_change')  # Clean up helper column
+            
+            return df_with_segments
+        else:
+            # No Ns data available - single segment
+            return df.with_columns(pl.lit(1).alias('segment_number'))
+
+    def _generate_segment_numbers_from_ns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Generate proper segment numbers based on BioLogic Ns (sequence) changes.
+        
+        BioLogic uses Ns column to indicate technique sequence changes.
+        Each unique Ns value represents a separate segment.
+        Map Ns values to sequential segment numbers for universal schema.
+        """
+        # Check if we have the raw Ns column from BioLogic
+        if 'Ns' in df.columns:
+            # Create segment numbers based on Ns changes
+            # Use Polars shift() to detect where Ns changes from previous row
+            df_with_segments = df.with_columns([
+                # Mark Ns changes: True where Ns differs from previous row
+                (pl.col('Ns') != pl.col('Ns').shift(1)).alias('ns_change')
+            ]).with_columns([
+                # Cumulative sum of Ns changes gives us segment numbers
+                # Add 1 to start segment numbering from 1 instead of 0
+                (pl.col('ns_change').cast(pl.Int32).cum_sum() + 1).alias('segment_number')
+            ]).drop('ns_change')  # Clean up helper column
+            
+            return df_with_segments
+        else:
+            # No Ns data available - single segment
+            return df.with_columns(pl.lit(1).alias('segment_number'))
+
     def _generate_segment_numbers(self, df: pl.DataFrame) -> pl.DataFrame:
         """
-        Generate proper segment numbers based on Ftech changes.
+        Generate proper segment numbers based on technique_id changes.
         
-        Each unique Ns value represents a different Ftech step within the Btech.
-        Map each Ns to sequential segment numbers for universal schema.
+        Each change in technique_id represents a new segment (technique transition).
+        Map each technique block to sequential segment numbers for universal schema.
         """
-        if 'Ns' not in df.columns:
-            # No Ns data - single segment
+        if 'technique_id' not in df.columns:
+            # No technique_id data - single segment
             return df.with_columns(pl.lit(1).alias('segment_number'))
         
-        # Create mapping DataFrame with Polars-optimized operations
-        unique_ns_df = (
-            df
-            .select('Ns')
-            .unique()
-            .sort('Ns')
-            .with_row_index(name='segment_number', offset=1)  # Sequential numbering starting from 1
-        )
+        # Create segment numbers based on technique_id changes
+        # Use Polars shift() to detect where technique_id changes from previous row
+        df_with_segments = df.with_columns([
+            # Mark technique changes: True where technique_id differs from previous row
+            (pl.col('technique_id') != pl.col('technique_id').shift(1)).alias('technique_change')
+        ]).with_columns([
+            # Cumulative sum of technique changes gives us segment numbers
+            # Add 1 to start segment numbering from 1 instead of 0
+            (pl.col('technique_change').cast(pl.Int32).cum_sum() + 1).alias('segment_number')
+        ]).drop('technique_change')  # Clean up helper column
         
-        # Join back to original DataFrame using Polars join (vectorized)
-        return df.join(unique_ns_df, on='Ns', how='left')
+        return df_with_segments
 
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA-256 hash of file."""

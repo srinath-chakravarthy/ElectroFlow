@@ -1,33 +1,33 @@
-"""
-BioLogic MPR Column Definitions - Direct from YADG
-
-All column mappings, data types, and conflict resolution for MPR file parsing.
-Original source: YADG project mpr_columns.py
-"""
-
 import numpy as np
 
-# Module header formats to try
+# Module header starting after each MODULE keyword.
 module_header_dtypes = (
-    np.dtype([
-        ("short_name", "|S10"),
-        ("long_name", "|S25"),
-        ("max_length", "<u4"),
-        ("length", "<u4"),
-        ("oldver", "<u4"),
-        ("newver", "<u4"),
-        ("date", "|S8"),
-    ]),
-    np.dtype([
-        ("short_name", "|S10"),
-        ("long_name", "|S25"),
-        ("length", "<u4"),
-        ("oldver", "<u4"),
-        ("date", "|S8"),
-    ]),
+    np.dtype(
+        [
+            ("short_name", "|S10"),
+            ("long_name", "|S25"),
+            ("max_length", "<u4"),
+            ("length", "<u4"),
+            ("oldver", "<u4"),
+            ("newver", "<u4"),
+            ("date", "|S8"),
+        ]
+    ),
+    np.dtype(
+        [
+            ("short_name", "|S10"),
+            ("long_name", "|S25"),
+            ("length", "<u4"),
+            ("oldver", "<u4"),
+            ("date", "|S8"),
+        ]
+    ),
 )
 
-# Relates the offset in the settings data to the corresponding dtype and name
+
+# Relates the offset in the settings data to the corresponding dtype and
+# name. Maybe watch out for very long pascal strings as they may span
+# over the entire zero padding and shift the offsets.
 settings_dtypes = {
     0x0007: ("pascal", "comments"),
     0x0107: ("<f4", "active_material_mass"),
@@ -43,19 +43,28 @@ settings_dtypes = {
     0x024C: ("<f4", "characteristic_mass"),
     0x025C: ("<f4", "battery_capacity"),
     0x0260: ("|u1", "battery_capacity_unit"),
+    # NOTE: The compliance limits are apparently not always at this
+    # offset, hence commented out...
+    # 0x19d2: ("<f4", "compliance_min"),
+    # 0x19d6: ("<f4", "compliance_max"),
 }
 
-# Maps the flag column ID bytes to the corresponding bitmask and name
+
+# Maps the flag column ID bytes to the corresponding bitmask and name.
 flag_columns = {
     1: (0b00000011, "mode"),
     2: (0b00000100, "ox or red"),
     3: (0b00001000, "error"),
     21: (0b00010000, "control changes"),
     31: (0b00100000, "Ns changes"),
+    # NOTE: I think the missing bitmask (0b01000000) is a stop bit. It
+    # sometimes appears in the flag byte of the very last data point.
     65: (0b10000000, "counter inc."),
 }
 
-# Maps the data column ID bytes to the corresponding dtype, name and unit
+
+# Maps the data column ID bytes to the corresponding dtype, name and
+# unit.
 data_columns = {
     4: ("<f8", "time", "s"),
     5: ("<f4", "control", "V/mA"),
@@ -114,7 +123,7 @@ data_columns = {
     169: ("<f4", "Cs", "µF"),
     172: ("<f4", "Cp", "µF"),
     173: ("<f4", "Cp⁻²", "µF⁻²"),
-    174: ("<f4", "<Ewe>", "V"),  # This column may conflict with ID 77 and 6
+    174: ("<f4", "<Ewe>", "V"),  # This column may conflict with ID 77 and 6.
     175: ("<f4", "|Zwe-ce|", "Ω"),
     176: ("<f4", "Re(Zwe-ce)", "Ω"),
     177: ("<f4", "-Im(Zwe-ce)", "Ω"),
@@ -156,7 +165,8 @@ data_columns = {
     247: ("<f4", "|Ece h7|", "V"),
 }
 
-# Conflict resolution map
+# Conflict resolution map. If both the outer and inner column ID are present,
+# the meaning of the outer column ID is set to the entry below.
 conflict_columns = {
     174: {
         6: ("<f4", "Phase(Zwe-ce)", "deg"),
@@ -164,14 +174,18 @@ conflict_columns = {
     },
 }
 
-# Technique-dependent column names
 technique_dependent_ids = {
     6: {
         "BCD": "Ecell",
     }
 }
 
-# Log module data types
+# Relates the offset in log data to the corresponding dtype and name.
+# NOTE: The safety limits are maybe at 0x200?
+# NOTE: The log also seems to contain the settings again. These are left
+# away for now.
+# NOTE: Looking at .mpl files, the log module appears to consist of
+# multiple 'modify on' sections, each starting with an OLE timestamp.
 log_dtypes = {
     0x0009: ("|u1", "channel_number"),
     0x00AB: ("<u2", "channel_sn"),
@@ -188,85 +202,7 @@ log_dtypes = {
     0x0922: ("|u1", "averaging_points"),
 }
 
-# =============================================================================
-# UNIVERSAL SCHEMA MAPPING - BioLogic to Universal Schema (ENHANCED)
-# =============================================================================
 
-BIOLOGIC_TO_UNIVERSAL_MAPPING = {
-    # Core electrochemical measurements
-    "time": "time_s",
-    # Current mapping with priority: control_I preferred over I if both present
-    "control_I": "current_a",            # Convert mA → A with factor (control current from YADG splitting) - PREFERRED
-    "I": "current_a",                    # Convert mA → A with factor (direct current) - FALLBACK
-    "Temperature": "temperature_c",      # Temperature monitoring
-    
-    # Working electrode voltage (vs reference)
-    "Ewe": "working_electrode_potential_v",
-    
-    # Counter electrode voltage
-    "Ece": "ce_potential_v",
-    
-    # Segment tracking (added by parser before universal conversion)
-    "segment_number": "segment_number",
-    
-    # Calculate cell voltage: potential_v = Ewe - Ece (done in parser logic)
-    
-    # Cell impedance columns (WE-CE combined)
-    "Re(Z)": "impedance_real_ohm",
-    "-Im(Z)": "impedance_imag_ohm",
-    "|Z|": "impedance_mag_ohm",
-    "Phase(Z)": "impedance_phase_deg",
-    "freq": "frequency_hz",
-    
-    # Working electrode impedance (electrode-specific)
-    "Re(Zwe-ce)": "we_impedance_real_ohm",      # WE impedance vs CE
-    "-Im(Zwe-ce)": "we_impedance_imag_ohm",     # WE impedance vs CE
-    "|Zwe-ce|": "we_impedance_mag_ohm",         # WE impedance vs CE
-    "Phase(Zwe-ce)": "we_impedance_phase_deg",  # WE impedance vs CE (calculated)
-    
-    # Counter electrode impedance (electrode-specific)  
-    "Re(Zce)": "ce_impedance_real_ohm",
-    "-Im(Zce)": "ce_impedance_imag_ohm",
-    "|Zce|": "ce_impedance_mag_ohm",
-    "Phase(Zce)": "ce_impedance_phase_deg",
-}
-
-# Unit conversion factors for BioLogic data
-BIOLOGIC_UNIT_CONVERSIONS = {
-    "I": 1e-3,              # mA → A (direct current)
-    "control_I": 1e-3,      # mA → A (control current from YADG splitting)
-}
-
-# =============================================================================
-# BTECH TO FTECH MAPPING - BioLogic Technique to Fundamental Technique
-# =============================================================================
-
-# BioLogic Technique (Btech) to Fundamental Technique (Ftech) Mapping
-BTECH_TO_FTECH_BASE_MAPPING = {
-    # Simple 1:1 mappings
-    "OCV": "rest",      # Open Circuit Voltage
-    "CV": "cv",         # Cyclic Voltammetry  
-    "PEIS": "eis",      # Potentio EIS
-    "GEIS": "eis",      # Galvano EIS
-    "WAIT": "rest",     # Wait = Rest
-    "LSV": "cv",        # Linear Sweep = CV variant
-    
-    # Potentiostatic vs Galvanostatic clarification
-    "CA": "cp",         # Chronoamperometry = Potentiostatic (voltage pulse)
-    "CP": "cc",         # Chronopotentiometry = Galvanostatic  
-    "coV": "cp",        # Constant Voltage = Potentiostatic
-    "coC": "cc",        # Constant Current = Galvanostatic
-    
-    # Complex techniques - use primary Ftech (Ns will handle sequences)
-    "GCPL": "cc",       # Galvanostatic Cycling (primary technique)
-    "CVA": "cv",        # Cyclic Voltammetry Advanced (primary)
-    "BCD": "cc",        # Battery Capacity Determination (primary)
-    "ZIR": "eis",       # EIS with IR compensation
-    "MP": "unknown",    # Modular Potentio (user-configurable)
-    "MB": "unknown",    # Modulo Bat (too complex)
-}
-
-# External device data types
 extdev_dtypes = {
     0x0036: ("pascal", "Analog IN 1"),
     0x0052: ("<f4", "Analog IN 1 max V"),
