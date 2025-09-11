@@ -122,11 +122,20 @@ class AnalyticsConfigRegistry:
             'exponential_fit': {
                 'description': 'Exponential decay fitting results: y = y∞ + A·exp(-t/τ)',
                 'fields': {
-                    'voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'Equilibrium voltage'},
-                    'voltage_amplitude': {'type': 'float', 'unit': 'V', 'description': 'Voltage decay amplitude'},
+                    'voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'Cell equilibrium voltage'},
+                    'voltage_amplitude': {'type': 'float', 'unit': 'V', 'description': 'Cell voltage decay amplitude'},
                     'current_infinity': {'type': 'float', 'unit': 'A', 'description': 'Equilibrium current'},
                     'current_amplitude': {'type': 'float', 'unit': 'A', 'description': 'Current decay amplitude'},
-                    'time_constant_s': {'type': 'float', 'unit': 's', 'description': 'Decay time constant'},
+                    'time_constant_s': {'type': 'float', 'unit': 's', 'description': 'Cell decay time constant'},
+                    # Working electrode (WE) specific exponential decay
+                    'we_voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'WE equilibrium voltage'},
+                    'we_voltage_amplitude': {'type': 'float', 'unit': 'V', 'description': 'WE voltage decay amplitude'},
+                    'we_time_constant_s': {'type': 'float', 'unit': 's', 'description': 'WE decay time constant'},
+                    # Counter electrode (CE) specific exponential decay
+                    'ce_voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'CE equilibrium voltage'},
+                    'ce_voltage_amplitude': {'type': 'float', 'unit': 'V', 'description': 'CE voltage decay amplitude'},
+                    'ce_time_constant_s': {'type': 'float', 'unit': 's', 'description': 'CE decay time constant'},
+                    # Fit quality metrics
                     'r_squared': {'type': 'float', 'unit': '', 'description': 'Goodness of fit (R²)'},
                     'rmse': {'type': 'float', 'unit': 'varies', 'description': 'Root mean square error'}
                 }
@@ -134,10 +143,17 @@ class AnalyticsConfigRegistry:
             'sqrt_fit': {
                 'description': 'Square root time fitting results: y = y∞ + A·√t',
                 'fields': {
-                    'voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'Equilibrium voltage'},
-                    'voltage_sqrt_amplitude': {'type': 'float', 'unit': 'V/s^0.5', 'description': 'Voltage sqrt(t) amplitude'},
+                    'voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'Cell equilibrium voltage'},
+                    'voltage_sqrt_amplitude': {'type': 'float', 'unit': 'V/s^0.5', 'description': 'Cell voltage sqrt(t) amplitude'},
                     'current_infinity': {'type': 'float', 'unit': 'A', 'description': 'Equilibrium current'},
                     'current_sqrt_amplitude': {'type': 'float', 'unit': 'A/s^0.5', 'description': 'Current sqrt(t) amplitude'},
+                    # Working electrode (WE) specific sqrt decay
+                    'we_voltage_sqrt_infinity': {'type': 'float', 'unit': 'V', 'description': 'WE equilibrium voltage (sqrt model)'},
+                    'we_voltage_sqrt_amplitude': {'type': 'float', 'unit': 'V/s^0.5', 'description': 'WE voltage sqrt(t) amplitude'},
+                    # Counter electrode (CE) specific sqrt decay
+                    'ce_voltage_sqrt_infinity': {'type': 'float', 'unit': 'V', 'description': 'CE equilibrium voltage (sqrt model)'},
+                    'ce_voltage_sqrt_amplitude': {'type': 'float', 'unit': 'V/s^0.5', 'description': 'CE voltage sqrt(t) amplitude'},
+                    # Fit quality metrics
                     'r_squared': {'type': 'float', 'unit': '', 'description': 'Goodness of fit (R²)'},
                     'rmse': {'type': 'float', 'unit': 'varies', 'description': 'Root mean square error'}
                 }

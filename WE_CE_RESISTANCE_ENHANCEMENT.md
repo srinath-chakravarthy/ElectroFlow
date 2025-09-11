@@ -1,20 +1,20 @@
-# WE and CE Electrode-Specific Resistance Analysis Enhancement
+# WE and CE Electrode-Specific Analysis Enhancement
 
 **Date**: September 11, 2025  
 **Status**: Implementation Complete - Integration Testing Pending  
-**Scope**: Extended resistance analysis to support Working Electrode (WE) and Counter Electrode (CE) specific measurements
+**Scope**: Extended resistance and voltage relaxation analysis to support Working Electrode (WE) and Counter Electrode (CE) specific measurements
 
 ---
 
 ## Overview
 
-Enhanced the electrochemical resistance analysis system to calculate electrode-specific resistance metrics using BioLogic's individual electrode potential measurements (`working_electrode_potential_v` and `ce_potential_v`) in addition to the existing cell voltage (`potential_v`) analysis.
+Enhanced the electrochemical analysis system to calculate electrode-specific **resistance and voltage relaxation** metrics using BioLogic's individual electrode potential measurements (`working_electrode_potential_v` and `ce_potential_v`) in addition to the existing cell voltage (`potential_v`) analysis.
 
 ## Key Enhancement: Trivial Fix Implementation
 
-**Approach**: Extend existing resistance calculation to also process WE and CE voltages when columns are not NULL.
+**Approach**: Extend existing resistance and voltage relaxation calculations to also process WE and CE voltages when columns are not NULL.
 
-**Implementation**: Added electrode-specific resistance calculations alongside existing cell-level analysis with proper NULL checking and data validation.
+**Implementation**: Added electrode-specific resistance and voltage decay calculations alongside existing cell-level analysis with proper NULL checking and data validation.
 
 ---
 
@@ -43,11 +43,38 @@ if 'working_electrode_potential_v' in segment_data.columns:
 
 **Result**: Generates WE and CE specific resistance metrics (`we_ir_immediate_ohm`, `ce_ir_10s_ohm`, etc.) alongside existing cell metrics.
 
-### 2. Analytics Config Enhancement (`src_clean/analysis/analytics_config.py`)
+### 2. Enhanced Voltage Relaxation Analysis (`src_clean/analysis/technique_analyzer.py`)
 
-**Enhanced**: `current_pulse` analysis schema
+**Modified**: `_analyze_rest()` method to include electrode-specific voltage decay
+
+**Key Changes**:
+```python
+# Electrode-specific voltage decay analysis if columns are not NULL
+# Working electrode (WE) voltage decay
+if 'working_electrode_potential_v' in segment_data.columns:
+    we_voltage_values = segment_data.get_column('working_electrode_potential_v').to_numpy()
+    we_valid_mask = ~(np.isnan(time_values) | np.isnan(we_voltage_values))
+    if np.any(we_valid_mask) and np.sum(we_valid_mask) >= 10:
+        we_voltage_exp_result = self._analyze_voltage_decay(we_t_clean, we_v_clean)
+        we_voltage_sqrt_result = self._analyze_voltage_sqrt_decay(we_t_clean, we_v_clean)
+        # Add WE prefix to results
+        if we_voltage_exp_result.get('success', False):
+            we_voltage_exp_result = self._prefix_analysis_result(we_voltage_exp_result, 'we_')
+
+# Counter electrode (CE) voltage decay (similar logic)
+```
+
+**Added Helper Method**: `_prefix_analysis_result()` to add electrode prefixes (`we_`, `ce_`) to voltage decay metrics.
+
+**Result**: Generates WE and CE specific voltage relaxation metrics (`we_voltage_infinity`, `we_time_constant_s`, `ce_voltage_amplitude`, etc.) alongside existing cell metrics.
+
+### 3. Analytics Config Enhancement (`src_clean/analysis/analytics_config.py`)
+
+**Enhanced**: `current_pulse`, `exponential_fit`, and `sqrt_fit` analysis schemas
 
 **Added Electrode-Specific Fields**:
+
+**Resistance Analysis (`current_pulse` schema)**:
 ```python
 # Working electrode (WE) specific resistance
 'we_ir_immediate_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'WE immediate resistance'},
@@ -60,6 +87,27 @@ if 'working_electrode_potential_v' in segment_data.columns:
 'ce_ir_10s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'CE resistance at 10 seconds'},
 'ce_ir_30s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'CE resistance at 30 seconds'},
 'ce_resistance_ratio_immediate_30s': {'type': 'float', 'unit': 'ratio', 'description': 'CE resistance ratio'}
+```
+
+**Voltage Relaxation Analysis (`exponential_fit` and `sqrt_fit` schemas)**:
+```python
+# Working electrode (WE) specific exponential decay
+'we_voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'WE equilibrium voltage'},
+'we_voltage_amplitude': {'type': 'float', 'unit': 'V', 'description': 'WE voltage decay amplitude'},
+'we_time_constant_s': {'type': 'float', 'unit': 's', 'description': 'WE decay time constant'},
+
+# Counter electrode (CE) specific exponential decay
+'ce_voltage_infinity': {'type': 'float', 'unit': 'V', 'description': 'CE equilibrium voltage'},
+'ce_voltage_amplitude': {'type': 'float', 'unit': 'V', 'description': 'CE voltage decay amplitude'},
+'ce_time_constant_s': {'type': 'float', 'unit': 's', 'description': 'CE decay time constant'},
+
+# Working electrode (WE) specific sqrt decay
+'we_voltage_sqrt_infinity': {'type': 'float', 'unit': 'V', 'description': 'WE equilibrium voltage (sqrt model)'},
+'we_voltage_sqrt_amplitude': {'type': 'float', 'unit': 'V/s^0.5', 'description': 'WE voltage sqrt(t) amplitude'},
+
+# Counter electrode (CE) specific sqrt decay  
+'ce_voltage_sqrt_infinity': {'type': 'float', 'unit': 'V', 'description': 'CE equilibrium voltage (sqrt model)'},
+'ce_voltage_sqrt_amplitude': {'type': 'float', 'unit': 'V/s^0.5', 'description': 'CE voltage sqrt(t) amplitude'}
 ```
 
 ### 3. Registry System Integration (`src_clean/analysis/registry.py`)
@@ -86,9 +134,16 @@ if 'working_electrode_potential_v' in segment_data.columns:
 - **NaN Filtering**: Proper mask-based filtering for each electrode independently
 
 ### Metric Generation
+
+**Resistance Metrics**:
 - **WE Metrics**: `we_ir_immediate_ohm`, `we_ir_10s_ohm`, `we_ir_30s_ohm`, `we_resistance_ratio_immediate_30s`
 - **CE Metrics**: `ce_ir_immediate_ohm`, `ce_ir_10s_ohm`, `ce_ir_30s_ohm`, `ce_resistance_ratio_immediate_30s`
 - **Cell Metrics**: Original metrics preserved (`ir_immediate_ohm`, etc.)
+
+**Voltage Relaxation Metrics**:
+- **WE Metrics**: `we_voltage_infinity`, `we_voltage_amplitude`, `we_time_constant_s`, `we_voltage_sqrt_amplitude`, etc.
+- **CE Metrics**: `ce_voltage_infinity`, `ce_voltage_amplitude`, `ce_time_constant_s`, `ce_voltage_sqrt_amplitude`, etc.
+- **Cell Metrics**: Original relaxation metrics preserved (`voltage_infinity`, `time_constant_s`, etc.)
 
 ### Registry Integration
 - **Auto-Discovery**: New metrics automatically available in web interface

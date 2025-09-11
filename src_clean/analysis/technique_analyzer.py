@@ -120,10 +120,46 @@ class TechniqueAnalyzer:
             voltage_sqrt_result = self._analyze_voltage_sqrt_decay(time_values, voltage_values)
             current_sqrt_result = self._analyze_current_sqrt_decay(time_values, current_values)
             
-            # Collect all successful results
+            # Electrode-specific voltage decay analysis if columns are not NULL
+            we_voltage_exp_result = None
+            we_voltage_sqrt_result = None
+            if 'working_electrode_potential_v' in segment_data.columns:
+                we_voltage_values = segment_data.get_column('working_electrode_potential_v').to_numpy()
+                we_valid_mask = ~(np.isnan(time_values) | np.isnan(we_voltage_values))
+                if np.any(we_valid_mask) and np.sum(we_valid_mask) >= 10:
+                    we_t_clean = time_values[we_valid_mask]
+                    we_v_clean = we_voltage_values[we_valid_mask]
+                    we_voltage_exp_result = self._analyze_voltage_decay(we_t_clean, we_v_clean)
+                    we_voltage_sqrt_result = self._analyze_voltage_sqrt_decay(we_t_clean, we_v_clean)
+                    # Add WE prefix to results
+                    if we_voltage_exp_result.get('success', False):
+                        we_voltage_exp_result = self._prefix_analysis_result(we_voltage_exp_result, 'we_')
+                    if we_voltage_sqrt_result.get('success', False):
+                        we_voltage_sqrt_result = self._prefix_analysis_result(we_voltage_sqrt_result, 'we_')
+            
+            # Counter electrode voltage decay analysis
+            ce_voltage_exp_result = None  
+            ce_voltage_sqrt_result = None
+            if 'ce_potential_v' in segment_data.columns:
+                ce_voltage_values = segment_data.get_column('ce_potential_v').to_numpy()
+                ce_valid_mask = ~(np.isnan(time_values) | np.isnan(ce_voltage_values))
+                if np.any(ce_valid_mask) and np.sum(ce_valid_mask) >= 10:
+                    ce_t_clean = time_values[ce_valid_mask]
+                    ce_v_clean = ce_voltage_values[ce_valid_mask]
+                    ce_voltage_exp_result = self._analyze_voltage_decay(ce_t_clean, ce_v_clean)
+                    ce_voltage_sqrt_result = self._analyze_voltage_sqrt_decay(ce_t_clean, ce_v_clean)
+                    # Add CE prefix to results
+                    if ce_voltage_exp_result.get('success', False):
+                        ce_voltage_exp_result = self._prefix_analysis_result(ce_voltage_exp_result, 'ce_')
+                    if ce_voltage_sqrt_result.get('success', False):
+                        ce_voltage_sqrt_result = self._prefix_analysis_result(ce_voltage_sqrt_result, 'ce_')
+            
+            # Collect all successful results (cell + electrode-specific)
             results = []
-            for result in [voltage_exp_result, current_exp_result, voltage_sqrt_result, current_sqrt_result]:
-                if result.get('success', False):
+            all_results = [voltage_exp_result, current_exp_result, voltage_sqrt_result, current_sqrt_result,
+                          we_voltage_exp_result, we_voltage_sqrt_result, ce_voltage_exp_result, ce_voltage_sqrt_result]
+            for result in all_results:
+                if result is not None and result.get('success', False):
                     results.append(result)
             
             if not results:
@@ -193,6 +229,37 @@ class TechniqueAnalyzer:
             
         except Exception as e:
             return {'analysis_type': 'voltage_decay_failed', 'success': False, 'error': str(e)}
+    
+    def _prefix_analysis_result(self, result: Dict[str, Any], prefix: str) -> Dict[str, Any]:
+        """
+        Add electrode prefix to analysis result field names.
+        
+        Args:
+            result: Analysis result dictionary
+            prefix: Prefix to add (e.g., 'we_', 'ce_')
+            
+        Returns:
+            Result with prefixed field names for electrode-specific metrics
+        """
+        if not result or not result.get('success', False):
+            return result
+            
+        prefixed_result = {'analysis_type': result['analysis_type'], 'success': result['success']}
+        
+        # Fields to prefix for electrode-specific naming
+        fields_to_prefix = [
+            'voltage_infinity', 'voltage_amplitude', 'time_constant_s', 
+            'voltage_sqrt_infinity', 'voltage_sqrt_amplitude',
+            'r_squared', 'rmse', 'voltage_infinity_error', 'voltage_amplitude_error', 'time_constant_error'
+        ]
+        
+        for key, value in result.items():
+            if key in fields_to_prefix:
+                prefixed_result[f'{prefix}{key}'] = value
+            elif key not in ['analysis_type', 'success']:  # Keep analysis_type and success as is
+                prefixed_result[key] = value
+                
+        return prefixed_result
     
     def _analyze_current_decay(self, time_values: np.ndarray,
                              current_values: np.ndarray) -> Dict[str, Any]:
