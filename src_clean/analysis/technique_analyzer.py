@@ -504,7 +504,7 @@ class TechniqueAnalyzer:
             voltage_values = segment_data.get_column('potential_v').to_numpy()
             current_values = segment_data.get_column('current_a').to_numpy()
             
-            # Remove NaN values
+            # Remove NaN values for primary calculation
             valid_mask = ~(np.isnan(time_values) | np.isnan(voltage_values) | np.isnan(current_values))
             if not np.any(valid_mask) or np.sum(valid_mask) < 10:
                 return {'analysis_type': 'current_pulse_insufficient_data', 'success': False}
@@ -513,8 +513,37 @@ class TechniqueAnalyzer:
             v_clean = voltage_values[valid_mask]
             i_clean = current_values[valid_mask]
             
-            # Calculate resistance at different time points
+            # Calculate resistance at different time points for cell voltage
             resistances = self._calculate_pulse_resistances(t_clean, v_clean, i_clean)
+            
+            # Calculate electrode-specific resistances if columns are not NULL
+            # Working electrode (WE) resistance
+            if 'working_electrode_potential_v' in segment_data.columns:
+                we_voltage_values = segment_data.get_column('working_electrode_potential_v').to_numpy()
+                we_valid_mask = ~(np.isnan(time_values) | np.isnan(we_voltage_values) | np.isnan(current_values))
+                if np.any(we_valid_mask) and np.sum(we_valid_mask) >= 10:
+                    we_t_clean = time_values[we_valid_mask]
+                    we_v_clean = we_voltage_values[we_valid_mask]
+                    we_i_clean = current_values[we_valid_mask]
+                    we_resistances = self._calculate_pulse_resistances(we_t_clean, we_v_clean, we_i_clean)
+                    # Add WE prefix to resistance metrics
+                    for key, value in we_resistances.items():
+                        if key.startswith('ir_') or key == 'resistance_ratio_immediate_30s':
+                            resistances[f'we_{key}'] = value
+            
+            # Counter electrode (CE) resistance  
+            if 'ce_potential_v' in segment_data.columns:
+                ce_voltage_values = segment_data.get_column('ce_potential_v').to_numpy()
+                ce_valid_mask = ~(np.isnan(time_values) | np.isnan(ce_voltage_values) | np.isnan(current_values))
+                if np.any(ce_valid_mask) and np.sum(ce_valid_mask) >= 10:
+                    ce_t_clean = time_values[ce_valid_mask]
+                    ce_v_clean = ce_voltage_values[ce_valid_mask]
+                    ce_i_clean = current_values[ce_valid_mask]
+                    ce_resistances = self._calculate_pulse_resistances(ce_t_clean, ce_v_clean, ce_i_clean)
+                    # Add CE prefix to resistance metrics
+                    for key, value in ce_resistances.items():
+                        if key.startswith('ir_') or key == 'resistance_ratio_immediate_30s':
+                            resistances[f'ce_{key}'] = value
             
             result = {
                 'analysis_type': 'current_pulse',

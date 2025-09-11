@@ -145,9 +145,21 @@ class AnalyticsConfigRegistry:
             'current_pulse': {
                 'description': 'Current pulse resistance analysis',
                 'fields': {
-                    'ir_immediate_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'Immediate resistance'},
-                    'ir_10s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'Resistance at 10 seconds'},
-                    'ir_30s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'Resistance at 30 seconds'},
+                    'ir_immediate_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'Cell immediate resistance'},
+                    'ir_10s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'Cell resistance at 10 seconds'},
+                    'ir_30s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'Cell resistance at 30 seconds'},
+                    'resistance_ratio_immediate_30s': {'type': 'float', 'unit': 'ratio', 'description': 'Cell resistance ratio (immediate/30s)'},
+                    # Working electrode (WE) specific resistance
+                    'we_ir_immediate_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'WE immediate resistance'},
+                    'we_ir_10s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'WE resistance at 10 seconds'},
+                    'we_ir_30s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'WE resistance at 30 seconds'},
+                    'we_resistance_ratio_immediate_30s': {'type': 'float', 'unit': 'ratio', 'description': 'WE resistance ratio (immediate/30s)'},
+                    # Counter electrode (CE) specific resistance
+                    'ce_ir_immediate_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'CE immediate resistance'},
+                    'ce_ir_10s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'CE resistance at 10 seconds'},
+                    'ce_ir_30s_ohm': {'type': 'float', 'unit': 'Ω', 'description': 'CE resistance at 30 seconds'},
+                    'ce_resistance_ratio_immediate_30s': {'type': 'float', 'unit': 'ratio', 'description': 'CE resistance ratio (immediate/30s)'},
+                    # Common metrics
                     'baseline_voltage_v': {'type': 'float', 'unit': 'V', 'description': 'Baseline voltage'},
                     'average_current_a': {'type': 'float', 'unit': 'A', 'description': 'Average current'},
                     'pulse_duration_s': {'type': 'float', 'unit': 's', 'description': 'Pulse duration'}
