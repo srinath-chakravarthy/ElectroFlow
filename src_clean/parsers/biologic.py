@@ -433,9 +433,8 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
                 # Based on observed patterns in real MB files
                 if ct == 4:  # Rest/Wait sequences
                     technique_id = 23  # Rest/OCV ActionID
-                elif ct == 17:  # Complex technique (often CC-CV or multi-step)
-                    # Analyze data to distinguish CC-CV from pure potentiostatic
-                    technique_id = self._classify_ctrl_type_17(df, ns_val)
+                elif ct == 17:  # Complex technique (CC-CV procedures)
+                    technique_id = 8   # Galvanostatic ActionID (CC-CV = galvanostatic family)
                 elif ct == 8:  # Standard measurement (often EIS or pulse)
                     # Check if it's EIS by looking at data
                     segment_data = df.filter(pl.col('Ns') == ns_val)
@@ -500,58 +499,6 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
         else:
             return 0   # Unknown
 
-    def _classify_ctrl_type_17(self, df: pl.DataFrame, ns_val: int) -> int:
-        """
-        Specialize ctrl_type=17 classification to distinguish CC-CV from pure potentiostatic.
-        
-        ctrl_type=17 indicates "Complex/Multi-step" techniques which can be:
-        1. CC-CV sequences (Constant Current → Constant Voltage battery charging)
-        2. Pure potentiostatic techniques (voltage-controlled throughout)
-        3. Multi-step potentiostatic procedures
-        
-        Args:
-            df: Raw DataFrame
-            ns_val: Ns value to analyze
-            
-        Returns:
-            Technique ID: 8 (Galvanostatic) for CC-CV, 7 (Potentiostatic) for pure voltage control
-        """
-        segment_data = df.filter(pl.col('Ns') == ns_val)
-        
-        if len(segment_data) == 0:
-            return 7  # Default to potentiostatic
-        
-        # Extract key indicators for CC-CV detection
-        voltage_min = float(segment_data['Ewe'].min())
-        voltage_max = float(segment_data['Ewe'].max())
-        voltage_range = voltage_max - voltage_min
-        
-        current_avg = abs(float(segment_data['I'].mean()))
-        current_std = float(segment_data['I'].std()) if len(segment_data) > 1 else 0.0
-        current_variability = current_std / current_avg if current_avg > 0.001 else 0.0
-        
-        duration = float(segment_data['time'].max() - segment_data['time'].min())
-        point_count = len(segment_data)
-        
-        # CC-CV Detection Criteria:
-        # 1. Large voltage range (>0.5V) indicating charging progression
-        # 2. Low current variability (<0.1) indicating controlled current phase
-        # 3. Long duration (>1 hour) typical of battery charging
-        # 4. Sufficient data points for meaningful analysis (>1000 points)
-        
-        is_large_voltage_range = voltage_range > 0.5  # >0.5V indicates significant charging
-        is_controlled_current = current_variability < 0.1  # Stable current indicates CC phase
-        is_long_duration = duration > 3600  # >1 hour typical for battery charging
-        is_sufficient_data = point_count > 1000  # Enough points for reliable analysis
-        
-        if (is_large_voltage_range and is_controlled_current and 
-            is_long_duration and is_sufficient_data):
-            # This looks like CC-CV battery charging
-            # Primary technique is galvanostatic (CC phase dominates)
-            return 8  # Galvanostatic ActionID
-        else:
-            # Pure potentiostatic or short multi-step procedure
-            return 7  # Potentiostatic ActionID
 
     def _add_segment_numbers_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """

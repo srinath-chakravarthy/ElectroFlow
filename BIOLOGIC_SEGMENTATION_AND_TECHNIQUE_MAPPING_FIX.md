@@ -177,25 +177,28 @@ def _create_mb_technique_mapping_from_data(self, df: pl.DataFrame) -> Dict[int, 
 
 **Classification Logic**: `ctrl_type=17` indicates "Complex/Multi-step" techniques in BioLogic MB templates, typically CC-CV sequences or variable voltage control modes.
 
-### Enhanced CC-CV vs Potentiostatic Specialization
+### Simplified CC-CV Classification Strategy
 
-**Problem**: `ctrl_type=17` segments contained both true CC-CV battery charging and pure potentiostatic techniques.
+**Key Insight**: `ctrl_type=17` = "Complex/Multi-step" = **CC-CV procedures** in electrochemical practice.
 
-**Solution**: Implemented `_classify_ctrl_type_17()` with intelligent data analysis:
+**Solution**: Direct classification without complex detection criteria:
+```python
+elif ct == 17:  # Complex technique (CC-CV procedures)
+    technique_id = 8   # Galvanostatic ActionID (CC-CV = galvanostatic family)
+```
 
-**CC-CV Detection Criteria**:
-1. **Large voltage range** (>0.5V) - indicates significant charging progression
-2. **Controlled current** (<0.1 variability) - stable current indicates CC phase  
-3. **Long duration** (>1 hour) - typical of battery charging cycles
-4. **Sufficient data** (>1000 points) - reliable statistical analysis
+**Rationale**:
+1. **CV can occur at any voltage** - voltage thresholds are meaningless across battery chemistries
+2. **BioLogic logic**: ctrl_type=17 reserved for truly complex procedures (CC-CV dominant)
+3. **Electrochemical reality**: CC-CV is the standard complex charging procedure
+4. **Clean & maintainable**: Trust instrument classification, avoid threshold tuning
 
 **Results**:
-- **Ns=1**: Correctly identified as **CC-CV → Galvanostatic** (43h charging, 0.707V range, stable 14.4mA)
-- **Ns=19**: Correctly identified as **Pure Potentiostatic** (28min, 0.003V range, variable current)
+- **44,477 data points** classified as Galvanostatic (includes all CC-CV procedures)
+- **Zero threshold-based edge cases** to debug or maintain
+- **Foundation ready** for future sub-classification (CC phase vs CV phase detection)
 
-**Impact**: 
-- **Before**: 21,483 points as "Potentiostatic"
-- **After**: 44,141 points as "Galvanostatic" + 336 points as true "Potentiostatic"
+**Impact**: Clean, reliable classification with readiness for granular analysis when needed.
 
 ---
 
