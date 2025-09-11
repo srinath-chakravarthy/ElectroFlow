@@ -157,7 +157,25 @@ def _create_mb_technique_mapping_from_data(self, df: pl.DataFrame) -> Dict[int, 
   - **EIS (ID=20)**: 1,332 data points (1.1%)
 - **Parameter-based classification working**: ctrl_type decoding with direct Ns indexing, frequency detection for EIS
 
-**Key Insight**: BioLogic's internal `Ns` tracking provides segmentation foundation + intelligent data pattern analysis enables technique classification for complex multi-technique files
+**Key Insight**: BioLogic's internal `Ns` tracking provides segmentation foundation + ctrl_type parameter decoding enables technique classification for complex multi-technique files
+
+### Potentiostatic Classification Deep-Dive
+
+**ctrl_type=17 Analysis** (`AR3677_3Electrode_Redo_formation_after_GITT_to_check_04_MB_C05.mpr`):
+
+**Ns=1** (Primary potentiostatic segment):
+- **21,147 points** over 154,625 seconds (~43 hours)
+- **Voltage progression**: 3.541V → 4.248V (0.707V range)
+- **Current behavior**: Stable ~14.4 mA (low variability: 0.053)
+- **Pattern**: Classic CC-CV battery charging (current-controlled → voltage-controlled transition)
+
+**Ns=19** (Secondary segment):
+- **336 points** over 1,669 seconds (~28 minutes)  
+- **Voltage range**: 4.242V → 4.244V (0.003V range)
+- **Current behavior**: Variable 20-47 mA (high variability: 0.230)
+- **Pattern**: Transitional or measurement artifact
+
+**Classification Logic**: `ctrl_type=17` indicates "Complex/Multi-step" techniques in BioLogic MB templates, typically CC-CV sequences or variable voltage control modes.
 
 ---
 
