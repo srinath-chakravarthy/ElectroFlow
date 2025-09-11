@@ -206,8 +206,9 @@ BIOLOGIC_TO_UNIVERSAL_MAPPING = {
     # Counter electrode voltage
     "Ece": "ce_potential_v",
     
-    # Segment tracking (added by parser before universal conversion)
+    # Parser-generated columns (added before universal conversion)
     "segment_number": "segment_number",
+    "technique_id": "technique_id",
     
     # Calculate cell voltage: potential_v = Ewe - Ece (done in parser logic)
     

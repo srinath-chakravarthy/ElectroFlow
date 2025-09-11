@@ -125,8 +125,11 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
 
             # Generate segment numbers from raw BioLogic Ns data BEFORE universal schema conversion
             raw_df = self._add_segment_numbers_to_raw_data(raw_df)
+            
+            # Add per-segment technique IDs using YADG parameters BEFORE universal schema conversion
+            raw_df = self._add_technique_ids_to_raw_data(raw_df)
 
-            # Convert to universal schema (segment_number will be included)
+            # Convert to universal schema (segment_number and technique_id will be included)
             universal_df = self._map_to_universal_schema(raw_df)
 
             # Add missing universal columns
@@ -136,14 +139,6 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
                 # BioLogic enhancement: populate electrode-specific columns from available data
                 universal_df = self._enhance_biologic_electrode_columns(universal_df)
                 
-                # Add technique information to universal schema
-                if hasattr(self.mpr_reader, 'last_technique_parameters'):
-                    ftech_name = self.mpr_reader.last_technique_parameters.get('_ftech_name', 'unknown')
-                    technique_id = self._get_technique_id_from_ftech(ftech_name)
-                    
-                    universal_df = universal_df.with_columns([
-                        pl.lit(technique_id).alias('technique_id')  # Use existing universal column
-                    ])
                 
 
             # Extract metadata (needed for timestamps)
@@ -293,6 +288,168 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             'unknown': 0   # Unknown
         }
         return ftech_to_id_mapping.get(ftech_name, 0)
+
+    def _add_technique_ids_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Add technique_id column to raw BioLogic data based on YADG parameter analysis.
+        
+        Uses YADG-extracted technique parameters to map each Ns (sequence) value to
+        its corresponding fundamental technique ID using simple 5-technique logic.
+        
+        Args:
+            df: Raw DataFrame with Ns column
+            
+        Returns:
+            DataFrame with added technique_id column
+        """
+        if 'Ns' not in df.columns:
+            # No Ns data - assign unknown technique
+            return df.with_columns(pl.lit(0).alias('technique_id'))
+        
+        # Get YADG technique parameters if available
+        if not (hasattr(self.mpr_reader, 'last_technique_parameters') and 
+                self.mpr_reader.last_technique_parameters):
+            # No technique parameters - assign unknown
+            return df.with_columns(pl.lit(0).alias('technique_id'))
+        
+        tech_params = self.mpr_reader.last_technique_parameters
+        btech_name = tech_params.get('_technique_name', 'unknown')
+        
+        # Handle special case: EIS techniques
+        if btech_name in ['PEIS', 'GEIS', 'ZIR']:
+            # All EIS techniques map to EIS fundamental technique
+            return df.with_columns(pl.lit(20).alias('technique_id'))  # EIS ActionID
+        
+        # Handle special case: MB (Modulo Bat) - complex multi-technique sequences
+        if btech_name == 'MB':
+            # Use data pattern analysis for MB technique classification
+            technique_mapping = self._create_mb_technique_mapping_from_data(df, tech_params)
+        else:
+            # For other techniques, use parameter-based Ns mapping
+            technique_mapping = self._create_ns_to_technique_mapping(tech_params)
+        
+        if not technique_mapping:
+            # Fallback to single technique for entire file
+            fallback_ftech = tech_params.get('_ftech_name', 'unknown')
+            fallback_id = self._get_technique_id_from_ftech(fallback_ftech)
+            return df.with_columns(pl.lit(fallback_id).alias('technique_id'))
+        
+        # Apply per-Ns technique mapping
+        df_with_techniques = df.with_columns([
+            pl.col('Ns').replace(technique_mapping, default=0).alias('technique_id')
+        ])
+        
+        return df_with_techniques
+
+    def _create_ns_to_technique_mapping(self, tech_params: dict) -> dict:
+        """
+        Create mapping from Ns values to technique IDs using YADG parameters.
+        
+        Simple 5-technique logic:
+        - rest: No current flow (Is=0)
+        - cc: Galvanostatic (current control with current flow)  
+        - cp: Potentiostatic (voltage control)
+        - cv: Cyclic voltammetry (detected from technique name)
+        - eis: Impedance spectroscopy (handled separately)
+        
+        Args:
+            tech_params: YADG technique parameters dictionary
+            
+        Returns:
+            Dictionary mapping Ns values to technique IDs
+        """
+        ns_count = tech_params.get('_ns', 0)
+        if ns_count == 0:
+            return {}
+        
+        # Get parameter arrays for each sequence
+        set_ic_values = tech_params.get('Set I/C', [])
+        current_values = tech_params.get('Is', [])  # Current setpoints
+        btech_name = tech_params.get('_technique_name', 'unknown')
+        
+        if len(set_ic_values) != ns_count or len(current_values) != ns_count:
+            return {}  # Parameter arrays don't match sequence count
+        
+        mapping = {}
+        
+        for ns_index in range(ns_count):
+            set_ic = set_ic_values[ns_index] if ns_index < len(set_ic_values) else 0
+            current = current_values[ns_index] if ns_index < len(current_values) else 0.0
+            
+            # Simple 5-technique classification
+            if btech_name in ['CV', 'CVA', 'LSV']:
+                technique_id = 1  # CV ActionID
+            elif set_ic == 0:  # Current control mode
+                if abs(float(current)) < 1e-6:  # Essentially zero current
+                    technique_id = 23  # Rest/OCV ActionID
+                else:
+                    technique_id = 8   # Galvanostatic ActionID
+            elif set_ic == 1:  # Voltage control mode
+                technique_id = 7   # Potentiostatic ActionID
+            else:
+                technique_id = 0   # Unknown
+            
+            mapping[ns_index] = technique_id
+        
+        return mapping
+
+    def _create_mb_technique_mapping_from_data(self, df: pl.DataFrame, tech_params: dict) -> dict:
+        """
+        Create technique mapping for MB (Modulo Bat) files using data pattern analysis.
+        
+        MB files can contain multiple technique types within one file. Since MB parameter
+        structure is complex, we analyze actual data patterns to classify techniques:
+        
+        - EIS: Frequency data present (freq > 0)  
+        - Galvanostatic: Significant current flow (|I| > threshold)
+        - Rest: Minimal current (|I| ≈ 0) and no frequency data
+        - Potentiostatic: Voltage control mode detection
+        
+        Args:
+            df: Raw DataFrame with Ns and measurement columns
+            tech_params: YADG technique parameters
+            
+        Returns:
+            Dictionary mapping Ns values to technique IDs
+        """
+        if 'Ns' not in df.columns:
+            return {}
+        
+        unique_ns_values = df['Ns'].unique().sort().to_list()
+        mapping = {}
+        
+        # Current threshold for distinguishing active vs rest phases (in mA)
+        current_threshold = 1.0  # 1 mA
+        
+        for ns_val in unique_ns_values:
+            # Analyze data patterns for this Ns segment
+            segment_data = df.filter(pl.col('Ns') == ns_val)
+            
+            if len(segment_data) == 0:
+                mapping[ns_val] = 0  # Unknown
+                continue
+            
+            # Extract key indicators
+            avg_current = abs(float(segment_data['I'].mean()))
+            max_freq = float(segment_data['freq'].max()) if 'freq' in segment_data.columns else 0.0
+            current_std = float(segment_data['I'].std()) if len(segment_data) > 1 else 0.0
+            
+            # Technique classification logic
+            if max_freq > 0.1:  # EIS: Frequency data present
+                technique_id = 20  # EIS ActionID
+            elif avg_current < current_threshold:  # Rest: Minimal current
+                technique_id = 23  # Rest/OCV ActionID  
+            elif avg_current >= current_threshold:  # Active current flow
+                if current_std < 0.1:  # Constant current (galvanostatic)
+                    technique_id = 8   # Galvanostatic ActionID
+                else:  # Variable current (could be potentiostatic or complex)
+                    technique_id = 7   # Potentiostatic ActionID
+            else:
+                technique_id = 0   # Unknown
+            
+            mapping[ns_val] = technique_id
+        
+        return mapping
 
     def _add_segment_numbers_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """

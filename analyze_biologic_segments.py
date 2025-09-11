@@ -83,7 +83,7 @@ if mpr_file.exists():
     if len(null_columns) > 10:
         print(f"   ... and {len(null_columns) - 10} more")
     
-    # Analyze final segments from universal schema
+    # Analyze final segments from universal schema with technique mapping
     if 'segment_number' in complete_df.columns:
         final_segments = complete_df['segment_number'].unique().sort()
         # Filter out None values
@@ -91,6 +91,41 @@ if mpr_file.exists():
         print(f"\n🎯 FINAL SEGMENT ANALYSIS:")
         print(f"   • Universal schema segments: {final_segments}")
         print(f"   • Total segments created: {len(final_segments)}")
+        
+        # Technique ID to name mapping
+        technique_names = {
+            0: 'Unknown',
+            1: 'CV', 
+            7: 'Potentiostatic',
+            8: 'Galvanostatic',
+            20: 'EIS',
+            23: 'Rest/OCV'
+        }
+        
+        # Analyze per-segment techniques
+        if 'technique_id' in complete_df.columns:
+            segment_techniques = complete_df.select(['segment_number', 'technique_id']).unique().sort('segment_number')
+            
+            print(f"\n🔬 Per-Segment Technique Analysis:")
+            for row in segment_techniques.iter_rows(named=True):
+                segment = row['segment_number']
+                tech_id = row['technique_id']
+                tech_name = technique_names.get(tech_id, f'Unknown_{tech_id}')
+                
+                if segment is not None and segment <= 10:  # First 10 segments
+                    print(f"   Segment {segment}: technique_id={tech_id} ({tech_name})")
+            
+            if len(final_segments) > 10:
+                print(f"   ... and {len(final_segments) - 10} more segments")
+            
+            # Technique summary statistics
+            unique_techniques = complete_df['technique_id'].unique().sort()
+            print(f"\n📊 Technique Distribution:")
+            for tech_id in unique_techniques.to_list():
+                if tech_id is not None:
+                    count = len(complete_df.filter(pl.col('technique_id') == tech_id))
+                    tech_name = technique_names.get(tech_id, f'Unknown_{tech_id}')
+                    print(f"   {tech_name} (ID={tech_id}): {count:,} data points")
         
         # Show first few segment details
         print(f"\n📊 Universal Schema Segment Details:")
@@ -106,7 +141,14 @@ if mpr_file.exists():
                 potential_range = f"{segment_data['potential_v'].min():.3f} - {segment_data['potential_v'].max():.3f} V"
                 current_range = f"{segment_data['current_a'].min():.6f} - {segment_data['current_a'].max():.6f} A"
                 
-                print(f"   Segment {seg_num}: {point_count} points, {duration:.1f}s, V={potential_range}, I={current_range}")
+                # Get technique info for this segment
+                tech_info = ""
+                if 'technique_id' in segment_data.columns:
+                    tech_id = segment_data['technique_id'][0]
+                    tech_name = technique_names.get(tech_id, f'Unknown_{tech_id}')
+                    tech_info = f", Technique: {tech_name}"
+                
+                print(f"   Segment {seg_num}: {point_count} points, {duration:.1f}s, V={potential_range}, I={current_range}{tech_info}")
     
     print(f"\n🎯 SEGMENT DATABASE REQUIREMENTS:")
     if 'segment_number' in complete_df.columns:
