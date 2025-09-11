@@ -395,19 +395,16 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
 
     def _create_mb_technique_mapping_from_data(self, df: pl.DataFrame, tech_params: dict) -> dict:
         """
-        Create technique mapping for MB (Modulo Bat) files using data pattern analysis.
+        Create technique mapping for MB (Modulo Bat) files using parameter-based analysis.
         
-        MB files can contain multiple technique types within one file. Since MB parameter
-        structure is complex, we analyze actual data patterns to classify techniques:
+        Uses proper Ns->parameter mapping to decode BioLogic's MB technique templates.
+        Each Ns value directly indexes into the MB parameter arrays to determine technique.
         
-        - EIS: Frequency data present (freq > 0)  
-        - Galvanostatic: Significant current flow (|I| > threshold)
-        - Rest: Minimal current (|I| ≈ 0) and no frequency data
-        - Potentiostatic: Voltage control mode detection
+        Fallback to data pattern analysis for unknown ctrl_type values.
         
         Args:
-            df: Raw DataFrame with Ns and measurement columns
-            tech_params: YADG technique parameters
+            df: Raw DataFrame with Ns and measurement columns  
+            tech_params: YADG technique parameters with MB parameter arrays
             
         Returns:
             Dictionary mapping Ns values to technique IDs
@@ -418,38 +415,89 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
         unique_ns_values = df['Ns'].unique().sort().to_list()
         mapping = {}
         
-        # Current threshold for distinguishing active vs rest phases (in mA)
-        current_threshold = 1.0  # 1 mA
+        # Get MB parameter arrays
+        ctrl_type = tech_params.get('ctrl_type', [])
+        apply_ic = tech_params.get('Apply I/C', [])
+        current_potential = tech_params.get('current/potential', [])
+        ctrl1_val = tech_params.get('ctrl1_val', [])
         
         for ns_val in unique_ns_values:
-            # Analyze data patterns for this Ns segment
-            segment_data = df.filter(pl.col('Ns') == ns_val)
-            
-            if len(segment_data) == 0:
-                mapping[ns_val] = 0  # Unknown
-                continue
-            
-            # Extract key indicators
-            avg_current = abs(float(segment_data['I'].mean()))
-            max_freq = float(segment_data['freq'].max()) if 'freq' in segment_data.columns else 0.0
-            current_std = float(segment_data['I'].std()) if len(segment_data) > 1 else 0.0
-            
-            # Technique classification logic
-            if max_freq > 0.1:  # EIS: Frequency data present
-                technique_id = 20  # EIS ActionID
-            elif avg_current < current_threshold:  # Rest: Minimal current
-                technique_id = 23  # Rest/OCV ActionID  
-            elif avg_current >= current_threshold:  # Active current flow
-                if current_std < 0.1:  # Constant current (galvanostatic)
-                    technique_id = 8   # Galvanostatic ActionID
-                else:  # Variable current (could be potentiostatic or complex)
-                    technique_id = 7   # Potentiostatic ActionID
+            # Use Ns as direct index into parameter arrays (YADG logic)
+            if ns_val < len(ctrl_type):
+                # Parameter-based classification using ctrl_type
+                ct = int(ctrl_type[ns_val])
+                aic = int(apply_ic[ns_val]) if ns_val < len(apply_ic) else 0
+                cv = float(ctrl1_val[ns_val]) if ns_val < len(ctrl1_val) else 0.0
+                
+                # Decode MB ctrl_type to fundamental technique
+                # Based on observed patterns in real MB files
+                if ct == 4:  # Rest/Wait sequences
+                    technique_id = 23  # Rest/OCV ActionID
+                elif ct == 17:  # Complex technique (often CC-CV or multi-step)
+                    technique_id = 7   # Potentiostatic ActionID (variable control)
+                elif ct == 8:  # Standard measurement (often EIS or pulse)
+                    # Check if it's EIS by looking at data
+                    segment_data = df.filter(pl.col('Ns') == ns_val)
+                    if len(segment_data) > 0:
+                        max_freq = float(segment_data['freq'].max()) if 'freq' in segment_data.columns else 0.0
+                        if max_freq > 0.1:  # EIS detection
+                            technique_id = 20  # EIS ActionID
+                        else:
+                            technique_id = 8   # Galvanostatic ActionID
+                    else:
+                        technique_id = 8  # Default to galvanostatic
+                elif ct == 0:  # Default/standard technique
+                    # Use current value and control mode to determine
+                    if abs(cv) < 0.001:  # Zero setpoint
+                        technique_id = 23  # Rest
+                    else:
+                        technique_id = 8   # Galvanostatic
+                elif ct == 5:  # Another measurement variant
+                    technique_id = 8   # Galvanostatic
+                else:
+                    # Fallback to data pattern analysis for unknown ctrl_type
+                    technique_id = self._fallback_data_pattern_classification(df, ns_val)
+                
+                mapping[ns_val] = technique_id
             else:
-                technique_id = 0   # Unknown
-            
-            mapping[ns_val] = technique_id
+                # Ns value out of parameter range - fallback to data pattern
+                mapping[ns_val] = self._fallback_data_pattern_classification(df, ns_val)
         
         return mapping
+
+    def _fallback_data_pattern_classification(self, df: pl.DataFrame, ns_val: int) -> int:
+        """
+        Fallback data pattern analysis for unknown MB parameter configurations.
+        
+        Args:
+            df: Raw DataFrame
+            ns_val: Ns value to analyze
+            
+        Returns:
+            Technique ID based on data patterns
+        """
+        segment_data = df.filter(pl.col('Ns') == ns_val)
+        
+        if len(segment_data) == 0:
+            return 0  # Unknown
+        
+        # Extract key indicators  
+        avg_current = abs(float(segment_data['I'].mean()))
+        max_freq = float(segment_data['freq'].max()) if 'freq' in segment_data.columns else 0.0
+        current_std = float(segment_data['I'].std()) if len(segment_data) > 1 else 0.0
+        
+        # Classification logic (more conservative thresholds)
+        if max_freq > 0.1:  # EIS: Frequency data present
+            return 20  # EIS ActionID
+        elif avg_current < 0.5:  # Rest: Very low current (reduced threshold)
+            return 23  # Rest/OCV ActionID  
+        elif avg_current >= 0.5:  # Active current flow
+            if current_std < 0.05:  # Very stable current (galvanostatic)
+                return 8   # Galvanostatic ActionID
+            else:  # Variable current (potentiostatic or complex)
+                return 7   # Potentiostatic ActionID
+        else:
+            return 0   # Unknown
 
     def _add_segment_numbers_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """

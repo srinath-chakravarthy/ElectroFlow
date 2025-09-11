@@ -70,7 +70,7 @@ Raw Data → Extract technique per Ns → Intelligent technique classification �
 - **ADDED** `_add_segment_numbers_to_raw_data()` method  
 - **ADDED** `_add_technique_ids_to_raw_data()` method for per-segment technique classification
 - **ADDED** `_create_ns_to_technique_mapping()` for parameter-based technique classification (GCPL, CV, etc.)
-- **ADDED** `_create_mb_technique_mapping_from_data()` for data-pattern classification (MB files)
+- **ADDED** `_create_mb_technique_mapping_from_data()` for parameter-based classification (MB files) using ctrl_type decoding
 - **CHANGED** processing flow: segmentation → technique mapping → universal conversion
 
 **Segmentation Logic**:
@@ -87,6 +87,26 @@ def _add_segment_numbers_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
         return df_with_segments
     else:
         return df.with_columns(pl.lit(1).alias('segment_number'))
+```
+
+**MB Technique Classification Logic**:
+```python
+# Parameter-based classification using ctrl_type decoding
+def _create_mb_technique_mapping_from_data(self, df: pl.DataFrame) -> Dict[int, int]:
+    # Direct Ns indexing into MB parameter arrays (following YADG approach)
+    for ns in unique_ns_values:
+        if ns < len(mb_params):
+            ctrl_type = mb_params[ns].get('ctrl_type')
+            if ctrl_type == 4:      # Rest/Wait sequences
+                technique_mapping[ns] = 23  # Rest/OCV ActionID
+            elif ctrl_type == 17:   # Complex technique (CC-CV or multi-step)
+                technique_mapping[ns] = 7   # Potentiostatic ActionID
+            elif ctrl_type == 8:    # Standard measurement (EIS or pulse)
+                # EIS detection using frequency data
+                if max_freq > 0.1:
+                    technique_mapping[ns] = 20  # EIS ActionID
+                else:
+                    technique_mapping[ns] = 8   # Galvanostatic ActionID
 ```
 
 ### 2. src_clean/parsers/configs/biologic_mappings.py
@@ -135,7 +155,7 @@ def _add_segment_numbers_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
   - **Galvanostatic (ID=8)**: 22,994 data points (18.4%)
   - **Potentiostatic (ID=7)**: 21,483 data points (17.2%) 
   - **EIS (ID=20)**: 1,332 data points (1.1%)
-- **Data-pattern classification working**: Current flow, frequency detection, variance analysis
+- **Parameter-based classification working**: ctrl_type decoding with direct Ns indexing, frequency detection for EIS
 
 **Key Insight**: BioLogic's internal `Ns` tracking provides segmentation foundation + intelligent data pattern analysis enables technique classification for complex multi-technique files
 
