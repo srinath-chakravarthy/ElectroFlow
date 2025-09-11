@@ -126,6 +126,33 @@ if 'working_electrode_potential_v' in segment_data.columns:
 
 ---
 
+## Architecture Clarification: JSON Field Storage
+
+### ✅ **Confirmed Data Flow Architecture**
+
+**Segment Data Population**:
+```
+Raw Data → Parser → Segment Creation:
+  ├── core_metrics.py → Direct segment columns (start_current_a, duration_s, etc.)
+  └── technique_analyzer.py → analysis_results JSON field (WE/CE metrics here)
+```
+
+**Database Storage Pattern**:
+```sql
+segments table:
+  ├── Direct columns: id, start_time_s, duration_s, start_current_a, end_current_a...
+  └── JSON field: analysis_results (contains all technique analyzer output)
+```
+
+**Our WE/CE Enhancement Location**:
+- **✅ WE/CE metrics** → **analysis_results JSON field** (NOT direct columns)
+- **✅ Registry extraction** → JSONFieldExtractor pulls from analysis_results
+- **✅ Analytics APIs** → Available via `get_segments_with_analytics(['resistance_analysis', 'kinetics_analysis'])`
+
+**This is the correct and expected architecture pattern** - technique analyzer results belong in JSON field, not as direct segment columns.
+
+---
+
 ## Technical Implementation Details
 
 ### NULL-Safe Processing
@@ -175,9 +202,16 @@ if 'working_electrode_potential_v' in segment_data.columns:
 
 ### ✅ Implementation Complete
 - [x] Technique analyzer enhancement with electrode-specific calculations
-- [x] Analytics config field definitions for WE and CE metrics
+- [x] Analytics config field definitions for WE and CE metrics  
 - [x] Registry system integration with complete metadata
 - [x] NULL-safe processing and data validation
+- [x] **Architecture confirmed**: JSON field storage pattern validated
+
+### ✅ Data Flow Confirmed  
+- [x] **WE/CE metrics** → Stored in `analysis_results` JSON field (correct pattern)
+- [x] **Registry extraction** → JSONFieldExtractor pulls electrode-specific metrics  
+- [x] **Analytics APIs** → Available via resistance_analysis and kinetics_analysis
+- [x] **Database schema** → No direct columns needed (JSON field approach confirmed)
 
 ### ⚠️ Integration Testing Pending
 - [ ] Verify electrode-specific data availability in BioLogic files
