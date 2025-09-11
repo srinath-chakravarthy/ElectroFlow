@@ -177,6 +177,26 @@ def _create_mb_technique_mapping_from_data(self, df: pl.DataFrame) -> Dict[int, 
 
 **Classification Logic**: `ctrl_type=17` indicates "Complex/Multi-step" techniques in BioLogic MB templates, typically CC-CV sequences or variable voltage control modes.
 
+### Enhanced CC-CV vs Potentiostatic Specialization
+
+**Problem**: `ctrl_type=17` segments contained both true CC-CV battery charging and pure potentiostatic techniques.
+
+**Solution**: Implemented `_classify_ctrl_type_17()` with intelligent data analysis:
+
+**CC-CV Detection Criteria**:
+1. **Large voltage range** (>0.5V) - indicates significant charging progression
+2. **Controlled current** (<0.1 variability) - stable current indicates CC phase  
+3. **Long duration** (>1 hour) - typical of battery charging cycles
+4. **Sufficient data** (>1000 points) - reliable statistical analysis
+
+**Results**:
+- **Ns=1**: Correctly identified as **CC-CV → Galvanostatic** (43h charging, 0.707V range, stable 14.4mA)
+- **Ns=19**: Correctly identified as **Pure Potentiostatic** (28min, 0.003V range, variable current)
+
+**Impact**: 
+- **Before**: 21,483 points as "Potentiostatic"
+- **After**: 44,141 points as "Galvanostatic" + 336 points as true "Potentiostatic"
+
 ---
 
 ## Architecture Principles Established
