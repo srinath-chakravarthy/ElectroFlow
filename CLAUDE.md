@@ -257,7 +257,7 @@ python -m src_clean.cli.main group-voltage-correlation 16 --correlation-type pea
 ### 📋 **Current System State**
 - **Branch**: feature/test-isolation-config (BioLogic parser development)
 - **Universal Schema**: v2.1.0 with 47 columns including electrode-specific impedance measurements
-- **BioLogic Parser**: ⚠️ **CURRENT_A MAPPING ISSUE** - Universal schema prioritizes `control_I` over `I`, causing Rest phases to show nan instead of measured current. See debug scripts for detailed investigation.
+- **BioLogic Parser**: ✅ **TRANSITION ARTIFACT FIX COMPLETE** - Universal fix eliminates control value contamination. Initial testing successful, user validation required.
 - **VersaStudio Parser**: ✅ **PRODUCTION** - confirmed proper universal schema column selection
 - **Integration Status**: BioLogic parser ready for database/pipeline integration (Phase 3)
 - **Parser Architecture**: Clean MPRReader (binary) + BiologicParser (integration) + universal schema mapping

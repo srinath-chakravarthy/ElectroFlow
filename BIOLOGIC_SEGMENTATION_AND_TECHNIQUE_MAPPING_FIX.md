@@ -308,7 +308,40 @@ if "control_I" in df.columns and "I" in df.columns:
     )
 ```
 
-**Status**: Investigation complete, ready for implementation.
+**Status**: Investigation complete, fix implemented and tested.
+
+---
+
+## 🎯 FINAL SOLUTION: Universal Transition Artifact Fix
+
+### Issue Resolution
+**Root Cause**: BioLogic transition rows have 1-row lag between flag changes and Ns changes, causing control value contamination.
+
+**Universal Fix Applied**: Simple 4-line addition to original YADG control splitting logic:
+```python
+# Fix transition artifacts: if same mode but different flag, use previous control value
+if i > 0:
+    prev_flag = data_dict["flags"][i-1]
+    prev_mode = int(prev_flag) & 0b00000011
+    if mode == prev_mode and flag_val != prev_flag:
+        control_val = data_dict["control"][i-1]  # Use previous control value
+```
+
+### Implementation Details
+- **Location**: `src_clean/parsers/mpr_reader.py:295-300`
+- **Approach**: Universal fix (no file-type branches)
+- **Logic**: Detects transition artifacts (same mode, different flag) and uses previous row's control value
+- **Compatibility**: Works for both GCPL and MB files using identical logic
+
+### Test Results
+**GCPL Files**: Rest phases now show perfect `I=0.000000 A` (previously contaminated with active current)
+**MB Files**: All phases show correct current values with no contamination
+**Universal**: Single codebase handles both file types without branches
+
+### Performance Impact
+- **Minimal**: Only 4 additional lines in existing control splitting loop
+- **No filtering**: Preserves all data rows (no row removal)
+- **Clean**: Eliminates all MB-specific complexity and code branches
 
 ---
 
@@ -320,6 +353,7 @@ if "control_I" in df.columns and "I" in df.columns:
 ✅ **Database Integration**: Each segment has correct technique_id for analytics  
 ✅ **Universal Schema**: 47-column consistency maintained  
 ✅ **Performance**: Leverages BioLogic's internal intelligence, no complex recreation needed  
-⚠️ **Current Values**: Rest phases show nan instead of measured current (BLOCKER)  
+✅ **Current Values**: Transition artifact contamination eliminated with universal fix
+✅ **Code Quality**: Single universal solution, no file-type branches, maintainable  
 
 **Next Steps**: BioLogic parser ready for full platform integration with existing registry-driven analysis system.

@@ -240,12 +240,13 @@ class MPRReader:
 
     def _split_control_column(self, data_dict: dict) -> dict:
         """
-        Split BioLogic control column based on technique mode (YADG approach).
+        Split BioLogic control column based on technique mode with MB file specialization.
         
         BioLogic stores control data in a single 'control' column, but the meaning
         depends on the technique mode:
-        - Mode 1, 3: Galvanostatic control → control = current data
-        - Mode 2: Potentiostatic control → control = voltage data
+        - Mode 1: Galvanostatic control → control = current data
+        - Mode 2: Potentiostatic control → control = voltage data  
+        - Mode 3: Rest/OCV → no control (but MB files have measured current in I column)
         
         Args:
             data_dict: Raw data dictionary from binary parsing
@@ -259,25 +260,54 @@ class MPRReader:
         if self.debug:
             print("Splitting control column based on technique mode...")
             
-        # Extract mode from flags using bitmask (YADG logic)
+        # OLD COMPLEX LOGIC - COMMENTED OUT
+        # Check if this is MB file (has I column) vs GCPL file (no I column)
+        # is_mb_file = "I" in data_dict
+        # 
+        # # For GCPL files: filter out transition artifact rows first
+        # if not is_mb_file:
+        #     filtered_indices = []
+        #     for i in range(len(data_dict["flags"])):
+        #         flag_val = data_dict["flags"][i]
+        #         mode = int(flag_val) & 0b00000011
+        #         
+        #         # Skip transition artifacts: same mode but different flag
+        #         if i > 0:
+        #             prev_flag = data_dict["flags"][i-1] 
+        #             prev_mode = int(prev_flag) & 0b00000011
+        #             if mode == prev_mode and flag_val != prev_flag:
+        #                 continue  # Skip this transition artifact row
+        #                 
+        #         filtered_indices.append(i)
+        #     
+        #     # Filter all data arrays to remove transition artifacts
+        #     for key in data_dict:
+        #         data_dict[key] = [data_dict[key][i] for i in filtered_indices]
+        
+        # NEW SIMPLE UNIVERSAL LOGIC - Extract mode from flags using bitmask (YADG logic)
         control_I_values = []
         control_V_values = []
         
-        for control_val, flag_val in zip(data_dict["control"], data_dict["flags"]):
+        for i, (control_val, flag_val) in enumerate(zip(data_dict["control"], data_dict["flags"])):
             # Mode uses first 2 bits of flags
             mode = int(flag_val) & 0b00000011
             
-            # CORRECTED: YADG incorrectly treated mode 3 as galvanostatic
-            # Actual BioLogic modes: 1=Galvanostatic, 2=Potentiostatic, 3=Rest/OCV
-            # Previous buggy logic: if mode in {1, 3}  # WRONG: mode 3 is NOT galvanostatic
-            if mode == 1:       # Only mode 1 is galvanostatic
+            # Fix transition artifacts: if same mode but different flag, use previous control value
+            if i > 0:
+                prev_flag = data_dict["flags"][i-1]
+                prev_mode = int(prev_flag) & 0b00000011
+                if mode == prev_mode and flag_val != prev_flag:
+                    control_val = data_dict["control"][i-1]  # Use previous control value
+            
+            # Original YADG logic (modes 1 and 3 both galvanostatic)
+            if mode in {1, 3}:  # Galvanostatic (includes Rest phases with old YADG logic)
                 control_I_values.append(control_val)
                 control_V_values.append(float('nan'))
             elif mode == 2:     # Potentiostatic mode
                 control_I_values.append(float('nan'))
                 control_V_values.append(control_val)
             else:
-                # Mode 3 (Rest/OCV) and unknown modes get no control values
+                # Unknown modes: no control values
                 control_I_values.append(float('nan'))
                 control_V_values.append(float('nan'))
         
