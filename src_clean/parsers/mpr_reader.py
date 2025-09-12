@@ -267,14 +267,17 @@ class MPRReader:
             # Mode uses first 2 bits of flags
             mode = int(flag_val) & 0b00000011
             
-            if mode in {1, 3}:  # Galvanostatic modes
+            # CORRECTED: YADG incorrectly treated mode 3 as galvanostatic
+            # Actual BioLogic modes: 1=Galvanostatic, 2=Potentiostatic, 3=Rest/OCV
+            # Previous buggy logic: if mode in {1, 3}  # WRONG: mode 3 is NOT galvanostatic
+            if mode == 1:       # Only mode 1 is galvanostatic
                 control_I_values.append(control_val)
                 control_V_values.append(float('nan'))
             elif mode == 2:     # Potentiostatic mode
                 control_I_values.append(float('nan'))
                 control_V_values.append(control_val)
             else:
-                # Unknown mode
+                # Mode 3 (Rest/OCV) and unknown modes get no control values
                 control_I_values.append(float('nan'))
                 control_V_values.append(float('nan'))
         

@@ -293,7 +293,8 @@ class LazyDataService:
             
             if start_row >= 0 and end_row > start_row:
                 # Use slice for row-based filtering (Polars uses 0-based indexing)
-                segment_data = lazy_frame.slice(start_row, end_row - start_row).collect()
+                # Use inclusive end_row to match analytics (core_metrics, technique_analyzer)
+                segment_data = lazy_frame.slice(start_row, end_row - start_row + 1).collect()
             else:
                 self.logger.warning(f"Invalid row range for segment {segment_id}: {start_row}-{end_row}")
                 return pl.DataFrame()

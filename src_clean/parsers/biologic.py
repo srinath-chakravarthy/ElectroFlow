@@ -18,6 +18,7 @@ try:
     from .base import SingleFileParser
     from ..core.data_models import DataFile, FileMetadata, add_missing_universal_columns
     from ..core.exceptions import DataParsingError, MetadataExtractionError
+    from ..core.universal_processor import UniversalProcessor
 
     INTEGRATED_MODE = True
 except ImportError:
@@ -34,6 +35,7 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
     def __init__(self):
         if INTEGRATED_MODE:
             super().__init__()
+            self.universal_processor = UniversalProcessor()
         self.mpr_reader = MPRReader(debug=False)
 
     def get_instrument_name(self) -> str:
@@ -139,6 +141,11 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
                 # BioLogic enhancement: populate electrode-specific columns from available data
                 universal_df = self._enhance_biologic_electrode_columns(universal_df)
                 
+                # Add computed columns using UniversalProcessor
+                universal_df = self.universal_processor.add_computed_columns(universal_df)
+
+                # Add physics integration using UniversalProcessor
+                universal_df = self.universal_processor.add_physics_integration(universal_df)
                 
 
             # Extract metadata (needed for timestamps)
@@ -514,11 +521,11 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             # Use Polars shift() to detect where Ns changes from previous row
             df_with_segments = df.with_columns([
                 # Mark Ns changes: True where Ns differs from previous row
-                (pl.col('Ns') != pl.col('Ns').shift(1)).alias('ns_change')
+                (pl.col('Ns') != pl.col('Ns').shift(1, fill_value=-1)).alias('ns_change')
             ]).with_columns([
-                # Cumulative sum of Ns changes gives us segment numbers
-                # Add 1 to start segment numbering from 1 instead of 0
-                (pl.col('ns_change').cast(pl.Int32).cum_sum() + 1).alias('segment_number')
+                # Cumulative sum of Ns changes gives us segment numbers  
+                # With fill_value=-1, first row gets change=True, so cum_sum starts from 1
+                (pl.col('ns_change').cast(pl.Int32).cum_sum()).alias('segment_number')
             ]).drop('ns_change')  # Clean up helper column
             
             return df_with_segments

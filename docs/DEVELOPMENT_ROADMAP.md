@@ -361,6 +361,34 @@ notebook.export_research_dataset(
 
 ---
 
+## Current Session Issues (September 12, 2025)
+
+### **🚨 BioLogic current_a Mapping Bug (UNFIXED)**
+
+**Issue**: Universal schema mapping prioritizes `control_I` over `I` for `current_a` column, causing Rest phases to show `nan` instead of actual measured current values.
+
+**Root Cause**: In `src_clean/parsers/biologic.py:190-201`, the logic uses:
+```python
+if "control_I" in df.columns:
+    # Use control_I (preferred) - THIS IS THE PROBLEM
+elif "I" in df.columns:
+    # Use I as fallback
+```
+
+**Problem**: For Rest phases (mode 3), `control_I` is correctly `nan` (no control active), but the measured current is in column `I` (0.000000 for Rest). The current logic discards the actual measured current.
+
+**Investigation Files**:
+- `debug_simple_current.py` - Shows raw `I` vs universal `current_a` mismatch
+- `debug_current_columns.py` - Complete current column analysis  
+- `debug_raw_flags.py` - BioLogic flag pattern investigation
+- `debug_flag_patterns.py` - Flag correlation with physical reality
+
+**Required Fix**: Modify mapping logic to handle Rest phases correctly - use measured current (`I`) when control current (`control_I`) is `nan`.
+
+**Status**: Investigation complete, fix implementation pending.
+
+---
+
 ## Conclusion
 
 These three priorities represent the evolution from current working baseline to a comprehensive, research-grade electrochemical analysis platform with multiple access patterns (web UI, Jupyter, CLI) and multi-instrument support (VersaStudio + BioLogic).

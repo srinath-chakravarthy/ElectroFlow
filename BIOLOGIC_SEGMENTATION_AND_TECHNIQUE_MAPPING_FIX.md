@@ -263,6 +263,55 @@ python -c "from src_clean.parsers.biologic import BiologicParser; from pathlib i
 
 **Status**: Both segmentation and technique mapping fixes complete and validated. BioLogic parser now provides production-ready intelligent per-segment technique classification for all major BioLogic file types (GCPL, MB, EIS, CV, etc.).
 
+---
+
+## 🚨 CURRENT BLOCKER: BioLogic current_a Mapping Issue (UNFIXED)
+
+### Issue Description
+Universal schema mapping logic prioritizes `control_I` over `I` for the `current_a` column, causing Rest phases to display `nan` values instead of actual measured current values.
+
+### Root Cause Analysis
+**Location**: `src_clean/parsers/biologic.py:190-201`
+
+**Problematic Logic**:
+```python
+if "control_I" in df.columns:
+    # Use control_I (preferred) - THIS CAUSES THE PROBLEM
+    expressions.append((pl.col("control_I") * conversion_factor).alias("current_a"))
+elif "I" in df.columns:
+    # Use I as fallback - NEVER REACHED because control_I always exists
+    expressions.append((pl.col("I") * conversion_factor).alias("current_a"))
+```
+
+**Problem**: For Rest phases (mode 3):
+- `control_I` = `nan` (correctly - no control active)  
+- `I` = `0.000000` (measured current during rest)
+- Current logic uses `nan` from `control_I`, discarding actual measured current
+
+### Investigation Files Created
+- `debug_simple_current.py` - Shows raw `I` vs universal `current_a` mismatch for boundary rows
+- `debug_current_columns.py` - Complete analysis of all current-related columns  
+- `debug_raw_flags.py` - BioLogic flag pattern investigation (raw data access)
+- `debug_flag_patterns.py` - Flag correlation with actual current measurements
+
+### Required Fix
+Modify current mapping logic to handle Rest phases correctly:
+```python
+# PROPOSED FIX: Use measured current when control current is nan
+if "control_I" in df.columns and "I" in df.columns:
+    # Smart fallback: use control_I, but fall back to I when control_I is nan
+    expressions.append(
+        pl.when(pl.col("control_I").is_not_null())
+        .then(pl.col("control_I") * control_conversion_factor)
+        .otherwise(pl.col("I") * i_conversion_factor)
+        .alias("current_a")
+    )
+```
+
+**Status**: Investigation complete, ready for implementation.
+
+---
+
 ## Production Readiness Summary
 
 ✅ **Segmentation**: Proper Ns-based segment boundaries  
@@ -271,5 +320,6 @@ python -c "from src_clean.parsers.biologic import BiologicParser; from pathlib i
 ✅ **Database Integration**: Each segment has correct technique_id for analytics  
 ✅ **Universal Schema**: 47-column consistency maintained  
 ✅ **Performance**: Leverages BioLogic's internal intelligence, no complex recreation needed  
+⚠️ **Current Values**: Rest phases show nan instead of measured current (BLOCKER)  
 
 **Next Steps**: BioLogic parser ready for full platform integration with existing registry-driven analysis system.
