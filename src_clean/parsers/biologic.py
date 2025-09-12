@@ -186,23 +186,13 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
             
             expressions = []
             
-            # Handle current_a with priority: control_I preferred over I
-            if "control_I" in df.columns:
-                # Use control_I (preferred)
-                conversion_factor = BIOLOGIC_UNIT_CONVERSIONS.get("control_I", 1)
-                expressions.append(
-                    (pl.col("control_I") * conversion_factor).alias("current_a")
-                )
-            elif "I" in df.columns:
-                # Use I as fallback
-                conversion_factor = BIOLOGIC_UNIT_CONVERSIONS.get("I", 1)
-                expressions.append(
-                    (pl.col("I") * conversion_factor).alias("current_a")
-                )
+            # Enhanced mode-aware current mapping with intelligent fallbacks
+            expressions.extend(self._apply_mode_aware_current_mapping(df))
             
-            # Handle all other mappings (excluding current_a conflicts)
+            # Handle all other mappings (excluding current_a, current_applied_a, potential_applied_v)
+            excluded_universals = {"current_a", "current_applied_a", "potential_applied_v"}
             for biologic_col, universal_col in BIOLOGIC_TO_UNIVERSAL_MAPPING.items():
-                if universal_col != "current_a" and biologic_col in df.columns:
+                if universal_col not in excluded_universals and biologic_col in df.columns:
                     # Apply unit conversion if needed
                     if biologic_col in BIOLOGIC_UNIT_CONVERSIONS:
                         conversion_factor = BIOLOGIC_UNIT_CONVERSIONS[biologic_col]
@@ -509,24 +499,42 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
 
     def _add_segment_numbers_to_raw_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """
-        Add segment numbers to raw BioLogic data based on Ns (sequence) changes.
+        Add segment numbers to raw BioLogic data based on Ns (sequence) changes 
+        AND mode transitions for mixed-mode segment splitting.
         
         This processes the raw data BEFORE universal schema conversion.
-        BioLogic uses Ns column to indicate technique sequence changes.
-        Each unique Ns value represents a separate segment.
+        BioLogic uses Ns column to indicate technique sequence changes, but
+        individual Ns segments can contain mixed control modes (e.g., CC-CV).
+        
+        Enhanced segmentation splits mixed-mode segments into pure technique segments.
         """
         # Check if we have the raw Ns column from BioLogic
         if 'Ns' in df.columns:
-            # Create segment numbers based on Ns changes
-            # Use Polars shift() to detect where Ns changes from previous row
+            # Enhanced segmentation: Ns changes + Mode changes
             df_with_segments = df.with_columns([
                 # Mark Ns changes: True where Ns differs from previous row
                 (pl.col('Ns') != pl.col('Ns').shift(1, fill_value=-1)).alias('ns_change')
-            ]).with_columns([
-                # Cumulative sum of Ns changes gives us segment numbers  
-                # With fill_value=-1, first row gets change=True, so cum_sum starts from 1
-                (pl.col('ns_change').cast(pl.Int32).cum_sum()).alias('segment_number')
-            ]).drop('ns_change')  # Clean up helper column
+            ])
+            
+            # Add mode change detection if flags column exists
+            if 'flags' in df.columns:
+                df_with_segments = df_with_segments.with_columns([
+                    # Extract mode from flags (bits 0-1)
+                    (pl.col('flags') & 0b00000011).alias('mode'),
+                    # Mark mode changes: True where mode differs from previous row  
+                    ((pl.col('flags') & 0b00000011) != ((pl.col('flags').shift(1, fill_value=-1)) & 0b00000011)).alias('mode_change')
+                ]).with_columns([
+                    # Combined: segment change occurs on EITHER Ns change OR mode change
+                    (pl.col('ns_change') | pl.col('mode_change')).alias('segment_change')
+                ]).with_columns([
+                    # Cumulative sum of segment changes gives us segment numbers
+                    (pl.col('segment_change').cast(pl.Int32).cum_sum()).alias('segment_number')
+                ]).drop(['ns_change', 'mode_change', 'segment_change'])  # Clean up helper columns
+            else:
+                # No flags column - fall back to Ns-only segmentation
+                df_with_segments = df_with_segments.with_columns([
+                    (pl.col('ns_change').cast(pl.Int32).cum_sum()).alias('segment_number')
+                ]).drop('ns_change')
             
             return df_with_segments
         else:
@@ -582,6 +590,83 @@ class BiologicParser(SingleFileParser if INTEGRATED_MODE else object):
         ]).drop('technique_change')  # Clean up helper column
         
         return df_with_segments
+
+    def _apply_mode_aware_current_mapping(self, df: pl.DataFrame) -> list:
+        """
+        Apply mode-aware current mapping with intelligent fallbacks.
+        
+        Priority order for current_a:
+        1. I (measured current) - preferred when available (MB files)
+        2. control_I (applied current) - for GCPL files or when I not available
+        3. <I> (AC average current) - for EIS files
+        4. 0.0 - default for OCV files
+        
+        Special handling:
+        - Rest mode (mode 3): Use control_I value (0.0) to ignore instrumentation drift
+        - Other modes: Use measured current (I) when available for accuracy
+        """
+        from .configs.biologic_mappings import BIOLOGIC_UNIT_CONVERSIONS
+        
+        expressions = []
+        
+        # Mode-aware current mapping
+        if 'flags' in df.columns and 'I' in df.columns and 'control_I' in df.columns:
+            # Full mode-aware logic for files with both I and control_I (e.g., MB files)
+            i_factor = BIOLOGIC_UNIT_CONVERSIONS.get("I", 1)
+            control_i_factor = BIOLOGIC_UNIT_CONVERSIONS.get("control_I", 1)
+            
+            current_mapping = (
+                pl.when((pl.col('flags') & 0b00000011) == 3)  # Rest mode
+                .then(pl.col('control_I') * control_i_factor)  # Use enforced control (0.0)
+                .otherwise(                                    # Galvanostatic/Potentiostatic modes
+                    pl.coalesce([
+                        pl.col('I') * i_factor,               # Measured current (preferred)
+                        pl.col('control_I') * control_i_factor # Applied current (fallback)
+                    ])
+                )
+                .alias('current_a')
+            )
+            expressions.append(current_mapping)
+            
+        else:
+            # Fallback logic for files with limited current columns
+            fallback_expressions = []
+            
+            # Priority order: I -> control_I -> <I> -> 0.0
+            if 'I' in df.columns:
+                fallback_expressions.append(pl.col('I') * BIOLOGIC_UNIT_CONVERSIONS.get("I", 1))
+            if 'control_I' in df.columns:
+                fallback_expressions.append(pl.col('control_I') * BIOLOGIC_UNIT_CONVERSIONS.get("control_I", 1))
+            if '<I>' in df.columns:
+                fallback_expressions.append(pl.col('<I>') * BIOLOGIC_UNIT_CONVERSIONS.get("<I>", 1))
+            
+            # Always have a default
+            fallback_expressions.append(pl.lit(0.0))
+            
+            current_mapping = pl.coalesce(fallback_expressions).alias('current_a')
+            expressions.append(current_mapping)
+        
+        # Applied current mapping (can be NULL)
+        if 'control_I' in df.columns:
+            applied_current = (
+                pl.when(pl.col('control_I').is_not_null() & pl.col('control_I').is_not_nan())
+                .then(pl.col('control_I') * BIOLOGIC_UNIT_CONVERSIONS.get("control_I", 1))
+                .otherwise(None)
+                .alias('current_applied_a')
+            )
+            expressions.append(applied_current)
+        
+        # Applied potential mapping (can be NULL)
+        if 'control_V' in df.columns:
+            applied_potential = (
+                pl.when(pl.col('control_V').is_not_null() & pl.col('control_V').is_not_nan())
+                .then(pl.col('control_V'))
+                .otherwise(None)
+                .alias('potential_applied_v')
+            )
+            expressions.append(applied_potential)
+        
+        return expressions
 
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA-256 hash of file."""

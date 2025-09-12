@@ -195,10 +195,16 @@ log_dtypes = {
 BIOLOGIC_TO_UNIVERSAL_MAPPING = {
     # Core electrochemical measurements
     "time": "time_s",
-    # Current mapping with priority: control_I preferred over I if both present
-    "control_I": "current_a",            # Convert mA → A with factor (control current from YADG splitting) - PREFERRED
-    "I": "current_a",                    # Convert mA → A with factor (direct current) - FALLBACK
+    
+    # Current mapping - MODE-AWARE FALLBACKS (see _map_to_universal_schema for logic)
+    "I": "current_a",                    # Measured current (PREFERRED when available)
+    "control_I": "current_a",            # Applied current (FALLBACK for GCPL files)
+    "<I>": "current_a",                  # AC average current (FALLBACK for EIS files)
     "Temperature": "temperature_c",      # Temperature monitoring
+    
+    # Applied control values (can be NULL)
+    "control_I": "current_applied_a",    # Applied current setpoint
+    "control_V": "potential_applied_v",  # Applied potential setpoint
     
     # Working electrode voltage (vs reference)
     "Ewe": "working_electrode_potential_v",
@@ -234,8 +240,10 @@ BIOLOGIC_TO_UNIVERSAL_MAPPING = {
 
 # Unit conversion factors for BioLogic data
 BIOLOGIC_UNIT_CONVERSIONS = {
-    "I": 1e-3,              # mA → A (direct current)
-    "control_I": 1e-3,      # mA → A (control current from YADG splitting)
+    "I": 1e-3,              # mA → A (measured current)
+    "control_I": 1e-3,      # mA → A (applied current from YADG splitting)
+    "<I>": 1e-3,            # mA → A (AC average current for EIS)
+    # control_V is already in V (no conversion needed)
 }
 
 # =============================================================================
