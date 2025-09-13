@@ -1,58 +1,65 @@
-# Documentation Index
+# Documentation Navigation Hub
 
-## 📋 **Quick Navigation**
+Complete technical documentation for the Electrochemical Analysis Platform.
 
-### **Essential Documentation**
-- **[README.md](../README.md)** - User guide, installation, and quick start
-- **[CLAUDE.md](../CLAUDE.md)** - Complete technical architecture and development guide
+## 🚀 Quick Access
 
-### **Registry System Documentation** 📊
-- **[REGISTRY_SYSTEM_COMPLETE.md](registry/REGISTRY_SYSTEM_COMPLETE.md)** - 🎉 **Production milestone documentation**
-- **[REGISTRY_CONFIG_REPORT.md](registry/REGISTRY_CONFIG_REPORT.md)** - Current system status and validation results
-- **[REGISTRY_PLOTTING_IMPLEMENTATION.md](registry/REGISTRY_PLOTTING_IMPLEMENTATION.md)** - Technical implementation details
-- **[REGISTRY_BUGS_LOG.md](registry/REGISTRY_BUGS_LOG.md)** - Bug tracking and resolution history
-- **[REGISTRY_SYSTEM_SUCCESS_REPORT.md](registry/REGISTRY_SYSTEM_SUCCESS_REPORT.md)** - Early success report
-- **[DEBUG_REGISTRY_INTEGRATION.md](registry/DEBUG_REGISTRY_INTEGRATION.md)** - Development debugging notes
+### New Users
+- **[Installation & Quick Start](../README.md)** - Get started in 5 minutes
+- **[User Guide](USER_GUIDE.md)** - Complete usage documentation
+- **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
 
-### **Architecture Documentation** 🏗️
-- **[ARCHITECTURE_DECISIONS.md](architecture/ARCHITECTURE_DECISIONS.md)** - Key architectural decisions and rationale
-- **[COMPREHENSIVE_AUDIT.md](architecture/COMPREHENSIVE_AUDIT.md)** - System audit and analysis
-- **[UI_IMPACT_ANALYSIS.md](architecture/UI_IMPACT_ANALYSIS.md)** - UI design impact analysis
-- **[UI_PATTERNS.md](architecture/UI_PATTERNS.md)** - UI component patterns and guidelines
+### Developers  
+- **[System Overview](SYSTEM_OVERVIEW.md)** - Architecture, data flow, components
+- **[Development Guide](DEVELOPMENT_GUIDE.md)** - Setup, testing, contribution workflow
+- **[API Reference](API_REFERENCE.md)** - Backend API and programming interface
 
-### **Development History** 📝
-- **[DATAFRAME_REFACTOR_CHANGES.md](development/DATAFRAME_REFACTOR_CHANGES.md)** - DataFrame refactor documentation
-- **[DATAFRAME_COLUMNS_DOCUMENTATION.md](development/DATAFRAME_COLUMNS_DOCUMENTATION.md)** - Universal schema documentation
-- **[DATAFRAME_STANDARDIZATION_CONTEXT.md](development/DATAFRAME_STANDARDIZATION_CONTEXT.md)** - Standardization context
-- **[Refactor.md](development/Refactor.md)** - Registry system refactor plan
-- **[REFACTOR_PROGRESS.md](development/REFACTOR_PROGRESS.md)** - Refactor progress tracking
-- **[versastudio_file_format.md](development/versastudio_file_format.md)** - VersaStudio file format specification
-- **[timestamp_and_capacity_integration.md](development/timestamp_and_capacity_integration.md)** - Capacity integration notes
-- **[why_i_need_this.md](development/why_i_need_this.md)** - Project motivation
+### Technical Deep Dives
+- **[Parser Architecture](PARSER_ARCHITECTURE.md)** - Universal schema, BioLogic/VersaStudio
+- **[Database Schema](DATABASE_SCHEMA.md)** - Tables, relationships, migrations  
+- **[Registry System](REGISTRY_SYSTEM.md)** - Analytics registry and auto-discovery
 
-### **Component Documentation** 🔧
-- **[panel_ui_components.md](panel_ui_components.md)** - Web interface component documentation
-- **[fundamental_analytics.md](fundamental_analytics.md)** - Analytics engine technical documentation
+## 📁 Documentation Structure
 
-### **Examples and Tutorials** 📚
-- **[examples/](examples/)** - Usage examples and sample code
-- **[tutorial/](tutorial/)** - Step-by-step tutorials
+```
+docs/
+├── README.md                 # This navigation hub
+├── SYSTEM_OVERVIEW.md        # Complete architecture overview
+├── API_REFERENCE.md          # Programming interfaces  
+├── USER_GUIDE.md            # Complete user documentation
+├── DEVELOPMENT_GUIDE.md     # Developer setup and workflow
+├── PARSER_ARCHITECTURE.md   # Data processing architecture
+├── DATABASE_SCHEMA.md       # Database design and relationships
+├── REGISTRY_SYSTEM.md       # Analytics system architecture
+├── TROUBLESHOOTING.md       # Debugging and common issues
+├── architecture/            # Detailed technical specifications
+│   ├── universal_schema.md
+│   ├── parser_design.md
+│   └── analytics_engine.md
+└── development/             # Historical development context
+    ├── BIOLOGIC_IMPLEMENTATION_LOG.md
+    ├── session_logs/
+    ├── decisions/
+    └── research/
+```
+
+## 🎯 Finding What You Need
+
+### "How do I...?"
+- **Install and run**: [README.md](../README.md) → [USER_GUIDE.md](USER_GUIDE.md)
+- **Process my files**: [USER_GUIDE.md](USER_GUIDE.md) → [Parser Architecture](PARSER_ARCHITECTURE.md)  
+- **Use the API**: [API_REFERENCE.md](API_REFERENCE.md)
+- **Contribute code**: [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md)
+
+### "How does ... work?"
+- **Overall system**: [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md)
+- **Data processing**: [PARSER_ARCHITECTURE.md](PARSER_ARCHITECTURE.md)
+- **Database design**: [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
+- **Analytics system**: [REGISTRY_SYSTEM.md](REGISTRY_SYSTEM.md)
+
+### "I'm getting an error..."
+- **Start here**: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+- **Development issues**: [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md)
 
 ---
-
-## 🎯 **Current System Status (v5.0.0)**
-
-### **✅ PRODUCTION COMPLETE:**
-- **Registry-Driven Analysis System** with comprehensive developer tooling
-- **8 Working Plot Configurations** ready for immediate use
-- **Development Workflow Transformation**: 2+ days → 30 minutes per new analysis
-- **650+ Lines of Legacy Code Cleanup** completed
-
-### **🚀 Next Steps:**
-1. Use registry tooling to implement remaining 4 plot configurations (~2 hours)
-2. Add extended plot variations per analysis type
-3. Implement advanced features (multi-axis plots, exports, optimization)
-
----
-
-**📍 For immediate help, start with [README.md](../README.md) for usage or [CLAUDE.md](../CLAUDE.md) for technical details.**
+*Documentation structure follows the 3-tier system: Quick Context (root) → Structured Technical (docs/) → Development Archives (docs/development/)*
