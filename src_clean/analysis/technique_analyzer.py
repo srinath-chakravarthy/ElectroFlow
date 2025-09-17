@@ -26,8 +26,8 @@ class TechniqueAnalyzer:
     
     # Rest phase identification keywords
     REST_KEYWORDS = {
-        'rest', 'relax', 'eis', 'open_circuit', 'ocp', 'ocv', 
-        'impedance', 'pause', 'wait', 'delay'
+        'rest', 'relax', 'open_circuit', 'ocp', 'ocv',
+        'pause', 'wait', 'delay'
     }
     
     def __init__(self):
@@ -114,11 +114,12 @@ class TechniqueAnalyzer:
             voltage_values = segment_data.get_column('potential_v').to_numpy()
             current_values = segment_data.get_column('current_a').to_numpy()
             
-            # Always attempt both voltage and current decay analysis with both models
+            # REST phases: voltage decay analysis only (electrode relaxation)
             voltage_exp_result = self._analyze_voltage_decay(time_values, voltage_values)
-            current_exp_result = self._analyze_current_decay(time_values, current_values)
             voltage_sqrt_result = self._analyze_voltage_sqrt_decay(time_values, voltage_values)
-            current_sqrt_result = self._analyze_current_sqrt_decay(time_values, current_values)
+            # No current analysis for REST phases (current should be zero)
+            current_exp_result = None
+            current_sqrt_result = None
             
             # Electrode-specific voltage decay analysis if columns are not NULL
             we_voltage_exp_result = None
@@ -181,15 +182,11 @@ class TechniqueAnalyzer:
                 'exponential_fits': {},
                 'sqrt_fits': {}
             }
-            
-            if voltage_exp_result.get('success'):
+
+            if voltage_exp_result and voltage_exp_result.get('success'):
                 fit_coefficients['exponential_fits']['voltage'] = self._extract_fit_coefficients(voltage_exp_result)
-            if current_exp_result.get('success'):
-                fit_coefficients['exponential_fits']['current'] = self._extract_fit_coefficients(current_exp_result)
-            if voltage_sqrt_result.get('success'):
+            if voltage_sqrt_result and voltage_sqrt_result.get('success'):
                 fit_coefficients['sqrt_fits']['voltage'] = self._extract_fit_coefficients(voltage_sqrt_result)
-            if current_sqrt_result.get('success'):
-                fit_coefficients['sqrt_fits']['current'] = self._extract_fit_coefficients(current_sqrt_result)
             
             # Add fit coefficients to the best result
             best_result['all_fit_coefficients'] = fit_coefficients
@@ -441,34 +438,46 @@ class TechniqueAnalyzer:
         try:
             if len(t) < 10:
                 return {'success': False, 'error': 'Insufficient data points'}
-            
-            # Avoid sqrt(0) by adding small offset to time
-            t_offset = t + 1e-6
-            sqrt_t = np.sqrt(t_offset)
-            
+
+            # Physics-based validation for sqrt(t) diffusion model
+            duration = t[-1] - t[0]
+            if duration < 30.0:
+                return {'success': False, 'error': 'Insufficient duration for sqrt(t) analysis (need ≥30s)'}
+
+            # Use data from 1s to 30s for sqrt(t) analysis
+            analysis_mask = (t >= (t[0] + 1.0)) & (t <= (t[0] + 30.0))
+            t_analysis = t[analysis_mask]
+            y_analysis = y[analysis_mask]
+
+            if len(t_analysis) < 10:
+                return {'success': False, 'error': 'Insufficient data points in analysis window'}
+
+            # Time offset for sqrt (start from 1s)
+            t_offset = t_analysis - t_analysis[0] + 1.0
+
             # Initial parameter estimates
-            y_initial = y[0]
-            y_final = y[-1]
+            y_initial = y_analysis[0]
+            y_final = y_analysis[-1]
             y_infinity_guess = y_final
             A_guess = (y_initial - y_final) / np.sqrt(np.max(t_offset))
             
             # Define sqrt(t) decay function
             def sqrt_decay(t_vals, y_inf, A):
-                return y_inf + A * np.sqrt(t_vals + 1e-6)
-            
+                return y_inf + A * np.sqrt(t_vals)
+
             # Perform curve fitting
             popt, pcov = optimize.curve_fit(
-                sqrt_decay, t, y,
+                sqrt_decay, t_offset, y_analysis,
                 p0=[y_infinity_guess, A_guess],
                 maxfev=1000
             )
-            
+
             y_infinity, A = popt
-            
+
             # Calculate fit quality
-            y_fit = sqrt_decay(t, *popt)
-            r_squared = self._calculate_r_squared(y, y_fit)
-            rmse = np.sqrt(np.mean((y - y_fit)**2))
+            y_fit = sqrt_decay(t_offset, *popt)
+            r_squared = self._calculate_r_squared(y_analysis, y_fit)
+            rmse = np.sqrt(np.mean((y_analysis - y_fit)**2))
             
             # Parameter uncertainties
             param_errors = np.sqrt(np.diag(pcov)) if pcov is not None else [0, 0]
@@ -486,7 +495,7 @@ class TechniqueAnalyzer:
                     f'{prefix}_infinity_error': float(param_errors[0]),
                     f'{prefix}_sqrt_amplitude_error': float(param_errors[1])
                 },
-                'data_points': len(t)
+                'data_points': len(t_analysis)
             }
             
             return result

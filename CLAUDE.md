@@ -12,6 +12,7 @@
 - **BioLogic Parser**: Complete mixed-mode segmentation + mode-aware current mapping, user validated
 - **VersaStudio Parser**: Production validated with proper universal schema column selection
 - **Universal Schema**: v2.1.0 with 47 columns including electrode-specific impedance measurements
+- **Analysis System**: Physics-based sqrt(t) constraints + technique-specific optimization (Sept 2025)
 - **Database**: SQLite with cross-file experiment tracking and automated migrations
 - **Scale Tested**: 30K+ segments validated, performance optimized for moderate datasets
 
@@ -30,6 +31,7 @@
 ## Documentation Navigation
 - **Quick Start**: [README.md](README.md) - Installation and basic usage
 - **Complete Docs**: [docs/](docs/) - Structured technical documentation
+- **Analysis Improvements**: [docs/ANALYSIS_IMPROVEMENTS_SEPT2025.md](docs/ANALYSIS_IMPROVEMENTS_SEPT2025.md) - Technical analysis system enhancements
 - **Development History**: [docs/development/](docs/development/) - Detailed implementation logs
 
 ---
