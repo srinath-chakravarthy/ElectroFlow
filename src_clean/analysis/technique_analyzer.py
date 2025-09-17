@@ -187,6 +187,18 @@ class TechniqueAnalyzer:
                 fit_coefficients['exponential_fits']['voltage'] = self._extract_fit_coefficients(voltage_exp_result)
             if voltage_sqrt_result and voltage_sqrt_result.get('success'):
                 fit_coefficients['sqrt_fits']['voltage'] = self._extract_fit_coefficients(voltage_sqrt_result)
+
+            # Add WE analysis to fit_coefficients
+            if we_voltage_exp_result and we_voltage_exp_result.get('success'):
+                fit_coefficients['exponential_fits']['we_voltage'] = self._extract_fit_coefficients(we_voltage_exp_result)
+            if we_voltage_sqrt_result and we_voltage_sqrt_result.get('success'):
+                fit_coefficients['sqrt_fits']['we_voltage'] = self._extract_fit_coefficients(we_voltage_sqrt_result)
+
+            # Add CE analysis to fit_coefficients
+            if ce_voltage_exp_result and ce_voltage_exp_result.get('success'):
+                fit_coefficients['exponential_fits']['ce_voltage'] = self._extract_fit_coefficients(ce_voltage_exp_result)
+            if ce_voltage_sqrt_result and ce_voltage_sqrt_result.get('success'):
+                fit_coefficients['sqrt_fits']['ce_voltage'] = self._extract_fit_coefficients(ce_voltage_sqrt_result)
             
             # Add fit coefficients to the best result
             best_result['all_fit_coefficients'] = fit_coefficients
@@ -522,16 +534,22 @@ class TechniqueAnalyzer:
         
         # Extract coefficients based on fit type
         if fit_result.get('fit_type') == 'exponential_decay':
-            # Exponential: y = y∞ + A·exp(-t/τ)
-            for key in ['voltage_infinity', 'current_infinity', 'voltage_amplitude', 
-                       'current_amplitude', 'time_constant_s']:
+            # Exponential: y = y∞ + A·exp(-t/τ) - support both unprefixed and WE/CE prefixed fields
+            possible_keys = ['voltage_infinity', 'current_infinity', 'voltage_amplitude',
+                           'current_amplitude', 'time_constant_s',
+                           'we_voltage_infinity', 'we_voltage_amplitude', 'we_time_constant_s',
+                           'ce_voltage_infinity', 'ce_voltage_amplitude', 'ce_time_constant_s']
+            for key in possible_keys:
                 if key in fit_result:
                     coefficients[key] = fit_result[key]
-                    
+
         elif fit_result.get('fit_type') == 'sqrt_decay':
-            # sqrt(t): y = y∞ + A·√t
-            for key in ['voltage_infinity', 'current_infinity', 'voltage_sqrt_amplitude',
-                       'current_sqrt_amplitude']:
+            # sqrt(t): y = y∞ + A·√t - support both unprefixed and WE/CE prefixed fields
+            possible_keys = ['voltage_infinity', 'current_infinity', 'voltage_sqrt_amplitude',
+                           'current_sqrt_amplitude',
+                           'we_voltage_infinity', 'we_voltage_sqrt_amplitude',
+                           'ce_voltage_infinity', 'ce_voltage_sqrt_amplitude']
+            for key in possible_keys:
                 if key in fit_result:
                     coefficients[key] = fit_result[key]
         
