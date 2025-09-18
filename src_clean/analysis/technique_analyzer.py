@@ -183,26 +183,73 @@ class TechniqueAnalyzer:
                 'sqrt_fits': {}
             }
 
+            # Merge all exponential fit results into single voltage section (schema compliant)
             if voltage_exp_result and voltage_exp_result.get('success'):
-                fit_coefficients['exponential_fits']['voltage'] = self._extract_fit_coefficients(voltage_exp_result)
+                voltage_coeffs = self._extract_fit_coefficients(voltage_exp_result)
+
+                # Add WE coefficients to same voltage section
+                if we_voltage_exp_result and we_voltage_exp_result.get('success'):
+                    we_coeffs = self._extract_fit_coefficients(we_voltage_exp_result)
+                    voltage_coeffs.update(we_coeffs)  # Merge WE fields with prefixes
+
+                # Add CE coefficients to same voltage section
+                if ce_voltage_exp_result and ce_voltage_exp_result.get('success'):
+                    ce_coeffs = self._extract_fit_coefficients(ce_voltage_exp_result)
+                    voltage_coeffs.update(ce_coeffs)  # Merge CE fields with prefixes
+
+                fit_coefficients['exponential_fits']['voltage'] = voltage_coeffs
+
+            # Merge all sqrt fit results into single voltage section (schema compliant)
             if voltage_sqrt_result and voltage_sqrt_result.get('success'):
-                fit_coefficients['sqrt_fits']['voltage'] = self._extract_fit_coefficients(voltage_sqrt_result)
+                sqrt_coeffs = self._extract_fit_coefficients(voltage_sqrt_result)
 
-            # Add WE analysis to fit_coefficients
-            if we_voltage_exp_result and we_voltage_exp_result.get('success'):
-                fit_coefficients['exponential_fits']['we_voltage'] = self._extract_fit_coefficients(we_voltage_exp_result)
-            if we_voltage_sqrt_result and we_voltage_sqrt_result.get('success'):
-                fit_coefficients['sqrt_fits']['we_voltage'] = self._extract_fit_coefficients(we_voltage_sqrt_result)
+                # Add WE sqrt coefficients to same voltage section
+                if we_voltage_sqrt_result and we_voltage_sqrt_result.get('success'):
+                    we_sqrt_coeffs = self._extract_fit_coefficients(we_voltage_sqrt_result)
+                    sqrt_coeffs.update(we_sqrt_coeffs)  # Merge WE sqrt fields with prefixes
 
-            # Add CE analysis to fit_coefficients
-            if ce_voltage_exp_result and ce_voltage_exp_result.get('success'):
-                fit_coefficients['exponential_fits']['ce_voltage'] = self._extract_fit_coefficients(ce_voltage_exp_result)
-            if ce_voltage_sqrt_result and ce_voltage_sqrt_result.get('success'):
-                fit_coefficients['sqrt_fits']['ce_voltage'] = self._extract_fit_coefficients(ce_voltage_sqrt_result)
+                # Add CE sqrt coefficients to same voltage section
+                if ce_voltage_sqrt_result and ce_voltage_sqrt_result.get('success'):
+                    ce_sqrt_coeffs = self._extract_fit_coefficients(ce_voltage_sqrt_result)
+                    sqrt_coeffs.update(ce_sqrt_coeffs)  # Merge CE sqrt fields with prefixes
+
+                fit_coefficients['sqrt_fits']['voltage'] = sqrt_coeffs
             
-            # Add fit coefficients to the best result
-            best_result['all_fit_coefficients'] = fit_coefficients
-            
+            # Create clean nested structure for JSONFieldExtractor
+            best_result = {'analysis_type': 'rest_analysis', 'success': True}
+
+            # Exponential fit section
+            if voltage_exp_result and voltage_exp_result.get('success'):
+                exp_fit = self._extract_fit_coefficients(voltage_exp_result)
+
+                # Add WE exponential results
+                if we_voltage_exp_result and we_voltage_exp_result.get('success'):
+                    we_exp_coeffs = self._extract_fit_coefficients(we_voltage_exp_result)
+                    exp_fit.update(we_exp_coeffs)  # Merge WE fields (already prefixed)
+
+                # Add CE exponential results
+                if ce_voltage_exp_result and ce_voltage_exp_result.get('success'):
+                    ce_exp_coeffs = self._extract_fit_coefficients(ce_voltage_exp_result)
+                    exp_fit.update(ce_exp_coeffs)  # Merge CE fields (already prefixed)
+
+                best_result['exponential_fit'] = exp_fit
+
+            # Sqrt fit section
+            if voltage_sqrt_result and voltage_sqrt_result.get('success'):
+                sqrt_fit = self._extract_fit_coefficients(voltage_sqrt_result)
+
+                # Add WE sqrt results
+                if we_voltage_sqrt_result and we_voltage_sqrt_result.get('success'):
+                    we_sqrt_coeffs = self._extract_fit_coefficients(we_voltage_sqrt_result)
+                    sqrt_fit.update(we_sqrt_coeffs)  # Merge WE fields (already prefixed)
+
+                # Add CE sqrt results
+                if ce_voltage_sqrt_result and ce_voltage_sqrt_result.get('success'):
+                    ce_sqrt_coeffs = self._extract_fit_coefficients(ce_voltage_sqrt_result)
+                    sqrt_fit.update(ce_sqrt_coeffs)  # Merge CE fields (already prefixed)
+
+                best_result['sqrt_fit'] = sqrt_fit
+
             return best_result
                     
         except Exception as e:
@@ -257,8 +304,7 @@ class TechniqueAnalyzer:
         
         # Fields to prefix for electrode-specific naming
         fields_to_prefix = [
-            'voltage_infinity', 'voltage_amplitude', 'time_constant_s', 
-            'voltage_sqrt_infinity', 'voltage_sqrt_amplitude',
+            'voltage_infinity', 'voltage_amplitude', 'time_constant_s',
             'r_squared', 'rmse', 'voltage_infinity_error', 'voltage_amplitude_error', 'time_constant_error'
         ]
         
@@ -545,10 +591,10 @@ class TechniqueAnalyzer:
 
         elif fit_result.get('fit_type') == 'sqrt_decay':
             # sqrt(t): y = y∞ + A·√t - support both unprefixed and WE/CE prefixed fields
-            possible_keys = ['voltage_infinity', 'current_infinity', 'voltage_sqrt_amplitude',
+            possible_keys = ['voltage_infinity', 'current_infinity', 'voltage_amplitude',
                            'current_sqrt_amplitude',
-                           'we_voltage_infinity', 'we_voltage_sqrt_amplitude',
-                           'ce_voltage_infinity', 'ce_voltage_sqrt_amplitude']
+                           'we_voltage_infinity', 'we_voltage_amplitude',
+                           'ce_voltage_infinity', 'ce_voltage_amplitude']
             for key in possible_keys:
                 if key in fit_result:
                     coefficients[key] = fit_result[key]

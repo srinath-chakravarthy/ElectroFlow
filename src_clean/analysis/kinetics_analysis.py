@@ -256,8 +256,8 @@ def _calculate_kinetics_summary(kinetics_data: List[Dict[str, Any]],
             }
         
         # Time constant analysis (for exponential fits)
-        tau_values = [k.get('tau_s') for k in high_quality_data 
-                     if k.get('tau_s') is not None and k.get('fit_type') == 'exponential']
+        tau_values = [k.get('time_constant_s') for k in high_quality_data
+                     if k.get('time_constant_s') is not None and k.get('fit_type') == 'exponential']
         if tau_values:
             summary['tau_stats'] = {
                 'mean_s': np.mean(tau_values),
@@ -317,8 +317,8 @@ def _interpret_kinetics_data(kinetics_data: List[Dict[str, Any]], settings: Dict
     
     # Time constant analysis
     if high_quality_fits:
-        tau_values = [k.get('tau_s') for k in high_quality_fits 
-                     if k.get('tau_s') is not None]
+        tau_values = [k.get('time_constant_s') for k in high_quality_fits
+                     if k.get('time_constant_s') is not None]
         
         if tau_values:
             avg_tau = np.mean(tau_values)

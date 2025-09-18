@@ -77,7 +77,7 @@ class JSONFieldExtractor:
             
             # Extract each field defined in the schema
             for field_name, field_info in field_metadata.items():
-                value = analysis_results.get(field_name)
+                value = self.extract_with_fallbacks(analysis_results, [f"{schema_name}.{field_name}", field_name])
                 if value is not None:
                     # Type validation based on schema
                     field_type = field_info.get('type', 'string')
